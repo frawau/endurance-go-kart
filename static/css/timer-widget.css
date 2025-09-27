@@ -1,0 +1,31 @@
+/* timer-widget.css */
+.timer {
+    font-family: monospace;
+    font-weight: bold;
+    color: #f59e0b; /* Orange color for inactive drivers (default) */
+    }
+
+.timer.timer-active {
+    color: #000000; /* Black color for active drivers */
+    }
+
+.timer.timer-paused {
+    color: #f59e0b; /* Amber color for paused state */
+    animation: blink 1s infinite;
+    }
+.timer.timer-frozen {
+    color: #f59e0b; /* Amber color for paused state */
+    }
+
+.timer.timer-ended {
+    color: #87cefa ; /* Light blue color for ended state */
+    }
+.timer.timer-over {
+    color: #ef4444; /* Red color for over state */
+    }
+
+@keyframes blink {
+    0% { opacity: 1; }
+    50% { opacity: 0.5; }
+    100% { opacity: 1; }
+    }

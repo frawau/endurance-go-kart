@@ -1,0 +1,24 @@
+{% extends 'layout/sabase.html' %}
+
+{% block content %}
+
+{% include 'layout/changedriver_detail.html' with change_lanes=change_lanes %}
+
+<script>
+    const wsScheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    const socket = new WebSocket(`${wsScheme}://${window.location.host}/ws/changedriver/`);
+
+    socket.onmessage = function (event) {
+        const data = JSON.parse(event.data);
+        document.getElementById('changedinfo').outerHTML = data.driverc_html;
+    };
+
+    socket.onclose = function(event) {
+        if (!event.wasClean) {
+            reloadTimer = setTimeout(() => {
+                location.reload();
+            }, 3000); // Reload after 3 seconds
+        }
+    };
+</script>
+{% endblock %}

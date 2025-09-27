@@ -1,0 +1,17 @@
+<div id="changedinfo" style="height: 100vh; width: 100vw; display: flex; margin: 0; padding: 0; background-color: white;">
+    {% if not change_lanes %}
+        <div style="flex: 1; display: flex; align-items: center; justify-content: center;">
+            <h1 class="text-dark" style="font-size: 18rem;">&nbsp;</h1>
+        </div>
+    {% else %}
+        {% for change_lane in change_lanes %}
+            <div style="flex: 1; display: flex; align-items: center; justify-content: center; border-right: 1px solid #ddd;">
+                {% if change_lane.driver %}
+                <span class="text-danger" style="font-size: 32rem;">
+                    {{ change_lane.driver.team.team.number }}
+                </span>
+                {% endif %}
+            </div>
+        {% endfor %}
+    {% endif %}
+</div>

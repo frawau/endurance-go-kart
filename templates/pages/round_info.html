@@ -1,0 +1,526 @@
+{% extends "layout/content.html" %}
+{% load round_tags %}
+
+{% block main_content %}
+<div class="container">
+    <h1>Round Information</h1>
+
+    <form method="get" id="round-form">
+        <div class="form-group">
+            <label for="round-select">Select Round:</label>
+            <select class="form-control" id="round-select" name="round_id" onchange="this.form.submit()">
+                {% for championship_name, championship_rounds in rounds_by_championship.items %}
+                    <optgroup label="{{ championship_name }}">
+                        {% for round in championship_rounds %}
+                            <option value="{{ round.id }}" {% if round.id == selected_round_id %}selected{% endif %}>
+                                {{ round.name }} ({{ round.start|date:"Y-m-d" }})
+                            </option>
+                        {% endfor %}
+                    </optgroup>
+                {% endfor %}
+            </select>
+        </div>
+    </form>
+
+    {% if round_teams %}
+    <div class="round-teams mt-4">
+        <table class="table table-hover round-stats-table">
+            <thead>
+                <tr>
+                    <th style="width: 8px;"></th>
+                    <th>Number</th>
+                    <th>Team Name</th>
+                    <th>{% if selected_round.ended %}Changes{% endif %}</th>
+                </tr>
+            </thead>
+
+            {% for team in round_teams %}
+            {% check_team_transgression team as team_has_transgression %}
+            <tbody class="team-{{ team.id }}-group">
+                <!-- Team row -->
+                <tr class="team-row depth-0" data-team-id="{{ team.id }}">
+                    <td class="color-label" style="background-color:
+                        {% if selected_round.ended %}
+                            {% if team_has_transgression %}#ff5252{% else %}#4caf50{% endif %}
+                        {% else %}transparent{% endif %}">
+                    </td>
+                    <td>{{ team.number }}</td>
+                    <td>{{ team.name }}</td>
+                    <td>{% if selected_round.ended %}{% if team.completed_sessions_count > 0 %}{{ team.completed_sessions_count|add:"-1" }}{% else %}0{% endif %}{% endif %}</td>
+                </tr>
+
+                <!-- Driver rows and their sessions -->
+                {% for member in team.members %}
+                {% check_driver_transgression member as driver_has_transgression %}
+                <tr class="driver-row depth-1 team-{{ team.id }} {% cycle 'driver-odd' 'driver-even' as driver_colors %}" data-member-id="{{ member.id }}" style="display: none;">
+                    <td class="color-label" style="background-color:
+                        {% if selected_round.ended %}
+                            {% if team_has_transgression %}#ff5252{% else %}#4caf50{% endif %}
+                        {% else %}transparent{% endif %}">
+                    </td>
+                    <td style="color: {% if driver_has_transgression %}#ff8080{% else %}#e6e6fa{% endif %}">
+                        {{ member.time_spent|format_time }}
+                    </td>
+                    <td>{{ member.member.nickname }}</td>
+                    <td>{{ member.sessions_count }}</td>
+                </tr>
+
+                <!-- Session rows for this driver -->
+                {% if selected_round.ended %}
+                {% for session in member.all_sessions %}
+                <tr class="session-row depth-2 member-{{ member.id }} team-{{ team.id }} {% cycle 'session-odd' 'session-even' as session_colors %}" style="display: none;">
+                    <td class="color-label" style="background-color:
+                        {% if team_has_transgression %}#ff5252{% else %}#4caf50{% endif %}">
+                    </td>
+                    <td>{{ session.duration|format_time }}</td>
+                    <td colspan="2">{{ session.start|date:"Y-m-d H:i:s" }}</td>
+                </tr>
+                {% endfor %}
+                {% resetcycle session_colors %}
+                {% endif %}
+                {% endfor %}
+                {% resetcycle driver_colors %}
+            </tbody>
+            {% endfor %}
+        </table>
+    </div>
+    {% else %}
+    <div class="alert alert-info">No round selected or no teams found.</div>
+    {% endif %}
+</div>
+{% endblock main_content %}
+
+{% block extra_js %}
+<style>
+    /* Base styling */
+    .round-stats-table {
+        background-color: rgba(40, 40, 50, 0.85);
+        border-radius: 6px;
+        overflow: hidden;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+    }
+
+    .round-stats-table th {
+        background-color: rgba(30, 30, 40, 0.9);
+        color: #e6e6fa !important;
+        font-weight: 600;
+        letter-spacing: 0.5px;
+        border-bottom: 2px solid rgba(80, 80, 100, 0.6);
+        padding: 12px 15px;
+    }
+
+    /* Row levels styling with more distinctive alternating colors */
+    /* Team rows - dark greys */
+    .round-stats-table tr.team-row {
+        background-color: rgba(45, 45, 60, 0.9);
+    }
+
+    .round-stats-table tr.team-row:nth-child(even) {
+        background-color: rgba(60, 60, 75, 0.9);
+    }
+
+    /* Driver rows - pastel red and blue */
+    .round-stats-table tr.driver-odd {
+        background-color: rgba(90, 50, 70, 0.8); /* Pastel red */
+        color: rgba(240, 240, 250, 1) !important;
+    }
+
+    .round-stats-table tr.driver-even {
+        background-color: rgba(50, 70, 100, 0.8); /* Pastel blue */
+        color: rgba(240, 240, 250, 1) !important;
+    }
+
+    /* Session rows - back to greys but lighter */
+    .round-stats-table tr.session-odd {
+        background-color: rgba(70, 70, 80, 0.7);
+    }
+
+    .round-stats-table tr.session-even {
+        background-color: rgba(80, 80, 90, 0.7);
+    }
+
+    /* Text and content styling */
+    .round-stats-table td {
+        color: #e6e6fa !important;
+        border-top: 1px solid rgba(80, 80, 100, 0.3);
+        padding: 10px 15px;
+    }
+
+    .color-label {
+        width: 8px;
+        padding: 0 !important;
+        border-right: none !important;
+    }
+
+    .team-row, .driver-row {
+        cursor: pointer;
+        transition: background-color 0.2s ease;
+    }
+
+    .team-row:hover, .driver-row:hover {
+        background-color: rgba(100, 100, 130, 0.6) !important;
+    }
+
+    /* Animation styles */
+    .driver-row, .session-row {
+        opacity: 0;
+        transition: all 0.3s ease-out;
+    }
+
+    .driver-row.show, .session-row.show {
+        opacity: 1;
+    }
+
+    /* Forms styling */
+    #round-form label {
+        color: #e6e6fa !important;
+        font-weight: 500;
+    }
+
+    #round-select {
+        color: #e6e6fa !important;
+        background-color: rgba(40, 40, 60, 0.9) !important;
+        border: 1px solid rgba(100, 100, 140, 0.4);
+        border-radius: 4px;
+        padding: 8px 12px;
+    }
+
+    #round-select option {
+        color: #e6e6fa !important;
+        background-color: #2d2d3d !important;
+    }
+
+    body .card-body .form-control,
+    body .card .card-body .form-control,
+    body .form-group .form-control {
+        color: #e6e6fa !important;
+    }
+
+    h1 {
+        color: #e6e6fa !important;
+        margin-bottom: 25px;
+        text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+    }
+
+    /* Icon styling for expandable rows */
+    .expand-icon {
+        display: inline-block;
+        width: 16px;
+        height: 16px;
+        margin-right: 8px;
+        text-align: center;
+        transition: transform 0.3s ease;
+    }
+
+    .expanded .expand-icon {
+        transform: rotate(90deg);
+    }
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Create and add the dynamic header rows - using exact same structure for all headers
+    const tableHead = document.querySelector('.round-stats-table thead');
+
+    // Create headers with identical structure to match original
+    const teamHeaderHTML = `
+        <tr class="header-team">
+            <th style="width: 8px;"></th>
+            <th>Number</th>
+            <th>Team Name</th>
+            <th>{% if selected_round.ended %}Changes{% endif %}</th>
+        </tr>
+    `;
+
+    const driverHeaderHTML = `
+        <tr class="header-driver" style="display: none;">
+            <th style="width: 8px;"></th>
+            <th>Driving Time</th>
+            <th>Nickname</th>
+            <th># Sessions</th>
+        </tr>
+    `;
+
+    const sessionHeaderHTML = `
+        <tr class="header-session" style="display: none;">
+            <th style="width: 8px;"></th>
+            <th>Duration</th>
+            <th>Starting time</th>
+            <th></th>
+        </tr>
+    `;
+
+    // Replace the entire thead content
+    tableHead.innerHTML = teamHeaderHTML + driverHeaderHTML + sessionHeaderHTML;
+
+    // Add CSS rule to lock column widths - fix first column width
+    const styleSheet = document.createElement("style");
+    styleSheet.textContent = `
+        .round-stats-table {
+            table-layout: fixed;
+        }
+        .round-stats-table th {
+            width: auto !important;
+        }
+        .round-stats-table th:nth-child(1) {
+            width: 8px !important;
+            min-width: 8px !important;
+            max-width: 8px !important;
+            padding: 0 !important;
+        }
+        .round-stats-table td:nth-child(1) {
+            width: 8px !important;
+            min-width: 8px !important;
+            max-width: 8px !important;
+            padding: 0 !important;
+        }
+        .round-stats-table th:nth-child(2) {
+            width: 20% !important;
+        }
+        .round-stats-table th:nth-child(3) {
+            width: 60% !important;
+        }
+        .round-stats-table th:nth-child(4) {
+            width: 20% !important;
+        }
+    `;
+    document.head.appendChild(styleSheet);
+
+    // Add expand icon to team rows
+    document.querySelectorAll('.team-row').forEach(row => {
+        const firstCell = row.querySelector('td:nth-child(2)');
+        if (firstCell) {
+            const expandIcon = document.createElement('span');
+            expandIcon.classList.add('expand-icon');
+            expandIcon.innerHTML = '▶';
+            if (firstCell.firstChild) {
+                firstCell.insertBefore(expandIcon, firstCell.firstChild);
+            } else {
+                firstCell.appendChild(expandIcon);
+            }
+        }
+    });
+
+    // Also add icons to driver rows
+    document.querySelectorAll('.driver-row').forEach(row => {
+        const firstCell = row.querySelector('td:nth-child(2)');
+        if (firstCell) {
+            const expandIcon = document.createElement('span');
+            expandIcon.classList.add('expand-icon');
+            expandIcon.innerHTML = '▶';
+            if (firstCell.firstChild) {
+                firstCell.insertBefore(expandIcon, firstCell.firstChild);
+            } else {
+                firstCell.appendChild(expandIcon);
+            }
+        }
+    });
+
+    // Handle mouse events for header switching
+    const teamHeader = document.querySelector('.round-stats-table thead tr.header-team');
+    const driverHeader = document.querySelector('.round-stats-table thead tr.header-driver');
+    const sessionHeader = document.querySelector('.round-stats-table thead tr.header-session');
+
+    // Team rows (default state)
+    document.querySelectorAll('.team-row').forEach(row => {
+        row.addEventListener('mouseenter', function() {
+            driverHeader.style.display = 'none';
+            sessionHeader.style.display = 'none';
+            teamHeader.style.display = 'table-row';
+        });
+    });
+
+    // For driver rows
+    document.querySelectorAll('.driver-row').forEach(row => {
+        row.addEventListener('mouseenter', function() {
+            teamHeader.style.display = 'none';
+            sessionHeader.style.display = 'none';
+            driverHeader.style.display = 'table-row';
+        });
+
+        row.addEventListener('mouseleave', function() {
+            // Only change back if not hovering over a session row
+            if (!document.querySelector('.session-row:hover')) {
+                // Check if hovering over team row
+                if (document.querySelector('.team-row:hover')) {
+                    driverHeader.style.display = 'none';
+                    teamHeader.style.display = 'table-row';
+                }
+            }
+        });
+    });
+
+    // For session rows
+    document.querySelectorAll('.session-row').forEach(row => {
+        row.addEventListener('mouseenter', function() {
+            teamHeader.style.display = 'none';
+            driverHeader.style.display = 'none';
+            sessionHeader.style.display = 'table-row';
+        });
+
+        row.addEventListener('mouseleave', function() {
+            // Check if hovering over a driver row
+            if (document.querySelector('.driver-row:hover')) {
+                sessionHeader.style.display = 'none';
+                driverHeader.style.display = 'table-row';
+            } else if (document.querySelector('.team-row:hover')) {
+                sessionHeader.style.display = 'none';
+                teamHeader.style.display = 'table-row';
+            }
+        });
+    });
+
+    // Handle hovering away from all rows
+    document.querySelector('.round-stats-table').addEventListener('mouseleave', function() {
+        driverHeader.style.display = 'none';
+        sessionHeader.style.display = 'none';
+        teamHeader.style.display = 'table-row';
+    });
+
+    // Toggle team members when clicking on a team row
+    document.querySelectorAll('.team-row').forEach(row => {
+        row.addEventListener('click', function() {
+            const teamId = this.getAttribute('data-team-id');
+            const driverRows = document.querySelectorAll(`.driver-row.team-${teamId}`);
+
+            // Toggle expanded class for icon rotation
+            this.classList.toggle('expanded');
+
+            // Close all other team drivers first
+            document.querySelectorAll('.team-row').forEach(otherTeamRow => {
+                if (otherTeamRow !== this && otherTeamRow.classList.contains('expanded')) {
+                    otherTeamRow.classList.remove('expanded');
+
+                    const otherTeamId = otherTeamRow.getAttribute('data-team-id');
+                    const otherDriverRows = document.querySelectorAll(`.driver-row.team-${otherTeamId}`);
+
+                    // Hide other team's driver rows
+                    otherDriverRows.forEach(dr => {
+                        dr.classList.remove('show');
+                        setTimeout(() => { dr.style.display = 'none'; }, 300);
+                    });
+
+                    // Hide other team's session rows
+                    document.querySelectorAll(`.session-row.team-${otherTeamId}`).forEach(sr => {
+                        sr.classList.remove('show');
+                        setTimeout(() => { sr.style.display = 'none'; }, 300);
+                    });
+                }
+            });
+
+            // Toggle this team's driver rows
+            if (driverRows[0] && driverRows[0].style.display === 'none') {
+                // Show driver rows
+                driverRows.forEach(dr => {
+                    dr.style.display = 'table-row';
+                    setTimeout(() => { dr.classList.add('show'); }, 10);
+
+                    // Hide any session rows that might be open
+                    if (dr.classList.contains('expanded')) {
+                        dr.classList.remove('expanded');
+                        const memberId = dr.getAttribute('data-member-id');
+                        const sessionRows = document.querySelectorAll(`.session-row.member-${memberId}`);
+                        sessionRows.forEach(sr => {
+                            sr.classList.remove('show');
+                            setTimeout(() => { sr.style.display = 'none'; }, 300);
+                        });
+                    }
+                });
+            } else {
+                // Hide driver rows
+                driverRows.forEach(dr => {
+                    dr.classList.remove('show');
+
+                    // Also hide any session rows
+                    if (dr.classList.contains('expanded')) {
+                        dr.classList.remove('expanded');
+                        const memberId = dr.getAttribute('data-member-id');
+                        const sessionRows = document.querySelectorAll(`.session-row.member-${memberId}`);
+                        sessionRows.forEach(sr => {
+                            sr.classList.remove('show');
+                            setTimeout(() => { sr.style.display = 'none'; }, 300);
+                        });
+                    }
+
+                    setTimeout(() => { dr.style.display = 'none'; }, 300);
+                });
+            }
+        });
+    });
+
+    // Toggle sessions when clicking on a driver row
+    document.querySelectorAll('.driver-row').forEach(driverRow => {
+        driverRow.addEventListener('click', function(e) {
+            e.stopPropagation(); // Prevent triggering the team row click
+
+            const memberId = this.getAttribute('data-member-id');
+            const sessionRows = document.querySelectorAll(`.session-row.member-${memberId}`);
+
+            if (sessionRows.length > 0) {
+                // Toggle expanded class for icon
+                this.classList.toggle('expanded');
+
+                // Hide sessions from other drivers in the same team
+                const teamId = this.classList[2].split('-')[1];
+                document.querySelectorAll(`.driver-row.team-${teamId}`).forEach(otherDriverRow => {
+                    if (otherDriverRow !== this && otherDriverRow.classList.contains('expanded')) {
+                        otherDriverRow.classList.remove('expanded');
+
+                        const otherMemberId = otherDriverRow.getAttribute('data-member-id');
+                        const otherSessionRows = document.querySelectorAll(`.session-row.member-${otherMemberId}`);
+                        otherSessionRows.forEach(sr => {
+                            sr.classList.remove('show');
+                            setTimeout(() => { sr.style.display = 'none'; }, 300);
+                        });
+                    }
+                });
+
+                // Toggle session rows
+                if (sessionRows[0].style.display === 'none') {
+                    // Show session rows
+                    sessionRows.forEach(sr => {
+                        sr.style.display = 'table-row';
+                        setTimeout(() => { sr.classList.add('show'); }, 10);
+                    });
+                } else {
+                    // Hide session rows
+                    sessionRows.forEach(sr => {
+                        sr.classList.remove('show');
+                        setTimeout(() => { sr.style.display = 'none'; }, 300);
+                    });
+                }
+            }
+        });
+    });
+
+    // WebSocket connection
+    if (document.querySelector('#round-select').value) {
+        const roundId = document.querySelector('#round-select').value;
+        const ws_scheme = window.location.protocol === "https:" ? "wss" : "ws";
+        const roundSocket = new WebSocket(
+            `${ws_scheme}://${window.location.host}/ws/round/${roundId}/`
+        );
+
+        roundSocket.onmessage = function(e) {
+            const data = JSON.parse(e.data);
+
+            if (!data.session_update) {
+                // Round updates
+                if (data.ended !== undefined) {
+                    if (data.ended) {
+                        location.reload(); // Reload when round ends
+                    }
+                }
+            } else {
+                // Session updates
+                location.reload(); // Simple approach for now
+            }
+        };
+
+        roundSocket.onclose = function(e) {
+            console.error('Round socket closed unexpectedly');
+        };
+    }
+});
+</script>
+{% endblock extra_js %}

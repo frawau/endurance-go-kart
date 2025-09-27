@@ -1,0 +1,302 @@
+{% extends "layout/content.html" %}
+{% load static %}
+
+{% block main_content %}
+<div class="container">
+    <h1>Round Penalties</h1>
+
+    <form method="get" id="round-form">
+        <div class="form-group">
+            <label for="round-select">Select Round:</label>
+            <select class="form-control" id="round-select" name="round_id" onchange="this.form.submit()">
+                {% for championship_name, championship_rounds in rounds_by_championship.items %}
+                    <optgroup label="{{ championship_name }}">
+                        {% for round in championship_rounds %}
+                            <option value="{{ round.id }}" {% if round.id == selected_round_id %}selected{% endif %}>
+                                {{ round.name }} ({{ round.start|date:"Y-m-d" }})
+                            </option>
+                        {% endfor %}
+                    </optgroup>
+                {% endfor %}
+            </select>
+        </div>
+    </form>
+
+    {% if round_penalties %}
+    <div class="round-penalties mt-4">
+        <table class="table table-hover round-stats-table penalties-table" id="penalties-table">
+            <thead>
+                <tr>
+                    <th style="width: 60px;">Illustration</th>
+                    <th>Description</th>
+                    <th class="sortable" data-sort="offender">
+                        Offending Team
+                        <i class="fas fa-sort ms-1"></i>
+                    </th>
+                    <th class="sortable" data-sort="victim">
+                        Victim Team
+                        <i class="fas fa-sort ms-1"></i>
+                    </th>
+                    <th>Penalty</th>
+                    <th>Imposed</th>
+                    <th>Served</th>
+                </tr>
+            </thead>
+            <tbody id="penalties-tbody">
+                {% for penalty in round_penalties %}
+                <tr data-offender="{{ penalty.offender.team.number }}" data-victim="{% if penalty.victim %}{{ penalty.victim.team.number }}{% else %}999{% endif %}">
+                    <td class="text-center">
+                        {% if penalty.penalty.penalty.illustration %}
+                            <img src="{% get_media_prefix %}{{ penalty.penalty.penalty.illustration }}" 
+                                 alt="{{ penalty.penalty.penalty.name }}" 
+                                 class="penalty-illustration" 
+                                 style="max-width: 80px; max-height: 80px; object-fit: contain;">
+                        {% else %}
+                            <i class="fas fa-flag text-muted" style="font-size: 2rem;"></i>
+                        {% endif %}
+                    </td>
+                    <td>{{ penalty.penalty.penalty.description|default:penalty.penalty.penalty.name }}</td>
+                    <td>
+                        <strong>{{ penalty.offender.team.number }}</strong> {{ penalty.offender.team.team.name }}
+                    </td>
+                    <td>
+                        {% if penalty.victim %}
+                            <strong>{{ penalty.victim.team.number }}</strong> {{ penalty.victim.team.team.name }}
+                        {% endif %}
+                    </td>
+                    <td>
+                        <span class="badge 
+                            {% if penalty.penalty.sanction == 'S' or penalty.penalty.sanction == 'D' %}bg-warning{% elif penalty.penalty.sanction == 'L' or penalty.penalty.sanction == 'P' %}bg-info{% else %}bg-secondary{% endif %}">
+                            {{ penalty.penalty_text }}
+                        </span>
+                    </td>
+                    <td>
+                        <small>{{ penalty.imposed|date:"M d, H:i" }}</small>
+                    </td>
+                    <td>
+                        {% if penalty.served %}
+                            <small class="text-success">{{ penalty.served|date:"M d, H:i" }}</small>
+                        {% else %}
+                            {% if penalty.penalty.sanction == 'S' or penalty.penalty.sanction == 'D' %}
+                                <span class="badge bg-warning text-dark">Pending</span>
+                            {% endif %}
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% elif selected_round %}
+    <div class="alert alert-info mt-4">
+        <i class="fas fa-info-circle me-2"></i>
+        No penalties recorded for this round.
+    </div>
+    {% endif %}
+</div>
+{% endblock main_content %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Add sorting functionality
+    const table = document.getElementById('penalties-table');
+    const tbody = document.getElementById('penalties-tbody');
+    const sortableHeaders = table.querySelectorAll('th.sortable');
+    
+    let currentSort = { column: null, direction: 'asc' };
+    
+    sortableHeaders.forEach(header => {
+        header.addEventListener('click', function() {
+            const sortBy = this.dataset.sort;
+            
+            // Update sort direction
+            if (currentSort.column === sortBy) {
+                currentSort.direction = currentSort.direction === 'asc' ? 'desc' : 'asc';
+            } else {
+                currentSort.direction = 'asc';
+            }
+            currentSort.column = sortBy;
+            
+            // Update header icons
+            sortableHeaders.forEach(h => {
+                const icon = h.querySelector('i');
+                if (h === this) {
+                    icon.className = currentSort.direction === 'asc' ? 'fas fa-sort-up ms-1' : 'fas fa-sort-down ms-1';
+                } else {
+                    icon.className = 'fas fa-sort ms-1';
+                }
+            });
+            
+            // Sort the table
+            sortTable(sortBy, currentSort.direction);
+        });
+        
+        // Add hover effect
+        header.style.cursor = 'pointer';
+        header.addEventListener('mouseenter', function() {
+            this.style.backgroundColor = '#f8f9fa';
+        });
+        header.addEventListener('mouseleave', function() {
+            this.style.backgroundColor = '';
+        });
+    });
+    
+    function sortTable(column, direction) {
+        const rows = Array.from(tbody.querySelectorAll('tr'));
+        
+        rows.sort((a, b) => {
+            let aValue, bValue;
+            
+            if (column === 'offender') {
+                aValue = parseInt(a.dataset.offender);
+                bValue = parseInt(b.dataset.offender);
+            } else if (column === 'victim') {
+                aValue = parseInt(a.dataset.victim);
+                bValue = parseInt(b.dataset.victim);
+            }
+            
+            if (direction === 'asc') {
+                return aValue - bValue;
+            } else {
+                return bValue - aValue;
+            }
+        });
+        
+        // Clear tbody and re-append sorted rows
+        tbody.innerHTML = '';
+        rows.forEach(row => tbody.appendChild(row));
+    }
+});
+</script>
+
+<style>
+/* Dropdown styling to match round_info */
+.form-control {
+    background-color: rgba(50, 50, 65, 0.9);
+    border: 1px solid rgba(80, 80, 100, 0.6);
+    color: #e6e6fa;
+    border-radius: 6px;
+}
+
+.form-control:focus {
+    background-color: rgba(60, 60, 75, 0.95);
+    border-color: rgba(120, 120, 140, 0.8);
+    color: #e6e6fa;
+    box-shadow: 0 0 0 0.2rem rgba(120, 120, 140, 0.25);
+}
+
+.form-control option {
+    background-color: rgba(50, 50, 65, 0.95);
+    color: #e6e6fa;
+}
+
+/* Base table styling from round_info */
+.round-stats-table {
+    background-color: rgba(40, 40, 50, 0.85);
+    border-radius: 6px;
+    overflow: hidden;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+}
+
+.round-stats-table th {
+    background-color: rgba(30, 30, 40, 0.9);
+    color: #e6e6fa !important;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    border-bottom: 2px solid rgba(80, 80, 100, 0.6);
+    padding: 12px 15px;
+}
+
+.round-stats-table th.sortable:hover {
+    background-color: rgba(40, 40, 50, 0.9);
+    cursor: pointer;
+}
+
+/* Penalty rows styling */
+.round-stats-table tbody tr {
+    height: 90px;
+    background-color: rgba(45, 45, 60, 0.9);
+}
+
+.round-stats-table tbody tr:nth-child(even) {
+    background-color: rgba(60, 60, 75, 0.9);
+}
+
+.round-stats-table tbody tr:hover {
+    background-color: rgba(70, 70, 85, 0.9);
+}
+
+.round-stats-table td {
+    color: #e6e6fa !important;
+    border-top: 1px solid rgba(80, 80, 100, 0.3);
+    padding: 10px 15px;
+    vertical-align: middle;
+}
+
+/* Penalty illustration styling */
+.penalty-illustration {
+    border-radius: 4px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+    transition: transform 0.2s ease;
+    cursor: pointer;
+}
+
+.penalty-illustration:hover {
+    transform: scale(1.5);
+    z-index: 1000;
+    position: relative;
+}
+
+/* Badge styling for dark theme */
+.badge {
+    font-size: 0.85em;
+    text-shadow: none;
+}
+
+.badge.bg-warning {
+    background-color: #f0ad4e !important;
+    color: #212529;
+}
+
+.badge.bg-info {
+    background-color: #5bc0de !important;
+    color: #212529;
+}
+
+.badge.bg-secondary {
+    background-color: #6c757d !important;
+    color: #e6e6fa;
+}
+
+/* Status text styling */
+.text-success {
+    color: #5cb85c !important;
+}
+
+.text-muted {
+    color: rgba(230, 230, 250, 0.6) !important;
+}
+
+/* Container background to match */
+.container {
+    background-color: transparent;
+    color: #e6e6fa;
+}
+
+.container h1 {
+    color: #e6e6fa;
+}
+
+.form-group label {
+    color: #e6e6fa;
+    font-weight: 500;
+}
+
+.alert-info {
+    background-color: rgba(91, 192, 222, 0.2);
+    border-color: rgba(91, 192, 222, 0.3);
+    color: #e6e6fa;
+}
+</style>
+{% endblock extra_js %}

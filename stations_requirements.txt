@@ -1,0 +1,10 @@
+# Station-specific dependencies for Raspberry Pi and hardware control
+# These are only needed on station/hardware devices, not on the main server
+
+# GPIO and I2C control for Raspberry Pi
+RPi.GPIO
+# Install from GitHub repo to get latest patches (PyPI version is outdated)
+git+https://github.com/jabdoa2/smbus2_asyncio.git
+
+# Async HTTP client for station communication  
+aiohttp

@@ -1,0 +1,752 @@
+{% extends 'layout/sabase.html' %}
+{% load static duration_filters timer_tags %}
+
+{% block content %}
+<div class="container-fluid" style="height: 100vh; overflow: hidden;">
+    <div class="row" style="height: 10%;">
+        <div class="col-12 position-relative text-center">
+            <a href="{% url 'Home' %}" class="btn btn-primary position-absolute" style="top: 10px; left: 10px; z-index: 10;">
+                <i class="material-symbols-rounded">home</i>
+            </a>
+            <h1>
+                {% if round %}
+                    {{ round.name }}&nbsp;&nbsp;Remaining Time: {% timer_widget "race-control-countdown" "countdownDisplay" round %}
+                {% else %}
+                    Race Control - No Active Round
+                {% endif %}
+            </h1>
+        </div>
+    </div>
+    <div class="row" style="height: 90%;">
+        <div class="col-md-8" style="height: 100%;">
+            <div class="card" style="height: 100%; background-color: transparent;">
+                <div class="card-body d-flex flex-column" style="height: 100%;">
+                    <div class="d-flex w-100" style="height: 40%;">
+                        <div id="race-control-buttons" style="width: 35%;" class="p-2 d-flex align-items-center flex-wrap" {% if round %}data-round-id="{{ round.id }}"{% endif %}>
+                            {% csrf_token %}
+
+                            {% if round %}
+                                {# Render all buttons, use 'hidden' attribute based on initial state #}
+                                <button id="preRaceCheckButton" class="btn btn-warning btn-lg me-2 mb-2 race-action-btn"
+                                        data-action="pre_check"
+                                        data-url="{% url 'preracecheck' %}"
+                                        {% if round.ready or round.started or round.ended %}hidden{% endif %}>
+                                    <i class="fas fa-tasks me-1"></i> Pre Race Check
+                                </button>
+
+                                <button id="startButton" class="btn btn-success btn-lg me-2 mb-2 race-action-btn"
+                                        data-action="start"
+                                        data-url="{% url 'race_start' %}"
+                                        {% if not round.ready or round.started or round.ended %}hidden{% endif %}>
+                                    <i class="fas fa-play me-1"></i> Start Race
+                                </button>
+
+                                <button id="pauseButton" class="btn btn-warning btn-lg me-2 mb-2 race-action-btn"
+                                        data-action="pause"
+                                        data-url="{% url 'racepaused' %}"
+                                        {% if not round.started or round.is_paused or round.ended %}hidden{% endif %}>
+                                    <i class="fas fa-pause me-1"></i> Pause Race
+                                </button>
+
+                                <button id="resumeButton" class="btn btn-info btn-lg me-2 mb-2 race-action-btn"
+                                        data-action="resume"
+                                        data-url="{% url 'racerestart' %}"
+                                        {% if not round.started or not round.is_paused or round.ended %}hidden{% endif %}>
+                                    <i class="fas fa-play-circle me-1"></i> Resume Race
+                                </button>
+
+                                <button id="endButton" class="btn btn-danger btn-lg me-2 mb-2 race-action-btn"
+                                        data-action="end"
+                                        data-url="{% url 'endofrace' %}"
+                                        {% if not round.started or round.ended %}hidden{% endif %}>
+                                    <i class="fas fa-stop me-1"></i> End Race
+                                </button>
+
+                                <button id="falseStartButton" class="btn btn-secondary btn-lg me-2 mb-2 race-action-btn"
+                                        data-action="false_start"
+                                        data-url="{% url 'falsestart' %}"
+                                        hidden>
+                                    <i class="fas fa-undo me-1"></i> False Start
+                                </button>
+
+                                <button id="falseRestartButton" class="btn btn-secondary btn-lg me-2 mb-2 race-action-btn"
+                                        data-action="false_restart"
+                                        data-url="{% url 'falserestart' %}"
+                                        hidden>
+                                    <i class="fas fa-history me-1"></i> False Restart
+                                </button>
+                            {% else %}
+                                <p class="text-muted">No round active.</p>
+                            {% endif %}
+                        </div>
+                        <div style="width: 65%;" class="p-2" id="teamsListContainer">
+                            <div class="card h-100" id="emptyTeamsCard" {% if round and round.ready %}style="display: none;"{% endif %}>
+                                <div class="card-header d-flex justify-content-between align-items-center">
+                                    <h5 class="mb-0">Teams with No Members</h5>
+                                    <button class="btn btn-danger" id="deleteEmptyTeamsBtn">Delete All</button>
+                                </div>
+                                <div class="card-body overflow-auto" id="emptyTeamsList">
+                                    <div class="text-center text-muted" id="emptyTeamsPlaceholder">
+                                        Loading teams...
+                                    </div>
+                                    <ul class="list-group" id="emptyTeamsUL"></ul>
+                                </div>
+                            </div>
+                            <div class="card h-100" id="teamSelectCard" {% if not round or not round.ready %}style="display: none;"{% endif %}>
+                                <div class="card-header">
+                                    <div class="d-flex justify-content-between align-items-center">
+                                        <h5 class="mb-0">Penalties</h5>
+                                        <div id="penaltyQueueStatus" class="text-end" style="display: none;">
+                                            <div class="text-muted" style="font-size: 1.1rem; font-weight: bold;">
+                                                <span>Serving Team: <span id="servingTeam" style="display: inline-block; width: 3ch; text-align: center;">--</span></span>
+                                                <span style="margin-left: 2rem;"><span id="queueCount">0</span> in Queue</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="card-body overflow-auto">
+                                    <div class="row">
+                                        <!-- Left side - Form inputs -->
+                                        <div class="col-8">
+                                            <!-- Penalty Dropdown -->
+                                            <label for="penaltySelect" class="form-label">Penalty</label>
+                                            <select class="form-select mb-2" id="penaltySelect" style="font-size: 1.0rem;">
+                                                <option value="">Select penalty...</option>
+                                                <!-- Options will be populated via JavaScript -->
+                                            </select>
+                                            
+                                            <!-- Offender Dropdown -->
+                                            <label for="offenderSelect" class="form-label">Offender</label>
+                                            <select class="form-select mb-2" id="offenderSelect" style="font-size: 1.0rem;" disabled>
+                                                <option value="">Select offending team...</option>
+                                                {% if round %}
+                                                    {% for team in round.round_team_set.all %}
+                                                        <option value="{{ team.id }}" data-team-number="{{ team.team.number }}">{{ team.team.number }} {{ team.team.team.name }}</option>
+                                                    {% endfor %}
+                                                {% endif %}
+                                            </select>
+                                            
+                                            <!-- Victim Dropdown -->
+                                            <label for="victimSelect" class="form-label">Victim</label>
+                                            <select class="form-select mb-2" id="victimSelect" style="font-size: 1.0rem;" disabled>
+                                                <option value="">Select victim team...</option>
+                                            </select>
+                                            
+                                            <!-- Duration Input -->
+                                            <label for="durationInput" class="form-label">Duration</label>
+                                            <input type="number" class="form-control" id="durationInput" value="20" min="1" max="300" style="font-size: 1.0rem;" disabled>
+                                        </div>
+                                        
+                                        <!-- Right side - Buttons -->
+                                        <div class="col-4 d-flex flex-column justify-content-between">
+                                            <!-- Stop & Go Button - Top -->
+                                            <div class="mb-2">
+                                                <button class="btn w-100" id="stopGoButton" disabled style="background-color: #6c757d; color: #fff; font-weight: bold; min-height: 45px; font-size: 0.9rem;">Stop & Go</button>
+                                            </div>
+                                            
+                                            <!-- Queue Action Buttons - When penalty is active -->
+                                            <div id="queueActionButtons" class="mb-2" style="display: none;">
+                                                <!-- Served Button -->
+                                                <button class="btn w-100 mb-1" id="servedButton" disabled style="background-color: #28a745; color: white; font-weight: bold; min-height: 35px; font-size: 0.8rem;">Served</button>
+                                                
+                                                <!-- Cancel and Delay buttons side by side -->
+                                                <div class="d-flex gap-1">
+                                                    <button class="btn flex-fill" id="cancelButton" disabled style="background-color: #dc3545; color: white; font-weight: bold; min-height: 35px; font-size: 0.8rem;">Cancel</button>
+                                                    <button class="btn flex-fill" id="delayButton" disabled style="background-color: #ffc107; color: black; font-weight: bold; min-height: 35px; font-size: 0.8rem;">Delay</button>
+                                                </div>
+                                            </div>
+                                            
+                                            <!-- Toggle Fence Button - Center -->
+                                            <div class="d-flex align-items-center justify-content-center flex-grow-1">
+                                                <button class="btn w-100" id="toggleFenceButton" style="background-color: #6c757d; color: black; min-height: 45px; font-size: 0.9rem;">Toggle Fence</button>
+                                            </div>
+                                            
+                                            <!-- Lap Penalties Button - Bottom -->
+                                            <div class="mt-2">
+                                                <button class="btn w-100" id="lapPenaltiesButton" style="background-color: #fd7e14; color: white; font-weight: bold; min-height: 45px; font-size: 0.9rem;">Lap Penalties</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="w-100 p-2" style="height: 60%;">
+                        <div class="row h-100">
+                            <!-- System Messages Card -->
+                            <div class="col-md-6 h-100">
+                                <div class="card h-100">
+                                    <div class="card-header">
+                                        <h5 class="mb-0">System Messages</h5>
+                                    </div>
+                                    <div class="card-body overflow-auto" id="messagesContainer">
+                                        {% if messages %}
+                                            {% for message in messages %}
+                                                <div class="alert alert-{{ message.tags }}" data-timeout="5000">
+                                                    {{ message }}
+                                                </div>
+                                            {% endfor %}
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </div>
+                            <!-- Pending Drivers Card -->
+                            <div class="col-md-6 h-100">
+                                <div class="card h-100">
+                                    <div class="card-header">
+                                        <h5 class="mb-0">Pending Drivers</h5>
+                                    </div>
+                                    <div class="card-body overflow-auto">
+                                        <!-- Pending Drivers Table -->
+                                        <div id="pendingDriversContent">
+                                            <div class="table-responsive">
+                                                <table class="table table-sm" id="pending-sessions-table">
+                                                    <thead>
+                                                        <tr>
+                                                            <th>Team</th>
+                                                            <th>Driver</th>
+                                                            <th>Next</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {% for session in pending_sessions %}
+                                                            <tr id="pending-row-{{ session.driver.id }}"
+                                                                class="pending-row"
+                                                                data-driver-id="{{ session.driver.id }}"
+                                                                data-team-id="{{ session.driver.team.id }}"
+                                                                data-team-number="{{ session.driver.team.team.number }}">
+                                                                <td>{{ session.driver.team.team.number }}</td>
+                                                                <td>{{ session.driver.member.nickname }}</td>
+                                                                {% if round.started %}
+                                                                    <td class="next-change-number">{{ session.team_completed_count|add:1 }}</td>
+                                                                {% else %}
+                                                                    <td class="next-change-number">{{ session.team_completed_count }}</td>
+                                                                {% endif %}
+                                                            </tr>
+                                                        {% empty %}
+                                                            <tr id="no-sessions-row">
+                                                                <td colspan="3">No pending sessions</td>
+                                                            </tr>
+                                                        {% endfor %}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        </div>
+                                        
+                                        <!-- Laps Penalty Form (Hidden by default) -->
+                                        <div id="lapsPenaltyContent" class="d-none">
+                                            <div class="text-center mb-3">
+                                                <h6 style="color: #fd7e14; font-weight: bold;">Assign Laps Penalty</h6>
+                                            </div>
+                                            <form id="lapsPenaltyForm">
+                                                {% csrf_token %}
+                                                <div class="mb-3">
+                                                    <label for="lapsPenaltySelect" class="form-label">Penalty</label>
+                                                    <select class="form-select" id="lapsPenaltySelect" required>
+                                                        <option value="">Select penalty...</option>
+                                                    </select>
+                                                </div>
+                                                <div class="mb-3">
+                                                    <label for="lapsOffenderSelect" class="form-label">Offending Team</label>
+                                                    <select class="form-select" id="lapsOffenderSelect" disabled required>
+                                                        <option value="">Select team...</option>
+                                                        {% if round %}
+                                                            {% for team in round.round_team_set.all %}
+                                                                <option value="{{ team.id }}" data-team-number="{{ team.team.number }}">{{ team.team.number }} {{ team.team.team.name }}</option>
+                                                            {% endfor %}
+                                                        {% endif %}
+                                                    </select>
+                                                </div>
+                                                <div class="mb-3">
+                                                    <label for="lapsValueInput" class="form-label">Value (Laps)</label>
+                                                    <input type="number" class="form-control" id="lapsValueInput" value="1" min="1" max="50" disabled>
+                                                </div>
+                                                <div class="d-flex gap-2">
+                                                    <button type="button" class="btn btn-warning" id="submitLapsPenaltyBtn" disabled>
+                                                        <i class="fas fa-flag"></i> Assign Penalty
+                                                    </button>
+                                                    <button type="button" class="btn btn-secondary" id="cancelLapsPenaltyBtn">
+                                                        Cancel
+                                                    </button>
+                                                </div>
+                                            </form>
+                                            <div id="lapsFormAlert" class="alert mt-3 d-none"></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4 d-flex flex-column" style="height: 100%;">
+            {% for i in "x"|ljust:lanes %}
+                <div id="lane-{{ forloop.counter }}" class="card mb-2" style="width: 668px; height: 280px; background-color: transparent;">
+                    <div class="card-header">
+                        <h5 class="mb-0">Pit Lane {{ forloop.counter }}</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="text-center text-muted">Loading...</div>
+                    </div>
+                </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+
+<div id="round-data"
+data-started="{{ round.started|yesno:'true,false' }}"
+data-ended="{{ round.ended|yesno:'true,false' }}"
+data-ready="{{ round.is_ready|yesno:'true,false' }}"
+data-lanes="{{ lanes }}"
+data-hmac-secret="{{ settings.STOPANDGO_HMAC_SECRET }}">
+</div>
+
+{% endblock content %}
+
+<!-- Debug: Add HMAC secret directly to script -->
+<script>
+  window.STOPANDGO_HMAC_SECRET = '{{ settings.STOPANDGO_HMAC_SECRET }}';
+  console.log('HMAC secret set via script tag:', window.STOPANDGO_HMAC_SECRET ? 'YES' : 'NO');
+</script>
+
+{% block extra_js %}
+{# Load the new JS file for button handling #}
+<script src="{% static 'js/racecontrol.js' %}"></script>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Initialize message timeouts
+    const messages = document.querySelectorAll('#messagesContainer .alert[data-timeout]');
+    messages.forEach(message => {
+        const timeout = parseInt(message.dataset.timeout);
+        setTimeout(() => {
+            message.style.opacity = '0';
+            message.style.transition = 'opacity 0.5s ease';
+            setTimeout(() => message.remove(), 500);
+        }, timeout);
+    });
+
+    {% if round %}
+        const roundId = {{ round.id }};
+        const wsScheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
+        const numLanes = {{ lanes }};
+
+        // --- Round Update WebSocket ---
+        const roundSocketUrl = `${wsScheme}://${window.location.host}/ws/round/${roundId}/`;
+        const roundSocket = createWebSocketWithReconnect(
+            roundSocketUrl,
+            function(e) {
+                try {
+                    const data = JSON.parse(e.data);
+                    console.log("Round WS received:", data);
+                    if (!data.session_update) {
+                        // --- Timer Update ---
+                        const isPaused = data.is_paused;
+
+                        // Handle countdown timer updates
+                        if (data.remaining_seconds !== undefined && data.remaining_seconds !== null) {
+                            timerRegistry.countdownTimers.forEach(timer => {
+                                timer.updateRemainingTime(data.remaining_seconds);
+                                timer.updatePauseState(isPaused);
+                            });
+                        }
+
+                        // --- Determine State from WS Data ---
+                        const isStarted = data.started === true;
+                        const isEnded = data.ended === true;
+                        const isReady = data.ready === true;
+
+                        let currentState = 'initial';
+                        if (isEnded) currentState = 'ended';
+                        else if (isStarted && isPaused) currentState = 'paused';
+                        else if (isStarted && !isPaused) currentState = 'running';
+                        else if (isReady && !isStarted) currentState = 'ready';
+
+                        updateButtonVisibility(currentState);
+                    }
+                } catch (err) {
+                    console.error("Error processing round WS message:", err, e.data);
+                }
+            },
+            null,
+            (e) => addSystemMessage("Round status connection error.", "danger"),
+            (e) => addSystemMessage("Round status connection closed.", e.wasClean ? "info" : "warning")
+        );
+
+        // --- Empty Teams WebSocket ---
+        const emptyTeamsSocketUrl = `${wsScheme}://${window.location.host}/ws/empty_teams/`;
+        window.emptyTeamsSocket = createWebSocketWithReconnect(
+            emptyTeamsSocketUrl,
+            function(e) {
+                try {
+                    const data = JSON.parse(e.data);
+                    if (data.type === 'empty_teams_list') {
+                        updateEmptyTeamsList(data.teams);
+                    } else if (data.type === 'system_message') {
+                        addSystemMessage(data.message, data.tag);
+                    }
+                } catch (err) {
+                    console.error("Error processing empty teams WS message:", err, e.data);
+                }
+            },
+            function(e) { console.log('Empty Teams WS connected'); },
+            function(e) { addSystemMessage("Empty Teams connection error.", "danger"); },
+            function(e) { addSystemMessage("Empty Teams connection closed.", e.wasClean ? "info" : "warning"); }
+        );
+
+        // Add event listener for delete button
+        document.getElementById('deleteEmptyTeamsBtn')?.addEventListener('click', function() {
+            if (confirm('Are you sure you want to delete all teams with no members?')) {
+                if (window.emptyTeamsSocket && window.emptyTeamsSocket.getReadyState() === WebSocket.OPEN) {
+                    window.emptyTeamsSocket.send(JSON.stringify({'action': 'delete_empty_teams'}));
+                    
+                    // Reload page after a short delay to refresh all team lists
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 1000);
+                } else if (window.emptyTeamsSocket === null) {
+                    addSystemMessage('Team management is closed. Pre-race checks have already been completed.', 'warning');
+                } else {
+                    addSystemMessage('Connection error. Please refresh the page.', 'danger');
+                }
+            }
+        });
+
+        // --- Pending Drivers WebSocket ---
+        const pendingDriversSocketUrl = `${wsScheme}://${window.location.host}/ws/round/${roundId}/`;
+        const pendingDriversSocket = createWebSocketWithReconnect(
+            pendingDriversSocketUrl,
+            function(e) {
+                try {
+                    const data = JSON.parse(e.data);
+                    console.log("Pending Drivers WS received:", data);
+                    
+                    if (data.session_update) {
+                        const driverId = data.driver_id;
+                        const status = data.driver_status;
+                        const completedSessions = data.completed_sessions;
+
+                        // Update the next change number in the pending drivers table
+                        const rows = document.querySelectorAll('.pending-row');
+                        rows.forEach(row => {
+                            if (row.getAttribute('data-driver-id') === driverId.toString()) {
+                                const nextChangeCell = row.querySelector('.next-change-number');
+                                if (nextChangeCell) {
+                                    nextChangeCell.textContent = completedSessions + 1;
+                                }
+                            }
+                        });
+
+                        if (status === "register") {
+                            // Add new row if it doesn't exist
+                            const rowId = `pending-row-${driverId}`;
+                            if (!document.getElementById(rowId)) {
+                                // Fetch driver info from API
+                                fetch(`/api/driver/${driverId}/info/`)
+                                    .then(response => response.json())
+                                    .then(driverInfo => {
+                                        const tbody = document.querySelector('#pending-sessions-table tbody');
+                                        const noSessionsRow = document.getElementById('no-sessions-row');
+                                        if (noSessionsRow) {
+                                            noSessionsRow.remove();
+                                        }
+
+                                        const newRow = document.createElement('tr');
+                                        newRow.id = rowId;
+                                        newRow.className = 'pending-row';
+                                        newRow.setAttribute('data-driver-id', driverId);
+
+                                        newRow.innerHTML = `
+                                            <td>${driverInfo.team_number}</td>
+                                            <td>${driverInfo.nickname}</td>
+                                            <td class="next-change-number">${completedSessions + 1}</td>
+                                        `;
+
+                                        tbody.appendChild(newRow);
+                                    })
+                                    .catch(error => {
+                                        console.error('Error fetching driver info:', error);
+                                        addSystemMessage("Error fetching driver information", "danger");
+                                    });
+                            }
+                        } else if (status === "start" || status === "reset") {
+                            // Remove the row (start = driver started session, reset = driver removed from queue)
+                            const rowId = `pending-row-${driverId}`;
+                            const row = document.getElementById(rowId);
+                            if (row) {
+                                row.remove();
+                            }
+
+                            // If no rows left, show the "no sessions" message
+                            const tbody = document.querySelector('#pending-sessions-table tbody');
+                            if (tbody.children.length === 0) {
+                                const noSessionsRow = document.createElement('tr');
+                                noSessionsRow.id = 'no-sessions-row';
+                                noSessionsRow.innerHTML = '<td colspan="3">No waiting driver.</td>';
+                                tbody.appendChild(noSessionsRow);
+                            }
+                        }
+                    }
+                } catch (err) {
+                    console.error("Error processing pending drivers WS message:", err, e.data);
+                }
+            },
+            function(e) { 
+                console.log('Pending Drivers WS connected');
+            },
+            function(e) { addSystemMessage("Pending Drivers connection error.", "danger"); },
+            function(e) { addSystemMessage("Pending Drivers connection closed.", e.wasClean ? "info" : "warning"); }
+        );
+
+        // --- Pit Lane WebSockets ---
+        for (let i = 1; i <= numLanes; i++) {
+            const laneSocketUrl = `${wsScheme}://${window.location.host}/ws/pitlanes/${i}/`;
+            const laneSocket = createWebSocketWithReconnect(
+                laneSocketUrl,
+                function(e) {
+                    try {
+                        const data = JSON.parse(e.data);
+                        console.log(`Pit Lane ${i} WS received:`, data);
+                        // Handle pit lane updates
+                        const laneElement = document.getElementById(`lane-${i}`);
+                        if (laneElement && (data.type === 'rclane.update' || data.type === 'lane.update')) {
+                            // Fix CSS syntax errors in the HTML
+                            const fixedHtml = data.lane_html
+                                .replace('style="flex;"', 'style="flex: 1;"')
+                                .replace('left-padding:', 'padding-left:')
+                                .replace('/div>', '</div>'); // Fix malformed closing div tags
+                            
+                            // Update lane card-body content with the fixed HTML
+                            const cardBody = laneElement.querySelector('.card-body');
+                            if (cardBody) {
+                                cardBody.innerHTML = fixedHtml;
+                            } else {
+                                console.warn(`Card body not found for lane ${i}`);
+                            }
+                        }
+                    } catch (err) {
+                        console.error(`Error processing pit lane ${i} WS message:`, err, e.data);
+                    }
+                },
+                function(e) { console.log(`Pit Lane ${i} WS connected`); },
+                function(e) { addSystemMessage(`Pit Lane ${i} connection error.`, "danger"); },
+                function(e) { addSystemMessage(`Pit Lane ${i} connection closed.`, e.wasClean ? "info" : "warning"); }
+            );
+        }
+    {% endif %}
+
+    // --- Laps Penalty Form Handling ---
+    const lapPenaltiesButton = document.getElementById('lapPenaltiesButton');
+    const pendingDriversContent = document.getElementById('pendingDriversContent');
+    const lapsPenaltyContent = document.getElementById('lapsPenaltyContent');
+    const lapsPenaltySelect = document.getElementById('lapsPenaltySelect');
+    const lapsOffenderSelect = document.getElementById('lapsOffenderSelect');
+    const lapsValueInput = document.getElementById('lapsValueInput');
+    const submitLapsPenaltyBtn = document.getElementById('submitLapsPenaltyBtn');
+    const cancelLapsPenaltyBtn = document.getElementById('cancelLapsPenaltyBtn');
+    const lapsFormAlert = document.getElementById('lapsFormAlert');
+    
+    let selectedLapsPenalty = null;
+
+    // Handle Lap Penalties button click
+    if (lapPenaltiesButton) {
+        lapPenaltiesButton.addEventListener('click', function() {
+            if (currentRoundId) {
+                showLapsPenaltyForm();
+            }
+        });
+    }
+
+    // Handle Cancel button click
+    if (cancelLapsPenaltyBtn) {
+        cancelLapsPenaltyBtn.addEventListener('click', function() {
+            showPendingDrivers();
+        });
+    }
+
+    function showLapsPenaltyForm() {
+        // Hide pending drivers and show penalty form
+        if (pendingDriversContent) pendingDriversContent.classList.add('d-none');
+        if (lapsPenaltyContent) lapsPenaltyContent.classList.remove('d-none');
+        
+        // Load penalties and reset form
+        loadLapsPenalties();
+        resetLapsForm();
+    }
+
+    function showPendingDrivers() {
+        // Hide penalty form and show pending drivers
+        if (lapsPenaltyContent) lapsPenaltyContent.classList.add('d-none');
+        if (pendingDriversContent) pendingDriversContent.classList.remove('d-none');
+        
+        // Reset form
+        resetLapsForm();
+    }
+
+    function loadLapsPenalties() {
+        if (!currentRoundId) return;
+        
+        fetch(`/api/round/${currentRoundId}/laps-penalties/`)
+            .then(response => response.json())
+            .then(data => {
+                if (lapsPenaltySelect && data.penalties) {
+                    lapsPenaltySelect.innerHTML = '<option value="">Select penalty...</option>';
+                    data.penalties.forEach(penalty => {
+                        const option = document.createElement('option');
+                        option.value = penalty.id;
+                        option.textContent = `${penalty.penalty_name} (${penalty.value} laps)`;
+                        option.dataset.penaltyValue = penalty.value;
+                        option.dataset.penaltyOption = penalty.option;
+                        lapsPenaltySelect.appendChild(option);
+                    });
+                }
+            })
+            .catch(error => {
+                console.error('Error loading Laps penalties:', error);
+                showLapsFormAlert('Failed to load penalties', 'danger');
+            });
+    }
+
+    // Handle penalty selection
+    if (lapsPenaltySelect) {
+        lapsPenaltySelect.addEventListener('change', function() {
+            const selectedPenaltyId = this.value;
+            const selectedOption = this.selectedOptions[0];
+            
+            if (selectedPenaltyId) {
+                selectedLapsPenalty = {
+                    id: selectedPenaltyId,
+                    value: parseInt(selectedOption.dataset.penaltyValue),
+                    option: selectedOption.dataset.penaltyOption
+                };
+                
+                // Enable offender dropdown
+                lapsOffenderSelect.disabled = false;
+                
+                // Set default value
+                lapsValueInput.value = selectedLapsPenalty.value;
+                
+                // Enable/disable value input based on penalty option
+                if (selectedLapsPenalty.option === 'variable') {
+                    lapsValueInput.disabled = false;
+                } else {
+                    lapsValueInput.disabled = true;
+                }
+                
+            } else {
+                selectedLapsPenalty = null;
+                lapsOffenderSelect.disabled = true;
+                lapsOffenderSelect.value = '';
+                lapsValueInput.disabled = true;
+                lapsValueInput.value = '1';
+            }
+            
+            checkLapsFormCompletion();
+        });
+    }
+
+    // Handle offender selection
+    if (lapsOffenderSelect) {
+        lapsOffenderSelect.addEventListener('change', checkLapsFormCompletion);
+    }
+
+    function checkLapsFormCompletion() {
+        const penaltySelected = selectedLapsPenalty !== null;
+        const offenderSelected = lapsOffenderSelect.value !== '';
+        
+        if (penaltySelected && offenderSelected) {
+            submitLapsPenaltyBtn.disabled = false;
+        } else {
+            submitLapsPenaltyBtn.disabled = true;
+        }
+    }
+
+    // Handle form submission
+    if (submitLapsPenaltyBtn) {
+        submitLapsPenaltyBtn.addEventListener('click', function() {
+            const offenderId = lapsOffenderSelect.value;
+            const value = parseInt(lapsValueInput.value) || 1;
+            
+            if (selectedLapsPenalty && offenderId && currentRoundId) {
+                const penaltyData = {
+                    round_id: currentRoundId,
+                    offender_id: offenderId,
+                    victim_id: null, // Laps penalties don't have victims
+                    championship_penalty_id: selectedLapsPenalty.id,
+                    value: value
+                };
+                
+                // Disable submit button during request
+                submitLapsPenaltyBtn.disabled = true;
+                submitLapsPenaltyBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Submitting...';
+                
+                fetch('/api/create-round-penalty/', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': getCookie('csrftoken')
+                    },
+                    body: JSON.stringify(penaltyData)
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        showLapsFormAlert('Penalty assigned successfully', 'success');
+                        // Add system message
+                        addSystemMessage(`Laps penalty assigned to team ${lapsOffenderSelect.selectedOptions[0]?.dataset.teamNumber}`, 'info');
+                        
+                        // Return to pending drivers view after 1.5 seconds
+                        setTimeout(() => {
+                            showPendingDrivers();
+                        }, 1500);
+                    } else {
+                        throw new Error(data.error || 'Failed to assign penalty');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error assigning penalty:', error);
+                    showLapsFormAlert('Failed to assign penalty: ' + error.message, 'danger');
+                })
+                .finally(() => {
+                    submitLapsPenaltyBtn.disabled = false;
+                    submitLapsPenaltyBtn.innerHTML = '<i class="fas fa-flag"></i> Assign Penalty';
+                });
+            }
+        });
+    }
+
+    function resetLapsForm() {
+        if (lapsPenaltySelect) lapsPenaltySelect.value = '';
+        if (lapsOffenderSelect) {
+            lapsOffenderSelect.value = '';
+            lapsOffenderSelect.disabled = true;
+        }
+        if (lapsValueInput) {
+            lapsValueInput.value = '1';
+            lapsValueInput.disabled = true;
+        }
+        if (submitLapsPenaltyBtn) submitLapsPenaltyBtn.disabled = true;
+        selectedLapsPenalty = null;
+        hideLapsFormAlert();
+    }
+
+    function showLapsFormAlert(message, type) {
+        if (lapsFormAlert) {
+            lapsFormAlert.className = `alert alert-${type} mt-3`;
+            lapsFormAlert.textContent = message;
+            lapsFormAlert.classList.remove('d-none');
+        }
+    }
+
+    function hideLapsFormAlert() {
+        if (lapsFormAlert) {
+            lapsFormAlert.classList.add('d-none');
+        }
+    }
+
+});
+</script>
+{% endblock extra_js %}

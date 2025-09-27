@@ -1,0 +1,19 @@
+{% extends "layout/content.html" %}
+
+{% block main_content %}
+<div class="container">
+    <div class="section">
+        <h1>People</h1>
+                {% for person in persons %}
+                <div class="row">
+                    <div class="col-md-8 ml-auto mr-auto">
+                        <div style="clear: both;">
+                            <span>{{ person.firstname }} {{person.surname}}- <img class="{{ country.flag_css }}" src="{{ person.country.flag }}" /></span>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+    </div>
+</div>
+
+{% endblock main_content %}

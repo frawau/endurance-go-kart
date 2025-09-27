@@ -1,0 +1,115 @@
+{% extends 'layout/content.html' %}
+{% load static %}
+
+{% block main_content %}
+<div class="container mt-5">
+    <div class="card">
+        <div class="card-header bg-primary text-white">
+            <h4>Join Championship</h4>
+        </div>
+
+        <div class="card-body">
+            <!-- Display messages -->
+            {% if success_message %}
+                <div class="alert alert-success alert-dismissible fade show" role="alert">
+                    {{ success_message }}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close">
+                    <i class="fa fa-trash"></i>
+                    </button>
+                </div>
+            {% endif %}
+            <form method="post" id="join-championship-form">
+                {% csrf_token %}
+
+                {{ form.non_field_errors }}
+
+                {% for field in form %}
+                    <div class="form-group">
+                        <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                        {{ field }}
+                        {% if field.errors %}
+                            <div class="error">{{ field.errors }}</div>
+                        {% endif %}
+                    </div>
+                {% endfor %}
+
+                <button type="submit" class="btn btn-primary">Join Championship</button>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const championshipSelect = document.getElementById('championship-select');
+    const teamSelect = document.getElementById('team-select');
+    const numberSelect = document.getElementById('number-select');
+
+    // Get CSRF token for POST requests
+    const csrftoken = document.querySelector('[name=csrfmiddlewaretoken]').value;
+
+    championshipSelect.addEventListener('change', function() {
+        const championshipId = this.value;
+
+        if (!championshipId) {
+            teamSelect.innerHTML = '<option value="">Select a team</option>';
+            numberSelect.innerHTML = '<option value="">Select a number</option>';
+            teamSelect.disabled = true;
+            numberSelect.disabled = true;
+            return;
+        }
+
+        teamSelect.disabled = false;
+        numberSelect.disabled = false;
+
+        // Fetch available teams
+        fetch('/api/get_teams/', {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': csrftoken,
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: `championship_id=${championshipId}`
+        })
+        .then(response => response.json())
+        .then(data => {
+            teamSelect.innerHTML = '<option value="">Select a team</option>';
+            data.teams.forEach(team => {
+                const option = document.createElement('option');
+                option.value = team.id;
+                option.textContent = team.name;
+                teamSelect.appendChild(option);
+            });
+        });
+
+        // Fetch available numbers
+        fetch('/api/get_numbers/', {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': csrftoken,
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: `championship_id=${championshipId}`
+        })
+        .then(response => response.json())
+        .then(data => {
+            numberSelect.innerHTML = '<option value="">Select a number</option>';
+            data.numbers.forEach(number => {
+                const option = document.createElement('option');
+                option.value = number;
+                option.textContent = number;
+                numberSelect.appendChild(option);
+            });
+        });
+    });
+
+    // Initially disable team and number if no championship is selected
+    if (!championshipSelect.value) {
+        teamSelect.disabled = true;
+        numberSelect.disabled = true;
+    }
+});
+</script>
+{% endblock %}

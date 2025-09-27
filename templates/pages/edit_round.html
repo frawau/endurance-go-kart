@@ -1,0 +1,315 @@
+{% extends 'layout/content.html' %}
+{% load static %}
+
+{% block main_content %}
+<div class="container mt-5">
+    <div class="card">
+        <div class="card-header bg-primary text-white">
+            <h4>Edit Round</h4>
+        </div>
+        <div class="card-body">
+            <!-- Championship Selection -->
+            <div class="row mb-4">
+                <div class="col-md-12">
+                    <div class="form-group">
+                        <label for="championship-select">Select Championship:</label>
+                        <select id="championship-select" class="form-control select2">
+                            <option value="">Search for a championship...</option>
+                            {% for championship in championships %}
+                            <option value="{{ championship.id }}" 
+                                    data-name="{{ championship.name }}">
+                                {{ championship.name }} ({{ championship.start|date:'Y' }})
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Round Selection -->
+            <div class="row mb-4" id="round-selection" style="display: none;">
+                <div class="col-md-12">
+                    <div class="form-group">
+                        <label for="round-select">Select Round:</label>
+                        <select id="round-select" class="form-control select2">
+                            <option value="">Search for a round...</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Round Edit Form -->
+            <form id="round-form" method="post" style="display: none;">
+                {% csrf_token %}
+                <input type="hidden" name="round_id" id="round-id">
+                
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="form-group mb-3">
+                            <label for="name">Round Name:</label>
+                            <input type="text" class="form-control" id="name" name="name" required>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="form-group mb-3">
+                            <label for="start">Start Date and Time:</label>
+                            <input type="datetime-local" class="form-control" id="start" name="start" required>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="form-group mb-3">
+                            <label for="duration">Duration (HH:MM:SS):</label>
+                            <input type="text" class="form-control" id="duration" name="duration" 
+                                   pattern="^([0-9]{2}):([0-9]{2}):([0-9]{2})$" 
+                                   placeholder="04:00:00" required>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="form-group mb-3">
+                            <label for="change_lanes">Number of Pit Lanes:</label>
+                            <input type="number" class="form-control" id="change_lanes" name="change_lanes" 
+                                   min="1" max="4" required>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="form-group mb-3">
+                            <label for="pitlane_open_after">Pit Lane Opens After (MM:SS):</label>
+                            <input type="text" class="form-control" id="pitlane_open_after" name="pitlane_open_after" 
+                                   pattern="^([0-9]{2}):([0-9]{2})$" 
+                                   placeholder="00:00" required>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="form-group mb-3">
+                            <label for="pitlane_close_before">Pit Lane Closes Before (MM:SS):</label>
+                            <input type="text" class="form-control" id="pitlane_close_before" name="pitlane_close_before" 
+                                   pattern="^([0-9]{2}):([0-9]{2})$" 
+                                   placeholder="00:00" required>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="form-group mb-3">
+                            <label for="limit_time">Maximum Driving Time:</label>
+                            <select class="form-control" id="limit_time" name="limit_time" required>
+                                <option value="none">No Time Limit</option>
+                                <option value="race">Race Time Limit</option>
+                                <option value="session">Session Time Limit</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="form-group mb-3">
+                            <label for="limit_method">Time Limit Method:</label>
+                            <select class="form-control" id="limit_method" name="limit_method" required>
+                                <option value="none">--</option>
+                                <option value="time">Time in minutes</option>
+                                <option value="percent">Average + N percents</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="form-group mb-3">
+                            <label for="limit_value">Time Limit Value:</label>
+                            <input type="number" class="form-control" id="limit_value" name="limit_value" 
+                                   min="1" required>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="form-group mb-3">
+                            <label for="limit_time_min">Minimum Driving Time (MM:SS):</label>
+                            <input type="text" class="form-control" id="limit_time_min" name="limit_time_min" 
+                                   pattern="^([0-9]{2}):([0-9]{2})$" 
+                                   placeholder="00:00" required>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="form-group mb-3">
+                            <label for="required_changes">Required Driver Changes:</label>
+                            <input type="number" class="form-control" id="required_changes" name="required_changes" 
+                                   min="0" required>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Weight Penalty Configuration -->
+                <div class="card mt-4 mb-4">
+                    <div class="card-header bg-secondary text-white">
+                        <h4 class="mb-0">Weight Penalty Configuration</h4>
+                    </div>
+                    <div class="card-body" id="weight-penalty-container">
+                        <div class="form-group">
+                            <label for="weight-penalty-operator">Weight Comparison Operator</label>
+                            <select id="weight-penalty-operator" class="form-control mb-3">
+                                <option value="<">Less than (&lt;)</option>
+                                <option value="<=">Less than or equal to (&le;)</option>
+                                <option value=">">Greater than (&gt;)</option>
+                                <option value=">=">Greater than or equal to (&ge;)</option>
+                            </select>
+
+                            <label>Weight-Penalty Pairs</label>
+                            <div id="weight-pairs-container" class="mb-3">
+                                <!-- Weight pairs will be added here -->
+                            </div>
+
+                            <button type="button" id="add-weight-pair" class="btn btn-info">
+                                <i class="fa-solid fa-plus"></i> Add Weight-Penalty Pair
+                            </button>
+
+                            <!-- Hidden input to store the final JSON -->
+                            <input type="hidden" id="id_weight_penalty" name="weight_penalty" value='[]'>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="row mt-4">
+                    <div class="col-12">
+                        <button type="submit" class="btn btn-primary">Save Changes</button>
+                        <button type="button" class="btn btn-secondary" id="cancel-btn">Cancel</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
+<script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+<script src="{% static 'js/weight-penalty-widget.js' %}"></script>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Initialize Select2 for both dropdowns
+    $('#championship-select, #round-select').select2({
+        placeholder: 'Search...',
+        allowClear: true
+    });
+
+
+    // Handle championship selection
+    $('#championship-select').on('change', function() {
+        const championshipId = $(this).val();
+        const roundSelection = $('#round-selection');
+        const roundSelect = $('#round-select');
+        const roundForm = $('#round-form');
+        
+        if (championshipId) {
+            // Fetch rounds for selected championship
+            fetch(`/api/championship/${championshipId}/rounds/?only_not_ready=1`)
+                .then(response => response.json())
+                .then(data => {
+                    const rounds = data.rounds;
+                    roundSelect.empty().append('<option value="">Search for a round...</option>');
+                    rounds.forEach(round => {
+                        roundSelect.append(`<option value="${round.id}" 
+                            data-name="${round.name}"
+                            data-start="${round.start}"
+                            data-duration="${round.duration}"
+                            data-change-lanes="${round.change_lanes}"
+                            data-pitlane-open="${round.pitlane_open_after}"
+                            data-pitlane-close="${round.pitlane_close_before}"
+                            data-limit-time="${round.limit_time}"
+                            data-limit-method="${round.limit_method}"
+                            data-limit-value="${round.limit_value}"
+                            data-limit-time-min="${round.limit_time_min}"
+                            data-required-changes="${round.required_changes}"
+                            data-weight-penalty='${JSON.stringify(round.weight_penalty || [">=", [0, 0]])}'>
+                            ${round.name}
+                        </option>`);
+                    });
+                    roundSelection.show();
+                    roundForm.hide();
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('Error loading rounds');
+                });
+        } else {
+            roundSelection.hide();
+            roundForm.hide();
+        }
+    });
+
+    // Handle round selection
+    $('#round-select').on('change', function() {
+        const selectedOption = $(this).find('option:selected');
+        const form = $('#round-form');
+        
+        if (selectedOption.val()) {
+            // Show form and populate fields
+            form.show();
+            $('#round-id').val(selectedOption.val());
+            $('#name').val(selectedOption.data('name'));
+            $('#start').val(selectedOption.data('start').slice(0, 16)); // Format for datetime-local input
+            $('#duration').val(selectedOption.data('duration'));
+            $('#change_lanes').val(selectedOption.data('change-lanes'));
+            $('#pitlane_open_after').val(selectedOption.data('pitlane-open'));
+            $('#pitlane_close_before').val(selectedOption.data('pitlane-close'));
+            $('#limit_time').val(selectedOption.data('limit-time'));
+            $('#limit_method').val(selectedOption.data('limit-method'));
+            $('#limit_value').val(selectedOption.data('limit-value'));
+            $('#limit_time_min').val(selectedOption.data('limit-time-min'));
+            $('#required_changes').val(selectedOption.data('required-changes'));
+            
+            // Initialize weight penalty widget with the round's data
+            const weightPenaltyData = selectedOption.data('weight-penalty');
+            $('#id_weight_penalty').val(JSON.stringify(weightPenaltyData));
+            
+            // Initialize the weight penalty widget using the library
+            initWeightPenaltyWidget();
+        } else {
+            form.hide();
+        }
+    });
+
+    // Handle form submission
+    $('#round-form').on('submit', function(e) {
+        e.preventDefault();
+        
+        const formData = new FormData(this);
+        
+        fetch('{% url "edit_round" %}', {
+            method: 'POST',
+            body: formData,
+            headers: {
+                'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                alert('Round updated successfully!');
+                location.reload();
+            } else {
+                alert('Error: ' + data.error);
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('An error occurred while saving the changes.');
+        });
+    });
+
+    // Handle cancel button
+    $('#cancel-btn').on('click', function() {
+        $('#round-select').val('').trigger('change');
+    });
+});
+</script>
+{% endblock %} 

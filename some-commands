@@ -1,0 +1,14 @@
+
+
+# Operations needed
+
+sudo pip install --break-system-package django-apscheduler redis django-cors-headers django-admin-material-dashboard django_countries django_dynamic_api
+sudo pip install --break-system-package djangorestframework django_theme_material_kit
+sudo apt install postgresql redis-server
+systemctl status postgresql
+sudo pip install --break-system-packages psycopg2-binary
+sudo -u postgres createdb gokartrace
+sudo -u postgres createuser -P easykart
+  ----> password  G0Kart 4 Life!
+sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE gokartrace TO easykart;"
+sudo -u postgres psql -d gokartrace -c "GRANT ALL ON SCHEMA public TO easykart;"

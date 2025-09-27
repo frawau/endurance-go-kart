@@ -1,0 +1,60 @@
+{% comment %} Inside teamcard.html {% endcomment %}
+{% load timer_tags %}
+
+<div class="card" style="background-color: transparent;">
+    <div class="card-body">
+        <h5 class="card-title" style="font-size: 4rem; display: flex; justify-content: space-between; align-items: center;">
+            <span>{{ round_team.team.number }} -- {{ round_team.team.team.name }}</span>
+            {% load duration_filters %}
+            {% if round_team.time_limit_seconds %}
+                <span style="font-size: 4rem; color: #666;">
+                    Max: {{ round_team.time_limit_seconds|duration_format }}
+                </span>
+            {% endif %}
+        </h5>
+        {% get_driver_time_limit round_team.round round_team as driver_limit %}
+        {% get_completed_sessions_count round_team as changes_count %}
+        <div class="table-responsive">
+            <table class="table w-100" style="font-size: 3rem; border-collapse: collapse; background-color: transparent;">
+                <thead>
+                    <tr>
+                        <th class="col" style="border: 10px solid #ddd; padding: 12px; text-align: center; font-weight: bold; color: #333; background-color: transparent;">{{ changes_count|positive_only }} Changes</th>
+                        <th class="col" style="border: 10px solid #ddd; padding: 12px; text-align: center; font-weight: bold; color: #333; background-color: transparent;">Drive Time</th>
+                        <th class="col" style="border: 10px solid #ddd; padding: 12px; text-align: center; font-weight: bold; color: #333; background-color: transparent;">Current Session</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for member in round_team.team_member_set.all %}
+                        {% if member.driver %}
+                            <tr id="driver-row-{{ member.id }}" data-driver-id="{{ member.id }}" data-ontrack="{{ member.ontrack|yesno:'true,false' }}" data-team-id="{{ round_team.id }}">
+                                <td style="border: 10px solid #ddd; padding: 12px; text-align: center; font-weight: bold; color: #333; background-color: transparent;">{{ member.member.nickname }}</td>
+                                <td style="border: 10px solid #ddd; padding: 12px; text-align: center; font-weight: bold; color: #333; background-color: transparent;">
+                                    {% if driver_limit.mode == "race" %}
+                                        {% timer_widget "total-time-" "totaltime" member limit=driver_limit.seconds %}
+                                    {% else %}
+                                        {% timer_widget "total-time-" "totaltime" member %}
+                                    {% endif %}
+                                </td>
+                                <td style="border: 10px solid #ddd; padding: 12px; text-align: center; font-weight: bold; color: #333; background-color: transparent;" id="session-cell-{{ member.id }}">
+                                    {% if driver_limit.mode == "session" %}
+                                        {% timer_widget "session-time-" "sessiontime" member limit=driver_limit.seconds %}
+                                    {% else %}
+                                        {% timer_widget "session-time-" "sessiontime" member %}
+                                    {% endif %}
+
+                                    {# Visually hide if not ontrack initially #}
+                                    <style>
+                                      #session-time-{{ member.id }}:not([style*="visibility: visible"]) {
+                                          visibility: {% if not member.isready %}hidden{% else %}visible{% endif %};
+                                      }
+                                    </style>
+
+                                </td>
+                            </tr>
+                        {% endif %}
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>

@@ -1,0 +1,47 @@
+{% extends "layout/content.html" %}
+
+{% block main_content %}
+<div class="container">
+    <div class="section">
+        {% if round is None %}
+        <h2>Thank you for visiting.</h2>
+                <div class="row">
+                    <div class="col-md-8 ml-auto mr-auto">
+                        <div style="clear: both;">
+                            <p style="color: black;">Thank you for visiting. There is no championship race today.</p>
+                            <p style="color: black;">Come back another day</p>
+                        </div>
+                    </div>
+                </div>
+        {% else %}
+        <h2>Welcome to {{ round.name }} of {{ round.championship.name }}.</h2>
+                <div class="row">
+                    <div class="col-md-8 ml-auto mr-auto">
+                        <div style="clear: both;">
+                            <p>Here is what you can do.</p>
+
+                            {% for row in buttons %}
+                                <div class="col-12">  {# Use col-12 for full-width rows #}
+                                    <div class="row">
+                                        {% for button in row %}
+                                            <div class="col-md-3 col-sm-6 col-12">  {# Adjust col-* for button size #}
+                                                {% if button.label == 'ekskip' %}
+                                                <p />
+                                                {% else %}
+                                                <a href="{{ button.url }}" class="btn btn-primary btn-lg btn-block">
+                                                    {{ button.label }}
+                                                </a>
+                                                {% endif %}
+                                            </div>
+                                        {% endfor %}
+                                    </div>
+                                </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+        {% endif %}
+    </div>
+</div>
+
+{% endblock main_content %}

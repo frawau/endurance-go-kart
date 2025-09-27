@@ -1,0 +1,119 @@
+{% extends 'layout/sabase.html' %}
+
+{% block content %}
+{% if not round %}
+    <!-- Show "No Race Today" message when there's no current round -->
+    <div style="height: 100vh; width: 100vw; display: flex; align-items: center; justify-content: center; flex-direction: column; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+        <div class="text-center text-white">
+            <div class="mb-5">
+                <i class="fas fa-calendar-times" style="font-size: 8rem;"></i>
+            </div>
+            <h1 class="mb-4" style="font-size: 4rem; font-weight: bold;">No Race Today</h1>
+        </div>
+    </div>
+{% elif not change_lane %}
+    <!-- Show loading message when pit lane doesn't exist yet -->
+    <div id="loading-container" style="height: 100vh; width: 100vw; display: flex; align-items: center; justify-content: center; flex-direction: column; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+        <div class="text-center text-white">
+            <div class="mb-5">
+                <div class="spinner-border" style="width: 6rem; height: 6rem;" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+            </div>
+            <h1 class="mb-4" style="font-size: 4rem; font-weight: bold;">Pit Lane {{ lane_number }} Not Ready</h1>
+            <h2 class="mb-5" style="font-size: 2.5rem;">Waiting for pre-race checks to complete...</h2>
+        </div>
+    </div>
+{% else %}
+    <!-- Normal pit lane view -->
+    <div style="height: 100vh; width: 100vw; display: flex; align-items: stretch; justify-content: center; margin: 0; padding: 0;">
+    {% include 'layout/changelane_detail.html' with change_lane=change_lane %}
+    </div>
+{% endif %}
+
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        {% if not round %}
+            // No round available
+            console.log('No round available');
+        {% elif not change_lane %}
+            // Pit lane not ready yet - start checking
+            console.log('Pit lane {{ lane_number }} not found - starting retry mechanism');
+            startPitLaneChecker();
+        {% else %}
+            // Pit lane available - set up WebSocket connection
+            const laneNumber = {{ change_lane.lane }};
+            const wsScheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
+            const socket = new WebSocket(`${wsScheme}://${window.location.host}/ws/pitlanes/${laneNumber}/`);
+
+            socket.onmessage = function (event) {
+                const data = JSON.parse(event.data);
+                if (data.type === 'lane.update') {
+                    document.getElementById(`lane-{{ change_lane.id }}`).outerHTML = data.lane_html;
+                }
+            };
+
+            socket.onclose = function(event) {
+                if (!event.wasClean) {
+                    reloadTimer = setTimeout(() => {
+                        location.reload();
+                    }, 3000); // Reload after 3 seconds
+                }
+            };
+        {% endif %}
+    });
+    
+    {% if not round %}
+        // No round - template handles this case
+    {% elif not change_lane %}
+    // Function to continuously check if pit lane is ready
+    function startPitLaneChecker() {
+        let attemptCount = 0;
+        
+        function checkForPitLane() {
+            attemptCount++;
+            
+            console.log(`Pit lane {{ lane_number }} check attempt ${attemptCount}`);
+            
+            // Check if pit lane is available by fetching the current page
+            fetch(window.location.href, { 
+                method: 'GET',
+                cache: 'no-cache',
+                headers: {
+                    'Cache-Control': 'no-cache',
+                    'Pragma': 'no-cache'
+                }
+            })
+            .then(response => response.text())
+            .then(html => {
+                // Check if the response contains pit lane content
+                const tempDiv = document.createElement('div');
+                tempDiv.innerHTML = html;
+                
+                // Look for pit lane detail content
+                const laneDetail = tempDiv.querySelector('[id^="lane-"]');
+                
+                if (laneDetail) {
+                    console.log('Pit lane {{ lane_number }} is now available! Reloading page...');
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 500);
+                    return; // Stop checking
+                }
+                
+                // Continue checking - no max limit for public display
+                setTimeout(checkForPitLane, 2000); // Check every 2 seconds
+            })
+            .catch(error => {
+                console.error('Error checking for pit lane {{ lane_number }}:', error);
+                // Continue checking even on error - this is a public display
+                setTimeout(checkForPitLane, 5000); // Wait longer on error
+            });
+        }
+        
+        // Start checking after a short delay
+        setTimeout(checkForPitLane, 1000);
+    }
+    {% endif %}
+</script>
+{% endblock %}

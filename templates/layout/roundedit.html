@@ -1,0 +1,132 @@
+{% load static %}
+{% load json_filters %}
+{% load duration_filters %}
+
+<form method="POST" action="{% url 'update_round' round.id %}">
+    {% csrf_token %}
+
+    <div class="row">
+        <!-- Left column fields (unchanged) -->
+        <div class="col-md-6">
+            <div class="form-group">
+                <label for="id_name">Round Name</label>
+                <input type="text" class="form-control" id="id_name" name="name" value="{{ round.name }}" required>
+            </div>
+
+            <div class="form-group">
+                <label for="id_start">Start Time</label>
+                <input type="datetime-local" class="form-control" id="id_start" name="start" value="{{ round.start|date:'Y-m-d\TH:i' }}" required>
+            </div>
+
+            <div class="form-group">
+                <label for="id_duration">Duration (HH:MM:SS)</label>
+                <input type="text" class="form-control" id="id_duration" name="duration" 
+                       pattern="^([0-9]{1,2}):([0-9]{2}):([0-9]{2})$" 
+                       placeholder="04:00:00" value="{{ round.duration }}" required>
+            </div>
+
+            <div class="form-group">
+                <label for="id_change_lanes">Number of Pit Lanes</label>
+                <input type="number" class="form-control" id="id_change_lanes" name="change_lanes" 
+                       value="{{ round.change_lanes }}" min="1" max="4" required>
+            </div>
+
+            <div class="form-group">
+                <label for="id_pitlane_open_after">Pit Lane Opens After (MM:SS)</label>
+                <input type="text" class="form-control" id="id_pitlane_open_after" name="pitlane_open_after" 
+                       pattern="^([0-9]{1,2}):([0-9]{2})$" 
+                       placeholder="00:00" value="{{ round.pitlane_open_after|mmss_format }}" required>
+            </div>
+
+            <div class="form-group">
+                <label for="id_pitlane_close_before">Pit Lane Closes Before (MM:SS)</label>
+                <input type="text" class="form-control" id="id_pitlane_close_before" name="pitlane_close_before" 
+                       pattern="^([0-9]{1,2}):([0-9]{2})$" 
+                       placeholder="00:00" value="{{ round.pitlane_close_before|mmss_format }}" required>
+            </div>
+        </div>
+
+        <!-- Right column fields (unchanged) -->
+        <div class="col-md-6">
+            <div class="form-group">
+                <label for="id_limit_time">Maximum Driving Time</label>
+                <select class="form-control" id="id_limit_time" name="limit_time">
+                    {% for value, display in round.LIMIT %}
+                        <option value="{{ value }}" {% if round.limit_time == value %}selected{% endif %}>{{ display }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="id_limit_method">Time Limit Method</label>
+                <select class="form-control" id="id_limit_method" name="limit_method">
+                    {% for value, display in round.LMETHOD %}
+                        <option value="{{ value }}" {% if round.limit_method == value %}selected{% endif %}>{{ display }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="id_limit_value">Time Limit Value</label>
+                <input type="number" class="form-control" id="id_limit_value" name="limit_value" 
+                       value="{{ round.limit_value }}" min="1" required>
+            </div>
+
+            <div class="form-group">
+                <label for="id_required_changes">Required Driver Changes</label>
+                <input type="number" class="form-control" id="id_required_changes" name="required_changes" value="{{ round.required_changes }}" required>
+            </div>
+
+            <div class="form-group">
+                <label for="id_limit_time_min">Minimum Driving Time (MM:SS)</label>
+                <input type="text" class="form-control" id="id_limit_time_min" name="limit_time_min" 
+                       pattern="^([0-9]{1,2}):([0-9]{2})$" 
+                       placeholder="00:00" value="{{ round.limit_time_min|mmss_format }}" required>
+            </div>
+        </div>
+    </div>
+
+    <!-- Weight Penalty Configuration -->
+    <div class="card mt-4 mb-4">
+        <div class="card-header bg-secondary text-white">
+            <h4 class="mb-0">Weight Penalty Configuration</h4>
+        </div>
+        <div class="card-body" id="weight-penalty-container">
+            <div class="form-group">
+                <label for="weight-penalty-operator">Weight Comparison Operator</label>
+                <select id="weight-penalty-operator" class="form-control mb-3">
+                    <option value="<">Less than (&lt;)</option>
+                    <option value="<=">Less than or equal to (&le;)</option>
+                    <option value=">">Greater than (&gt;)</option>
+                    <option value=">=">Greater than or equal to (&ge;)</option>
+                </select>
+
+                <label>Weight-Penalty Pairs</label>
+                <div id="weight-pairs-container" class="mb-3">
+                    <!-- Weight pairs will be added here -->
+                </div>
+
+                <button type="button" id="add-weight-pair" class="btn btn-info" >
+                    <i class="fa-solid fa-plus"></i> Add Weight-Penalty Pair
+                </button>
+
+                <!-- Hidden input to store the final JSON -->
+                <input type="hidden" id="id_weight_penalty" name="weight_penalty" value='{{ round.weight_penalty|jsonify|safe }}' >
+            </div>
+        </div>
+    </div>
+
+    <div class="text-center">
+        <button type="submit" class="btn btn-primary btn-lg">Save Changes</button>
+        <a href="{% url 'rounds_list' %}" class="btn btn-secondary btn-lg">Cancel</a>
+    </div>
+</form>
+
+<script src="{% static 'js/weight-penalty-widget.js' %}"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Initialize the weight penalty widget using the library
+    initWeightPenaltyWidget();
+});
+</script>
+

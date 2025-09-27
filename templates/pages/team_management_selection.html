@@ -1,0 +1,50 @@
+{% extends "layout/base.html" %}
+{% load static %}
+
+{% block title %}Team Management{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2>Team Management</h2>
+    <p>Select a championship and a round to manage teams.</p>
+
+    <form method="get" id="selectionForm">
+        <div class="row">
+            <div class="col-md-6 mb-3">
+                <label for="championship" class="form-label">Championship</label>
+                <select name="championship" id="championship" class="form-select" onchange="this.form.submit()">
+                    <option value="">-- Select Championship --</option>
+                    {% for championship in championships %}
+                        <option value="{{ championship.pk }}" {% if selected_championship.pk == championship.pk %}selected{% endif %}>
+                            {{ championship.name }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+            {% if selected_championship %}
+            <div class="col-md-6 mb-3">
+                <label for="round" class="form-label">Round</label>
+                <select name="round" id="round" class="form-select" onchange="navigateToTeamView(this.value)">
+                    <option value="">-- Select Round --</option>
+                    {% for round in rounds %}
+                        <option value="{{ round.pk }}">{{ round.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            {% endif %}
+        </div>
+    </form>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+{{ block.super }}
+<script>
+    function navigateToTeamView(roundId) {
+        console.log("Round selected: " + roundId);
+        if (roundId) {
+            window.location.href = `/rounds/team/${roundId}/`;
+        }
+    }
+</script>
+{% endblock extra_js %}

@@ -1,0 +1,33 @@
+{% load driver_tags %}
+{% if change_lane.open %}
+    {% if change_lane.driver %}
+    <div id="lane-{{ change_lane.id }}" class="row w-100 m-0" style="flex;">
+        <div class="col-3 d-flex align-items-center justify-content-center"
+            style="font-size: 6rem; font-weight: bold; height: 100%; background-color: #f0fff0; left-padding: 20px;">
+                {{ change_lane.driver.team.team.number }}
+        </div>
+        <div class="col-9 p-5 d-flex align-items-center justify-content-center flex-column" style="font-size: 2rem; height: 100%; background-color: #f0fff0; position: relative;">
+                <h1 class="text-primary" style="font-size: 2rem;">{{ change_lane.driver.team.team.team.name }}</h1>
+                {% get_weight_penalty change_lane.driver as weight_penalty %}
+                <div class="d-flex align-items-center">
+                    <div class="d-flex flex-column justify-content-center" style="margin-left: 20px;">
+                        <p class="text-dark" style="font-size: 2rem;">{{ change_lane.driver.member.nickname }}</p>
+                        <p class="text-dark" style="font-size: 2rem;">Penalty: {{ weight_penalty }} Kg</p>
+                    </div>
+                </div>
+        </div>
+    </div>
+    {% else %}
+    <div id="lane-{{ change_lane.id }}" class="row w-100 m-0" style="flex-grow: 1;">
+        <div class="d-flex align-items-center justify-content-center h-100" style="background-color: green;">
+            <h1 class="text-dark" style="font-size: 3rem; font-weight: bold;">Open</h1>
+        </div>
+    </div>
+    {% endif %}
+{% else %}
+    <div id="lane-{{ change_lane.id }}" class="row w-100 m-0" style="flex-grow: 1;">
+        <div class="col-12 d-flex align-items-center justify-content-center h-100" style="background-color: red;">
+            <h1 class="text-warning" style="font-size: 3rem; font-weight: bold;">Closed</h1>
+        </div>
+    </div>
+{% endif %}

@@ -1,0 +1,193 @@
+{% extends 'layout/content.html' %}
+{% load static %}
+
+{% block main_content %}
+<div class="container mt-5">
+    <div class="card">
+        <div class="card-header bg-primary text-white">
+            <h4>All Drivers</h4>
+        </div>
+        <div class="card-body">
+            <!-- Championship Selection -->
+            <form method="get" class="mb-4">
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label for="championship">Select Championship:</label>
+                            <select name="championship" id="championship" class="form-control" onchange="this.form.submit()">
+                                <option value="">Select a championship...</option>
+                                {% for championship in championships %}
+                                <option value="{{ championship.id }}" {% if selected_championship.id == championship.id %}selected{% endif %}>
+                                    {{ championship.name }}
+                                </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                    <div class="col-md-5">
+                        <div class="form-group">
+                            <label for="search">Search:</label>
+                            <input type="text" id="search" class="form-control" placeholder="Type to search...">
+                        </div>
+                    </div>
+                    <div class="col-md-1 d-flex align-items-end">
+                        <i class="fas fa-question-circle text-primary" 
+                           style="font-size: 1.5rem; cursor: pointer;"
+                           data-bs-toggle="popover"
+                           data-bs-placement="left"
+                           data-bs-html="true"
+                           data-bs-content="<b>Page Features:</b><br>
+                           • Select a championship to view all drivers<br>
+                           • Use the search box to filter by nickname or full name<br>
+                           • Click on a round header to:<br>
+                           &nbsp;&nbsp;- Show only that round's column<br>
+                           &nbsp;&nbsp;- Hide drivers not participating in that round<br>
+                           • Click the round header again to show all rounds<br>
+                           • The search filter remains active while viewing a single round"></i>
+                    </div>
+                </div>
+            </form>
+
+            {% if selected_championship %}
+            <div class="table-responsive">
+                <table class="table table-striped">
+                    <thead>
+                        <tr>
+                            <th style="width: 40px;"></th>
+                            <th>Nickname</th>
+                            <th>Full Name</th>
+                            {% for round in rounds %}
+                            <th class="round-header" data-round-id="{{ round.id }}" style="cursor: pointer; text-align: center;">
+                                {{ round.name }}
+                                <i class="fas fa-filter ml-1" style="font-size: 0.8em; opacity: 0.5;"></i>
+                            </th>
+                            {% endfor %}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for person in persons %}
+                        <tr class="driver-row">
+                            <td>
+                                <img src="/static/flags/{{ person.country.code|lower }}.png" 
+                                     alt="{{ person.country.name }}" 
+                                     class="flag-icon"
+                                     style="width: 24px; height: 16px; object-fit: cover; border: 1px solid #ddd; box-shadow: 0 1px 2px rgba(0,0,0,0.1);">
+                            </td>
+                            <td class="driver-nickname">{{ person.nickname }}</td>
+                            <td class="driver-fullname">{{ person.firstname }} {{ person.surname }}</td>
+                            {% for round in rounds %}
+                            <td class="text-center round-cell" data-round-id="{{ round.id }}">
+                                {% for team in person.teams %}
+                                {% if team.round_id == round.id %}
+                                {{ team.number }} - {{ team.name }}
+                                {% endif %}
+                                {% endfor %}
+                            </td>
+                            {% endfor %}
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<style>
+.flag-icon {
+    width: 24px;
+    height: 16px;
+    object-fit: cover;
+    border: 1px solid #ddd;
+    border-radius: 2px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+}
+
+/* Style for the popover */
+.popover {
+    max-width: 300px;
+}
+
+.popover-body {
+    padding: 1rem;
+    line-height: 1.5;
+}
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Initialize popovers
+    const popoverTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="popover"]'));
+    popoverTriggerList.map(function (popoverTriggerEl) {
+        return new bootstrap.Popover(popoverTriggerEl);
+    });
+
+    const searchInput = document.getElementById('search');
+    const rows = document.querySelectorAll('.driver-row');
+    let activeRoundId = null;
+
+    // Function to check if a row should be visible based on search and round filter
+    function shouldShowRow(row, searchTerm, roundId) {
+        const nickname = row.querySelector('.driver-nickname').textContent.toLowerCase();
+        const fullname = row.querySelector('.driver-fullname').textContent.toLowerCase();
+        const hasMatch = nickname.includes(searchTerm) || fullname.includes(searchTerm);
+        
+        if (!hasMatch) return false;
+        
+        if (roundId) {
+            const roundCell = row.querySelector(`.round-cell[data-round-id="${roundId}"]`);
+            return roundCell.textContent.trim() !== '';
+        }
+        
+        return true;
+    }
+
+    // Function to update row visibility
+    function updateRowVisibility() {
+        const searchTerm = searchInput.value.toLowerCase();
+        
+        rows.forEach(row => {
+            const shouldShow = shouldShowRow(row, searchTerm, activeRoundId);
+            row.style.display = shouldShow ? '' : 'none';
+        });
+    }
+
+    // Search input handler
+    searchInput.addEventListener('input', updateRowVisibility);
+
+    // Round header click handlers
+    document.querySelectorAll('.round-header').forEach(header => {
+        header.addEventListener('click', function() {
+            const roundId = this.dataset.roundId;
+            const roundCells = document.querySelectorAll('.round-cell');
+            const headers = document.querySelectorAll('.round-header');
+            
+            if (activeRoundId === roundId) {
+                // Reset to show all rounds
+                activeRoundId = null;
+                roundCells.forEach(cell => cell.style.display = '');
+                headers.forEach(h => {
+                    h.style.display = '';
+                    h.querySelector('i').style.opacity = '0.5';
+                });
+            } else {
+                // Show only selected round
+                activeRoundId = roundId;
+                roundCells.forEach(cell => {
+                    cell.style.display = cell.dataset.roundId === roundId ? '' : 'none';
+                });
+                headers.forEach(h => {
+                    h.style.display = h.dataset.roundId === roundId ? '' : 'none';
+                    h.querySelector('i').style.opacity = h.dataset.roundId === roundId ? '1' : '0.5';
+                });
+            }
+            
+            updateRowVisibility();
+        });
+    });
+});
+</script>
+{% endblock %} 

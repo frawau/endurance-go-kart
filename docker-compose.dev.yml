@@ -1,0 +1,13 @@
+version: '3.8'
+services:
+  appseed-app:
+    volumes:
+      # Mount static assets for development
+      - ./static:/app/static
+      # Mount fonts directory
+      - ./fonts:/usr/local/share/fonts:ro
+    environment:
+      - DEBUG=True
+    ports:
+      # Expose port for direct access during development
+      - "8000:5005"

@@ -1,0 +1,214 @@
+{% load driver_tags %}
+<div id="lane-{{ change_lane.id }}" class="d-flex flex-column h-100 lane-content" style="min-height: 100vh; transition: all 0.3s ease-in-out;">
+    {% if change_lane.open %}
+        {% if change_lane.driver %}
+            <div class="d-flex flex-column h-100 lane-info-state" style="background-color: #f0fff0; min-height: 100vh;">
+                <div class="text-center py-2 team-name-section" style="flex: 0 0 auto; min-height: 12vh;">
+                    <h1 class="text-primary team-name-text">{{ change_lane.driver.team.team.team.name }}</h1>
+                </div>
+                <div class="d-flex justify-content-center align-items-center px-2 team-number-section" style="flex: 1 1 auto; min-height: 40vh;">
+                    <span class="team-number-text fw-bold me-3">{{ change_lane.driver.team.team.number }}</span>
+                    <img src="{{ change_lane.driver.member.mugshot.url }}" alt="Driver Snapshot"
+                        class="rounded-circle driver-photo" style="object-fit: cover;">
+                </div>
+                <div class="d-flex flex-column align-items-center justify-content-start pt-2 driver-info-section" style="flex: 0 0 auto; min-height: 40vh;">
+                    <h1 class="text-dark driver-name-text mb-2" data-name-length="{{ change_lane.driver.member.nickname|length }}">{{ change_lane.driver.member.nickname }}</h1>
+                    {% get_weight_penalty change_lane.driver as weight_penalty %}
+                    <h2 class="penalty-text" style="color: #DC0000;">Penalty: {{ weight_penalty }} Kg</h2>
+                </div>
+            </div>
+        {% else %}
+            <div class="d-flex align-items-center justify-content-center h-100 lane-open-state" style="background-color: #f0fff0; min-height: 100vh; transition: all 0.3s ease-in-out;">
+                <h1 class="text-dark fw-bold open-text">Open</h1>
+            </div>
+        {% endif %}
+    {% else %}
+        <div class="d-flex align-items-center justify-content-center h-100 lane-closed-state" style="background-color: red; min-height: 100vh; transition: all 0.3s ease-in-out;">
+            <h1 class="text-warning fw-bold closed-text">Closed</h1>
+        </div>
+    {% endif %}
+</div>
+
+<style>
+/* Responsive font sizing based on container */
+.team-name-text {
+    font-size: clamp(2rem, 8vw, 6rem);
+    font-weight: bold;
+    line-height: 1.1;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+}
+
+.team-number-text {
+    font-size: clamp(6rem, 15vw, 18rem);
+    line-height: 1;
+    color: #000;
+}
+
+.driver-name-text {
+    font-size: clamp(2.5rem, 8vw, 9rem);
+    line-height: 1.1;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    text-align: center;
+    max-width: 90%;
+}
+
+/* Responsive font sizing based on driver name length */
+.driver-name-text[data-name-length="1"],
+.driver-name-text[data-name-length="2"],
+.driver-name-text[data-name-length="3"],
+.driver-name-text[data-name-length="4"],
+.driver-name-text[data-name-length="5"],
+.driver-name-text[data-name-length="6"],
+.driver-name-text[data-name-length="7"] {
+    font-size: clamp(2.5rem, 8vw, 9rem);
+}
+
+.driver-name-text[data-name-length="8"],
+.driver-name-text[data-name-length="9"],
+.driver-name-text[data-name-length="10"] {
+    font-size: clamp(2.2rem, 7vw, 7.5rem);
+}
+
+.driver-name-text[data-name-length="11"],
+.driver-name-text[data-name-length="12"],
+.driver-name-text[data-name-length="13"] {
+    font-size: clamp(2rem, 6vw, 6rem);
+}
+
+.driver-name-text[data-name-length="14"],
+.driver-name-text[data-name-length="15"],
+.driver-name-text[data-name-length="16"] {
+    font-size: clamp(1.8rem, 5vw, 5rem);
+}
+
+/* For very long names (17+ characters) */
+.driver-name-text[data-name-length="17"], .driver-name-text[data-name-length="18"], 
+.driver-name-text[data-name-length="19"], .driver-name-text[data-name-length="20"],
+.driver-name-text[data-name-length="21"], .driver-name-text[data-name-length="22"],
+.driver-name-text[data-name-length="23"], .driver-name-text[data-name-length="24"],
+.driver-name-text[data-name-length="25"], .driver-name-text[data-name-length="26"],
+.driver-name-text[data-name-length="27"], .driver-name-text[data-name-length="28"],
+.driver-name-text[data-name-length="29"], .driver-name-text[data-name-length="30"] {
+    font-size: clamp(1.5rem, 4vw, 4rem);
+    line-height: 1.0;
+}
+
+.penalty-text {
+    font-size: clamp(1.5rem, 6vw, 7rem);
+    line-height: 1.1;
+}
+
+.open-text, .closed-text {
+    font-size: clamp(4rem, 12vw, 8rem);
+    line-height: 1;
+}
+
+.driver-photo {
+    width: clamp(200px, 25vw, 400px);
+    height: clamp(200px, 25vw, 400px);
+    max-width: 40vh;
+    max-height: 40vh;
+}
+
+/* Smooth state transitions */
+.lane-content {
+    position: relative;
+}
+
+.lane-info-state, .lane-open-state, .lane-closed-state {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+/* Media queries for very small screens */
+@media (max-width: 576px) {
+    .team-number-text {
+        font-size: 6rem;
+    }
+    
+    .driver-name-text {
+        font-size: 2.5rem;
+    }
+    
+    .driver-name-text[data-name-length="8"],
+    .driver-name-text[data-name-length="9"],
+    .driver-name-text[data-name-length="10"] {
+        font-size: 2.2rem;
+    }
+    
+    .driver-name-text[data-name-length="11"],
+    .driver-name-text[data-name-length="12"],
+    .driver-name-text[data-name-length="13"] {
+        font-size: 2rem;
+    }
+    
+    .driver-name-text[data-name-length="14"],
+    .driver-name-text[data-name-length="15"],
+    .driver-name-text[data-name-length="16"] {
+        font-size: 1.8rem;
+    }
+    
+    /* Very long names on small screens */
+    .driver-name-text[data-name-length="17"], .driver-name-text[data-name-length="18"], 
+    .driver-name-text[data-name-length="19"], .driver-name-text[data-name-length="20"],
+    .driver-name-text[data-name-length="21"], .driver-name-text[data-name-length="22"],
+    .driver-name-text[data-name-length="23"], .driver-name-text[data-name-length="24"],
+    .driver-name-text[data-name-length="25"], .driver-name-text[data-name-length="26"],
+    .driver-name-text[data-name-length="27"], .driver-name-text[data-name-length="28"],
+    .driver-name-text[data-name-length="29"], .driver-name-text[data-name-length="30"] {
+        font-size: 1.5rem;
+        line-height: 1.0;
+    }
+    
+    .penalty-text {
+        font-size: 1.5rem;
+    }
+}
+
+/* Media queries for very large screens */
+@media (min-width: 1920px) {
+    .team-number-text {
+        font-size: 20rem;
+    }
+    
+    .driver-name-text {
+        font-size: 10rem;
+    }
+    
+    .driver-name-text[data-name-length="8"],
+    .driver-name-text[data-name-length="9"],
+    .driver-name-text[data-name-length="10"] {
+        font-size: 8.5rem;
+    }
+    
+    .driver-name-text[data-name-length="11"],
+    .driver-name-text[data-name-length="12"],
+    .driver-name-text[data-name-length="13"] {
+        font-size: 7rem;
+    }
+    
+    .driver-name-text[data-name-length="14"],
+    .driver-name-text[data-name-length="15"],
+    .driver-name-text[data-name-length="16"] {
+        font-size: 6rem;
+    }
+    
+    /* Very long names on large screens */
+    .driver-name-text[data-name-length="17"], .driver-name-text[data-name-length="18"], 
+    .driver-name-text[data-name-length="19"], .driver-name-text[data-name-length="20"],
+    .driver-name-text[data-name-length="21"], .driver-name-text[data-name-length="22"],
+    .driver-name-text[data-name-length="23"], .driver-name-text[data-name-length="24"],
+    .driver-name-text[data-name-length="25"], .driver-name-text[data-name-length="26"],
+    .driver-name-text[data-name-length="27"], .driver-name-text[data-name-length="28"],
+    .driver-name-text[data-name-length="29"], .driver-name-text[data-name-length="30"] {
+        font-size: 5rem;
+        line-height: 1.0;
+    }
+    
+    .penalty-text {
+        font-size: 8rem;
+    }
+}
+</style> 

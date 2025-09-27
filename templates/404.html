@@ -1,0 +1,37 @@
+{# race/templates/pages/error404.html #}
+{% load static %}
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Patience.</title>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f0f0f0;
+        }
+        img {
+            max-width: 200px;
+            margin-bottom: 20px;
+        }
+        h1 {
+            font-size: 3rem;
+            color: #333;
+            text-align: center;
+        }
+    </style>
+    <script>
+        setTimeout(function() {
+            location.reload();
+        }, 10000); // 10 seconds
+    </script>
+</head>
+<body>
+    <img src="{% static 'img/easykart-logo.png' %}" alt="Logo">
+    <h1>This page will soon be available.</h1>
+</body>
+</html>

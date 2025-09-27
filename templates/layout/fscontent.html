@@ -1,0 +1,13 @@
+{% extends "layout/fsbase.html" %}
+{% load static %}
+{% block body %}index-page bg-gray-200{% endblock body %}
+{% block content %}
+<div class="container position-relative">
+  {% if organiser_logo %}
+  <img src="{{ organiser_logo.image.url }}" class="img-fluid position-absolute" alt="{{ organiser_logo.name }}" style="top: 10px; right: 10px; max-width: 400px; z-index: 1;">
+  {% else %}
+  <img src="{% static 'logos/gokartrace-logo.svg' %}" class="img-fluid position-absolute" alt="GoKartRace" style="top: 10px; right: 10px; max-width: 400px; z-index: 1;">
+  {% endif %}
+  {% block main_content %} {% endblock main_content %}
+</div>
+{% endblock content %}

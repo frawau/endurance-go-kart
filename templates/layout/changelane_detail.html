@@ -1,0 +1,31 @@
+{% load driver_tags %}
+    <div id="lane-{{ change_lane.id }}" class="row w-100 m-0" style="flex-grow: 1;">
+        {% if change_lane.open %}
+            {% if change_lane.driver %}
+                <div class="col-3 d-flex align-items-center justify-content-center"
+                    style="font-size: 28rem; font-weight: bold; height: 100%; background-color: #f0fff0; left-padding: 50px;">
+                        {{ change_lane.driver.team.team.number }}
+                </div>
+                <div class="col-9 p-5 d-flex align-items-center justify-content-center flex-column" style="font-size: 2rem; height: 100%; background-color: #f0fff0; position: relative;">
+                        <h1 class="text-primary" style="font-size: 8rem;">{{ change_lane.driver.team.team.team.name }}</h1>
+                        <div class="d-flex align-items-center">
+                            <img src="{{ change_lane.driver.member.mugshot.url }}" alt="Driver Snapshot"
+                                class="rounded-circle" style="width: 250px; height: 320px; object-fit: cover; position: absolute; left: -20px; top: 60%; transform: translateY(-50%);">
+                            {% get_weight_penalty change_lane.driver as weight_penalty %}
+                            <div class="d-flex flex-column justify-content-center" style="margin-left: 220px;">
+                                <p class="text-dark" style="font-size: 8rem;">{{ change_lane.driver.member.nickname }}</p>
+                                <p class="text-dark" style="font-size: 8rem;">Penalty:{{ weight_penalty }} Kg</p>
+                            </div>
+                        </div>
+                </div>
+            {% else %}
+                <div class="d-flex align-items-center justify-content-center h-100">
+                    <h1 class="text-dark" style="font-size: 18rem; font-weight: bold;">Open</h1>
+                </div>
+            {% endif %}
+        {% else %}
+            <div class="col-12 d-flex align-items-center justify-content-center h-100" style="background-color: red;">
+                <h1 class="text-warning" style="font-size: 18rem; font-weight: bold;">Closed</h1>
+            </div>
+        {% endif %}
+    </div>

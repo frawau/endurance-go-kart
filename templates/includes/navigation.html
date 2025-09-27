@@ -1,0 +1,425 @@
+{% load static %}
+{% load user_auth %}
+
+<!-- Navbar -->
+<div class="container position-sticky z-index-sticky top-0">
+    <div class="row">
+      <div class="col-12">
+        <nav
+          class="navbar navbar-expand-lg  blur border-radius-xl top-0 z-index-fixed shadow position-absolute my-3 p-2 start-0 end-0 mx-4">
+          <div class="container-fluid px-0">
+            <a class="navbar-brand font-weight-bolder ms-sm-3 text-sm"
+              href="{% url 'Home' %}">
+              Endurance Race System
+            </a>
+            <button class="navbar-toggler shadow-none ms-2" type="button" data-bs-toggle="collapse"
+              data-bs-target="#navigation" aria-controls="navigation" aria-expanded="false"
+              aria-label="Toggle navigation">
+              <span class="navbar-toggler-icon mt-2">
+                <span class="navbar-toggler-bar bar1"></span>
+                <span class="navbar-toggler-bar bar2"></span>
+                <span class="navbar-toggler-bar bar3"></span>
+              </span>
+            </button>
+            <div class="collapse navbar-collapse pt-3 pb-2 py-lg-0 w-100" id="navigation">
+            <ul class="navbar-nav navbar-nav-hover ms-auto">
+            {% if request.user.is_superuser %}
+                <li class="nav-item dropdown dropdown-hover mx-2">
+                  <a class="nav-link ps-2 d-flex cursor-pointer align-items-center font-weight-semibold"
+                    id="dropdownMenuDocs" data-bs-toggle="dropdown" aria-expanded="false">
+                    <i class="material-symbols-rounded opacity-6 me-2 text-md">article</i>
+                    Admin
+                    <img src="{% static "img/down-arrow-dark.svg" %}" alt="down-arrow" class="arrow ms-auto ms-md-2">
+                  </a>
+                  <ul
+                    class="dropdown-menu dropdown-menu-end dropdown-menu-animation dropdown-md dropdown-md-responsive mt-0 mt-lg-3 p-3 border-radius-lg"
+                    aria-labelledby="dropdownMenuDocs">
+                    <div class="d-none d-lg-block">
+                      <ul class="list-group">
+                        <li class="nav-item list-group-item border-0 p-0">
+                          <a class="dropdown-item py-2 ps-3 border-radius-md"
+                            href="/admin/">
+                            <h6
+                              class="dropdown-header text-dark font-weight-bolder d-flex justify-content-cente align-items-center p-0">
+                              Administration</h6>
+                            <span class="text-sm">Database Admin.</span>
+                          </a>
+                        </li>
+                      </ul>
+                    </div>
+                  </ul>
+                </li>
+            {% endif %}
+            {% if user.is_authenticated and user|has_group:"Admin" %}
+                <li class="nav-item dropdown dropdown-hover mx-2">
+                  <a class="nav-link ps-2 d-flex cursor-pointer align-items-center font-weight-semibold"
+                    id="dropdownMenuDocs" data-bs-toggle="dropdown" aria-expanded="false">
+                    <i class="material-symbols-rounded opacity-6 me-2 text-md">article</i>
+                    Setup Round
+                    <img src="{% static "img/down-arrow-dark.svg" %}" alt="down-arrow" class="arrow ms-auto ms-md-2">
+                  </a>
+                  <ul
+                    class="dropdown-menu dropdown-menu-end dropdown-menu-animation dropdown-md dropdown-md-responsive mt-0 mt-lg-3 p-3 border-radius-lg"
+                    aria-labelledby="dropdownMenuDocs">
+                    <div class="d-none d-lg-block">
+                      <ul class="list-group">
+                        <li class="nav-item list-group-item border-0 p-0">
+                          <a class="dropdown-item py-2 ps-3 border-radius-md"
+                            href="/rounds/update/">
+                            <h6
+                              class="dropdown-header text-dark font-weight-bolder d-flex justify-content-cente align-items-center p-0">
+                              Manage Round</h6>
+                            <span class="text-sm">Configure Rounds.</span>
+                          </a>
+                        </li>
+                        <li class="nav-item list-group-item border-0 p-0">
+                          <a class="dropdown-item py-2 ps-3 border-radius-md"
+                            href="/rounds/team/">
+                            <h6
+                              class="dropdown-header text-dark font-weight-bolder d-flex justify-content-cente align-items-center p-0">
+                              Manage Round Team</h6>
+                            <span class="text-sm">Configure teams in the next/current round.</span>
+                          </a>
+                        </li>
+                        {% if user|has_group:"Race Director" %}
+                        <li class="nav-item list-group-item border-0 p-0">
+                          <a class="dropdown-item py-2 ps-3 border-radius-md"
+                          href="/racecontrol/">
+                            <h6
+                            class="dropdown-header text-dark font-weight-bolder d-flex justify-content-cente align-items-center p-0">
+                            Race Control</h6>
+                            <span class="text-sm">Controlling the current Round..</span>
+                          </a>
+                        </li>
+                        {% endif %}
+                      </ul>
+                    </div>
+                  </ul>
+                </li>
+                <li class="nav-item dropdown dropdown-hover mx-2">
+                  <a class="nav-link ps-2 d-flex cursor-pointer align-items-center font-weight-semibold"
+                    id="dropdownMenuDocs" data-bs-toggle="dropdown" aria-expanded="false">
+                    <i class="material-symbols-rounded opacity-6 me-2 text-md">article</i>
+                    Championship
+                    <img src="{% static "img/down-arrow-dark.svg" %}" alt="down-arrow" class="arrow ms-auto ms-md-2">
+                  </a>
+                  <ul
+                    class="dropdown-menu dropdown-menu-end dropdown-menu-animation dropdown-md dropdown-md-responsive mt-0 mt-lg-3 p-3 border-radius-lg"
+                    aria-labelledby="dropdownMenuDocs">
+                    <div class="d-none d-lg-block">
+                      <ul class="list-group">
+                        <li class="nav-item list-group-item border-0 p-0">
+                          <a class="dropdown-item py-2 ps-3 border-radius-md"
+                            href="/championship/create/">
+                            <h6
+                              class="dropdown-header text-dark font-weight-bolder d-flex justify-content-cente align-items-center p-0">
+                              Create Championship</h6>
+                            <span class="text-sm">Create a new championship with rounds.</span>
+                          </a>
+                        </li>
+                        <li class="nav-item list-group-item border-0 p-0">
+                          <a class="dropdown-item py-2 ps-3 border-radius-md"
+                            href="/championship/edit/">
+                            <h6
+                              class="dropdown-header text-dark font-weight-bolder d-flex justify-content-cente align-items-center p-0">
+                              Edit Championship</h6>
+                            <span class="text-sm">Edit existing championships.</span>
+                          </a>
+                        </li>
+                        <li class="nav-item list-group-item border-0 p-0">
+                          <a class="dropdown-item py-2 ps-3 border-radius-md"
+                            href="/championship/edit-round/">
+                            <h6
+                              class="dropdown-header text-dark font-weight-bolder d-flex justify-content-cente align-items-center p-0">
+                              Edit Round</h6>
+                            <span class="text-sm">Edit rounds within championships.</span>
+                          </a>
+                        </li>
+                        <li class="nav-item list-group-item border-0 p-0">
+                          <a class="dropdown-item py-2 ps-3 border-radius-md"
+                            href="/penalty/manage/">
+                            <h6
+                              class="dropdown-header text-dark font-weight-bolder d-flex justify-content-cente align-items-center p-0">
+                              Manage Penalties</h6>
+                            <span class="text-sm">Add, edit, and delete penalties.</span>
+                          </a>
+                        </li>
+                        <li class="nav-item list-group-item border-0 p-0">
+                          <a class="dropdown-item py-2 ps-3 border-radius-md"
+                            href="/sponsor/manage/">
+                            <h6
+                              class="dropdown-header text-dark font-weight-bolder d-flex justify-content-cente align-items-center p-0">
+                              Manage Sponsors</h6>
+                            <span class="text-sm">Add, edit, and delete sponsor and organiser logos.</span>
+                          </a>
+                        </li>
+                      </ul>
+                    </div>
+                  </ul>
+                </li>
+            {% endif %}
+                <li class="nav-item dropdown dropdown-hover mx-2">
+                  <a class="nav-link ps-2 d-flex cursor-pointer align-items-center font-weight-semibold"
+                    id="dropdownMenuDocs" data-bs-toggle="dropdown" aria-expanded="false">
+                    <i class="material-symbols-rounded opacity-6 me-2 text-md">article</i>
+                    Drivers
+                    <img src="{% static "img/down-arrow-dark.svg" %}" alt="down-arrow" class="arrow ms-auto ms-md-2">
+                  </a>
+                  <ul
+                    class="dropdown-menu dropdown-menu-end dropdown-menu-animation dropdown-md dropdown-md-responsive mt-0 mt-lg-3 p-3 border-radius-lg"
+                    aria-labelledby="dropdownMenuDocs">
+                    <div class="d-none d-lg-block">
+                      <ul class="list-group">
+                        <li class="nav-item list-group-item border-0 p-0">
+                          <a class="dropdown-item py-2 ps-3 border-radius-md"
+                            href="/pending_drivers-nav/">
+                            <h6
+                              class="dropdown-header text-dark font-weight-bolder d-flex justify-content-cente align-items-center p-0">
+                              Drivers Queue</h6>
+                            <span class="text-sm">Show drivers waiting for relay..</span>
+                          </a>
+                        </li>
+                        <li class="nav-item list-group-item border-0 p-0">
+                          <a class="dropdown-item py-2 ps-3 border-radius-md"
+                            href="/alldrivers/">
+                            <h6
+                              class="dropdown-header text-dark font-weight-bolder d-flex justify-content-cente align-items-center p-0">
+                              All Drivers</h6>
+                            <span class="text-sm">View all drivers in championships.</span>
+                          </a>
+                        </li>
+                        {% if user.is_authenticated and user|has_group:"Admin" %}
+                        <li class="nav-item list-group-item border-0 p-0">
+                        <a class="dropdown-item py-2 ps-3 border-radius-md"
+                        href="/driver/add/">
+                        <h6
+                        class="dropdown-header text-dark font-weight-bolder d-flex justify-content-cente align-items-center p-0">
+                        Add driver</h6>
+                        <span class="text-sm">Add a new driver.</span>
+                        </a>
+                        </li>
+                        <li class="nav-item list-group-item border-0 p-0">
+                        <a class="dropdown-item py-2 ps-3 border-radius-md"
+                        href="/edit/driver/">
+                        <h6
+                        class="dropdown-header text-dark font-weight-bolder d-flex justify-content-cente align-items-center p-0">
+                        Edit Driver</h6>
+                        <span class="text-sm">Edit existing driver details.</span>
+                        </a>
+                        </li>
+                        {% endif %}
+                      </ul>
+                    </div>
+                  </ul>
+                </li>
+
+                <li class="nav-item dropdown dropdown-hover mx-2">
+                  <a class="nav-link ps-2 d-flex cursor-pointer align-items-center font-weight-semibold"
+                    id="dropdownMenuDocs" data-bs-toggle="dropdown" aria-expanded="false">
+                    <i class="material-symbols-rounded opacity-6 me-2 text-md">article</i>
+                    Teams
+                    <img src="{% static "img/down-arrow-dark.svg" %}" alt="down-arrow" class="arrow ms-auto ms-md-2">
+                  </a>
+                  <ul
+                    class="dropdown-menu dropdown-menu-end dropdown-menu-animation dropdown-md dropdown-md-responsive mt-0 mt-lg-3 p-3 border-radius-lg"
+                    aria-labelledby="dropdownMenuDocs">
+                    <div class="d-none d-lg-block">
+                      <ul class="list-group">
+                        <li class="nav-item list-group-item border-0 p-0">
+                          <a class="dropdown-item py-2 ps-3 border-radius-md"
+                            href="/singleteam/">
+                            <h6
+                              class="dropdown-header text-dark font-weight-bolder d-flex justify-content-cente align-items-center p-0">
+                              Teams</h6>
+                            <span class="text-sm">Check a team current status.</span>
+                          </a>
+                        </li>
+                        <li class="nav-item list-group-item border-0 p-0">
+                          <a class="dropdown-item py-2 ps-3 border-radius-md"
+                            href="/teamcarousel-nav/">
+                            <h6
+                              class="dropdown-header text-dark font-weight-bolder d-flex justify-content-cente align-items-center p-0">
+                              Team Carousel</h6>
+                            <span class="text-sm">Display all team status sequentially.</span>
+                          </a>
+                        </li>
+                        <li class="nav-item list-group-item border-0 p-0">
+                          <a class="dropdown-item py-2 ps-3 border-radius-md"
+                            href="/allteams/">
+                            <h6
+                              class="dropdown-header text-dark font-weight-bolder d-flex justify-content-cente align-items-center p-0">
+                              All Teams</h6>
+                            <span class="text-sm">View all teams and their participation in championships.</span>
+                          </a>
+                        </li>
+                        {% if user.is_authenticated and user|has_group:"Admin" %}
+                        <li class="nav-item list-group-item border-0 p-0">
+                          <a class="dropdown-item py-2 ps-3 border-radius-md"
+                            href="/team/add/">
+                           <h6
+                             class="dropdown-header text-dark font-weight-bolder d-flex justify-content-cente align-items-center p-0">
+                             Add Team,</h6>
+                          <span class="text-sm">Add a new team.</span>
+                          </a>
+                        </li>
+                        <li class="nav-item list-group-item border-0 p-0">
+                          <a class="dropdown-item py-2 ps-3 border-radius-md"
+                            href="/edit/team/">
+                           <h6
+                             class="dropdown-header text-dark font-weight-bolder d-flex justify-content-cente align-items-center p-0">
+                             Edit Team</h6>
+                          <span class="text-sm">Edit existing team details.</span>
+                          </a>
+                        </li>
+                        <li class="nav-item list-group-item border-0 p-0">
+                          <a class="dropdown-item py-2 ps-3 border-radius-md"
+                            href="{% url 'team_management_selection' %}">
+                           <h6
+                             class="dropdown-header text-dark font-weight-bolder d-flex justify-content-cente align-items-center p-0">
+                             Team Members</h6>
+                          <span class="text-sm">Manage team members for a round.</span>
+                          </a>
+                        </li>
+                        <li class="nav-item list-group-item border-0 p-0">
+                          <a class="dropdown-item py-2 ps-3 border-radius-md"
+                            href="/join_championship/">
+                           <h6
+                             class="dropdown-header text-dark font-weight-bolder d-flex justify-content-cente align-items-center p-0">
+                             Join Championship,</h6>
+                          <span class="text-sm">Team joining Championship.</span>
+                          </a>
+                        </li>
+                        {% endif %}
+                      </ul>
+                    </div>
+                  </ul>
+                </li>
+                {% if active_round_change_lanes > 0 and request.user.is_authenticated %}
+                <li class="nav-item dropdown dropdown-hover mx-2">
+                  <a class="nav-link ps-2 d-flex cursor-pointer align-items-center font-weight-semibold"
+                    id="dropdownMenuDocs" data-bs-toggle="dropdown" aria-expanded="false">
+                    <i class="material-symbols-rounded opacity-6 me-2 text-md">article</i>
+                    Displays
+                    <img src="{% static "img/down-arrow-dark.svg" %}" alt="down-arrow" class="arrow ms-auto ms-md-2">
+                  </a>
+                  <ul
+                    class="dropdown-menu dropdown-menu-end dropdown-menu-animation dropdown-md dropdown-md-responsive mt-0 mt-lg-3 p-3 border-radius-lg"
+                    aria-labelledby="dropdownMenuDocs">
+                    <div class="d-none d-lg-block">
+
+                      <ul class="list-group">
+                        {% for i in "x"|ljust:active_round_change_lanes %}
+                        <li class="nav-item list-group-item border-0 p-0">
+                          <a class="dropdown-item py-2 ps-3 border-radius-md"
+                            href="/pitlane/{{ forloop.counter }}">
+                            <h6
+                              class="dropdown-header text-dark font-weight-bolder d-flex justify-content-cente align-items-center p-0">
+                              Pit Lane {{ forloop.counter }}</h6>
+                            <span class="text-sm">Check current status of Pit Lane {{ forloop.counter }}.</span>
+                          </a>
+                        </li>
+                        {% endfor %}
+                        <li class="nav-item list-group-item border-0 p-0">
+                          <a class="dropdown-item py-2 ps-3 border-radius-md"
+                            href="/all_pitlanes/">
+                            <h6
+                              class="dropdown-header text-dark font-weight-bolder d-flex justify-content-cente align-items-center p-0">
+                              All Pit Lanes</h6>
+                            <span class="text-sm">View all pit lanes at once in a combined view.</span>
+                          </a>
+                        </li>
+                        <li class="nav-item list-group-item border-0 p-0">
+                          <a class="dropdown-item py-2 ps-3 border-radius-md"
+                            href="/changedriver/">
+                            <h6
+                              class="dropdown-header text-dark font-weight-bolder d-flex justify-content-cente align-items-center p-0">
+                              Driver Change</h6>
+                            <span class="text-sm">Call driver change.</span>
+                          </a>
+                        </li>
+                        <li class="nav-item list-group-item border-0 p-0">
+                          <a class="dropdown-item py-2 ps-3 border-radius-md"
+                            href="/teamcarousel/">
+                            <h6
+                              class="dropdown-header text-dark font-weight-bolder d-flex justify-content-cente align-items-center p-0">
+                              Team Carousel</h6>
+                            <span class="text-sm">Display all team status sequentially.</span>
+                          </a>
+                        </li>
+                        <li class="nav-item list-group-item border-0 p-0">
+                          <a class="dropdown-item py-2 ps-3 border-radius-md"
+                            href="/pending_drivers/">
+                            <h6
+                              class="dropdown-header text-dark font-weight-bolder d-flex justify-content-cente align-items-center p-0">
+                              Driver Queue</h6>
+                            <span class="text-sm">Display driver queue status.</span>
+                          </a>
+                        </li>
+                      </ul>
+                    </div>
+                  </ul>
+                </li>
+                {% endif %}
+                <li class="nav-item dropdown dropdown-hover mx-2">
+                  <a class="nav-link ps-2 d-flex cursor-pointer align-items-center font-weight-semibold"
+                    id="dropdownMenuDocs" data-bs-toggle="dropdown" aria-expanded="false">
+                    <i class="material-symbols-rounded opacity-6 me-2 text-md">article</i>
+                    Rounds
+                    <img src="{% static "img/down-arrow-dark.svg" %}" alt="down-arrow" class="arrow ms-auto ms-md-2">
+                  </a>
+                  <ul
+                    class="dropdown-menu dropdown-menu-end dropdown-menu-animation dropdown-md dropdown-md-responsive mt-0 mt-lg-3 p-3 border-radius-lg"
+                    aria-labelledby="dropdownMenuDocs">
+                    <div class="d-none d-lg-block">
+
+                      <ul class="list-group">
+                        <li class="nav-item list-group-item border-0 p-0">
+                          <a class="dropdown-item py-2 ps-3 border-radius-md"
+                            href="/round_info/">
+                            <h6
+                              class="dropdown-header text-dark font-weight-bolder d-flex justify-content-cente align-items-center p-0">
+                              Round Info</h6>
+                            <span class="text-sm">Information about rounds.</span>
+                          </a>
+                        </li>
+                        <li class="nav-item list-group-item border-0 p-0">
+                          <a class="dropdown-item py-2 ps-3 border-radius-md"
+                            href="/round_penalties/">
+                            <h6
+                              class="dropdown-header text-dark font-weight-bolder d-flex justify-content-cente align-items-center p-0">
+                              Round Penalties</h6>
+                            <span class="text-sm">View penalties assigned in rounds.</span>
+                          </a>
+                        </li>
+                      </ul>
+                    </div>
+                  </ul>
+                </li>
+                {% if request.user.is_authenticated %}
+                <li class="nav-item ms-lg-auto">
+                    <form method="post" action="{% url 'logout' %}" style="display: inline;">
+                        {% csrf_token %}
+                        <button type="submit" class="nav-link nav-link-icon me-2" style="background: none; border: none; padding: 0; cursor: pointer; color: inherit; font: inherit; text-align: left; text-decoration: none; -webkit-appearance: none; -moz-appearance: none; appearance: none; font-weight: 600; line-height: inherit; height: 100%; ">
+                            <i class="fa fa-sign-out me-1" style="color: #262626;"></i>
+                            <p class="d-inline text-sm z-index-1 font-weight-semibold" data-bs-toggle="tooltip"
+                              data-bs-placement="bottom" title="Logout" style="color: #262626;">Logout</p>
+                        </button>
+                    </form>
+                </li>
+                {% else %}
+                <li class="nav-item ms-lg-auto">
+                    <a class="nav-link nav-link-icon me-2" href="{% url 'login' %}">
+                        <i class="fa fa-sign-in me-1"></i>
+                        <p class="d-inline text-sm z-index-1 font-weight-semibold" data-bs-toggle="tooltip"
+                          data-bs-placement="bottom" title="Login">Login</p>
+                    </a>
+                </li>
+                {% endif %}
+              </ul>
+            </div>
+          </div>
+        </nav>
+        <!-- End Navbar -->
+      </div>
+    </div>
+</div>

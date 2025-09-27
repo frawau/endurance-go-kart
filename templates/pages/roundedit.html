@@ -1,0 +1,236 @@
+{% extends 'layout/content.html' %}
+{% load static %}
+
+{% block main_content %}
+<div class="container py-5">
+    <div class="row justify-content-center">
+        <div class="col-md-10">
+            <div class="card">
+                <div class="card-header bg-primary text-white">
+                    <h4>Manage Round</h4>
+                    {% if championship %}
+                        <p class="mb-0">Championship: {{ championship.name }}</p>
+                    {% endif %}
+                </div>
+                <div class="card-body">
+                    <!-- Round Selection -->
+                    <form method="get" class="mb-4">
+                        <div class="row">
+                            <div class="col-md-8">
+                                <div class="form-group">
+                                    <label for="round-select" class="form-label">Select Round</label>
+                                    <select id="round-select" name="round_id" class="form-control">
+                                        <option value="">-- Select a Round --</option>
+                                        {% for round in rounds %}
+                                            <option value="{{ round.id }}" {% if round.id == selected_round.id %}selected{% endif %}>{{ round.name }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="col-md-4 d-flex align-items-end">
+                                <button type="submit" class="btn btn-primary">Select Round</button>
+                            </div>
+                        </div>
+                    </form>
+
+                    <!-- Form container for round details -->
+                    <div id="round-form-container">
+                        {% if selected_round %}
+                            {% include "layout/roundedit.html" with round=selected_round %}
+                        {% else %}
+                            <div class="alert alert-info">Please select a round to edit its details.</div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // This function will be applied after form is loaded with HTMX
+    document.body.addEventListener('htmx:afterSwap', function() {
+        if (document.getElementById('weight-penalty-container')) {
+            initWeightPenaltyWidget();
+        }
+    });
+
+    function shouldRenderSorted(pairs) {
+        if (!pairs.length) return false;
+
+        let hasPositive = false;
+
+        for (const [weight, penalty] of pairs) {
+            if (
+                weight === '' || penalty === '' ||
+                isNaN(weight) || isNaN(penalty)
+            ) {
+                return false; // missing or invalid values
+            }
+
+            if (parseFloat(weight) > 0 || parseFloat(penalty) > 0) {
+                hasPositive = true;
+            } else {
+                hasPositive = false;
+            }
+        }
+
+        return hasPositive;
+    }
+
+    function collectPairs(pairsContainer) {
+        const pairs = [];
+        pairsContainer.querySelectorAll('.weight-pair-row').forEach(row => {
+            const weightValue = row.querySelector('.weight-value')?.value;
+            const penaltyValue = row.querySelector('.penalty-value')?.value;
+
+            // if (weightValue !== '' && penaltyValue !== '') {
+            pairs.push([parseFloat(weightValue), parseFloat(penaltyValue)]);
+            // }
+        });
+        return pairs;
+    }
+
+    function initWeightPenaltyWidget() {
+        const container = document.getElementById('weight-penalty-container');
+        const operatorSelect = document.getElementById('weight-penalty-operator');
+        const pairsContainer = document.getElementById('weight-pairs-container');
+        const addButton = document.getElementById('add-weight-pair');
+        const hiddenInput = document.getElementById('id_weight_penalty');
+
+        // Set the initial JSON value
+        console.log("Input data: ", hiddenInput.value);
+        const weightPenaltyData = JSON.parse(hiddenInput.value || '[]');
+
+        // Add a new weight pair row
+        addButton.addEventListener('click', function() {
+            console.log("Add weight pair clicked");
+            addWeightPair();
+            updateHiddenField();
+        });
+
+        // Update hidden field when any value changes
+        container.addEventListener('change', function(e) {
+            updateHiddenField();
+
+            if (
+                e.target === operatorSelect ||
+                e.target.classList.contains('weight-value') ||
+                e.target.classList.contains('penalty-value')
+            ) {
+                const pairs = collectPairs(pairsContainer);
+                if (shouldRenderSorted(pairs)) {
+                    renderSortedPairs();
+                }
+            }
+        });
+
+        function addWeightPair(weight = '', penalty = '') {
+            const row = document.createElement('div');
+            row.className = 'weight-pair-row d-flex mb-2 align-items-center';
+
+            row.innerHTML = `
+                <div class="operator-display mx-2">${operatorSelect.value}</div>
+                <input type="number" step="0.5" class="form-control weight-value mr-2" value="${weight}" placeholder="Weight">
+                <div class="operator-display mx-2"><i class="fa-solid fa-arrow-right"></i></div>
+                <input type="number" step="0.5" class="form-control penalty-value ml-2" value="${penalty}" placeholder="Penalty">
+                <button type="button" class="btn btn-danger btn-sm ml-2 remove-pair">
+                <i class="fa-solid fa-trash fa-lg"></i>
+                </button>
+            `;
+
+            row.querySelector('.remove-pair').addEventListener('click', function() {
+                row.remove();
+                updateHiddenField();
+            });
+
+            pairsContainer.appendChild(row);
+        }
+
+        function updateOperatorDisplay() {
+            const operatorValue = operatorSelect.value;
+            document.querySelectorAll('.operator-display').forEach(element => {
+                if(!element.querySelector('i')) { // Skip arrow icons
+                    element.textContent = operatorValue;
+                }
+            });
+        }
+
+        operatorSelect.addEventListener('change', updateOperatorDisplay);
+
+
+        function updateHiddenField() {
+            const operator = operatorSelect.value;
+            const pairs = collectPairs(pairsContainer);
+
+            // Sort pairs based on operator
+            sortPairsByOperator(pairs, operator);
+
+            // Create the JSON structure
+            const weightPenaltyData = [operator, ...pairs];
+            hiddenInput.value = JSON.stringify(weightPenaltyData);
+        }
+
+        function sortPairsByOperator(pairs, operator) {
+            if ([">=", ">"].includes(operator)) {
+                // Sort pairs by weight in descending order
+                pairs.sort((a, b) => b[0] - a[0]);
+            } else {
+                // Sort pairs by weight in ascending order
+                pairs.sort((a, b) => a[0] - b[0]);
+            }
+            return pairs;
+        }
+
+        function renderSortedPairs() {
+            // Save current pairs
+            const pairs = collectPairs(pairsContainer);
+            const operator = operatorSelect.value;
+
+            // Sort them
+            sortPairsByOperator(pairs, operator);
+
+            // Clear container
+            pairsContainer.innerHTML = '';
+
+            // Re-render in sorted order
+            pairs.forEach(pair => {
+                addWeightPair(pair[0], pair[1]);
+            });
+        }
+
+        // Initialize from the data
+        function initializeFromData() {
+            // Clear existing pairs
+            pairsContainer.innerHTML = '';
+            console.log("Initialize weight penalty data:", weightPenaltyData);
+
+            if (Array.isArray(weightPenaltyData) && weightPenaltyData.length > 0) {
+                // Set the operator
+                if (typeof weightPenaltyData[0] === 'string') {
+                    operatorSelect.value = weightPenaltyData[0];
+                }
+                updateOperatorDisplay();
+
+                // Add pairs from the data
+                for (let i = 1; i < weightPenaltyData.length; i++) {
+                    if (Array.isArray(weightPenaltyData[i]) && weightPenaltyData[i].length === 2) {
+                        addWeightPair(weightPenaltyData[i][0], weightPenaltyData[i][1]);
+                    }
+                }
+            } else {
+                // Add one empty pair if no data
+                addWeightPair();
+            }
+
+            // Update the hidden input with the initialized data and sort the UI
+            updateHiddenField();
+        }
+
+        // Initialize the widget
+        initializeFromData();
+    }
+</script>
+{% endblock %}

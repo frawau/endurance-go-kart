@@ -1,0 +1,142 @@
+{% extends 'layout/content.html' %}
+{% load static %}
+
+{% block main_content %}
+<div class="container mt-5">
+    <div class="card">
+        <div class="card-header bg-primary text-white">
+            <h4>Add Team</h4>
+        </div>
+
+        <div class="card-body">
+            <form method="post" enctype="multipart/form-data">
+                {% csrf_token %}
+
+                {{ form.non_field_errors }}
+
+                {% for field in form %}
+                    <div class="form-group">
+                        {% if field.name == 'logo' %}
+                            <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                            <div id="drop-area" class="drop-area">
+                                <p>Drag & drop your image here or click to select</p>
+                                <div class="preview-container">
+                                    <img id="preview-image" src="#" alt="Preview" style="display: none; max-width: 200px;">
+                                </div>
+                                {{ field }}
+                            </div>
+                            {% if field.errors %}
+                                <div class="error">{{ field.errors }}</div>
+                            {% endif %}
+                        {% else %}
+                            <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                            {{ field }}
+                            {% if field.errors %}
+                                <div class="error">{{ field.errors }}</div>
+                            {% endif %}
+                        {% endif %}
+                    </div>
+                {% endfor %}
+
+                <button type="submit">Submit</button>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<style>
+    .drop-area {
+        border: 2px dashed #ccc;
+        border-radius: 8px;
+        padding: 20px;
+        text-align: center;
+        margin: 10px 0;
+        cursor: pointer;
+        transition: background-color 0.3s;
+    }
+    .drop-area.highlight {
+        background-color: #f0f0f0;
+        border-color: #999;
+    }
+    .file-input {
+        opacity: 0;
+        position: absolute;
+        width: 1px;
+        height: 1px;
+    }
+    .preview-container {
+        margin-top: 10px;
+    }
+</style>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const dropArea = document.getElementById('drop-area');
+        const fileInput = document.getElementById('logo-upload');
+        const previewImage = document.getElementById('preview-image');
+
+        // Prevent default drag behaviors
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropArea.addEventListener(eventName, preventDefaults, false);
+        });
+
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        // Highlight drop area when item is dragged over it
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropArea.addEventListener(eventName, highlight, false);
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropArea.addEventListener(eventName, unhighlight, false);
+        });
+
+        function highlight() {
+            dropArea.classList.add('highlight');
+        }
+
+        function unhighlight() {
+            dropArea.classList.remove('highlight');
+        }
+
+        // Handle dropped files
+        dropArea.addEventListener('drop', handleDrop, false);
+
+        function handleDrop(e) {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+            fileInput.files = files;
+
+            updatePreview(files[0]);
+        }
+
+        // Handle file selection via the file input
+        fileInput.addEventListener('change', function() {
+            if (this.files.length > 0) {
+                updatePreview(this.files[0]);
+            }
+        });
+
+        // Make the entire drop area clickable
+        dropArea.addEventListener('click', function() {
+            fileInput.click();
+        });
+
+        function updatePreview(file) {
+            if (file && file.type.startsWith('image/')) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    previewImage.src = e.target.result;
+                    previewImage.style.display = 'block';
+                };
+                reader.readAsDataURL(file);
+            }
+        }
+    });
+</script>
+{% endblock %}

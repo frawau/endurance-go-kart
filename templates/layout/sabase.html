@@ -1,0 +1,36 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title></title>
+    <link rel="stylesheet" href="{% static 'css/material-kit.min.css' %}">
+    <link href="{% static 'fontawesomefree/css/fontawesome.css' %}" rel="stylesheet" type="text/css">
+    <link href="{% static 'fontawesomefree/css/brands.css' %}" rel="stylesheet" type="text/css">
+    <link href="{% static 'fontawesomefree/css/solid.css' %}" rel="stylesheet" type="text/css">
+    <script src="https://unpkg.com/htmx.org@1.9.6"></script>
+    <style>
+        html, body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            background-image: url("{% static 'img/racebackground.png' %}");
+            background-repeat: repeat;
+            background-size: auto; /* Adjust as needed */
+            background-attachment: fixed; /* Optional: to make the background fixed */
+        }
+    </style>
+    <link rel="stylesheet" href="{% static 'css/timer-widget.css' %}">
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="{% static 'js/timer-widget.js' %}"></script>
+</head>
+</head>
+<body>
+    <div>
+        {% block content %}{% endblock %}
+    </div>
+    {% include "includes/scripts.html" %}
+    {% block extra_js %}{% endblock extra_js %}
+</body>
+</html>

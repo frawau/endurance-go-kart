@@ -1,0 +1,18 @@
+# Stop and Go Station Configuration
+# Command line arguments will override these values
+
+# Server connection settings
+server = "gokart.wautier.eu"
+port = 8000
+secure = false
+
+# GPIO pin configuration
+button = 18  # Physical pin 18 (GPIO24)
+fence = 24   # Physical pin 24 (GPIO8)
+
+# Logging level
+debug = false
+info = true
+
+# HMAC secret for message authentication
+hmac_secret = "race_control_hmac_key_2024"

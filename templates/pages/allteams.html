@@ -1,0 +1,102 @@
+{% extends 'layout/content.html' %}
+{% load static %}
+
+{% block main_content %}
+<div class="container mt-5">
+    <div class="card">
+        <div class="card-header bg-primary text-white">
+            <h4>All Teams</h4>
+        </div>
+        <div class="card-body">
+            <!-- Championship Selection -->
+            <form method="get" class="mb-4">
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label for="championship">Select Championship:</label>
+                            <select name="championship" id="championship" class="form-control" onchange="this.form.submit()">
+                                <option value="">Select a championship...</option>
+                                {% for championship in championships %}
+                                <option value="{{ championship.id }}" {% if selected_championship.id == championship.id %}selected{% endif %}>
+                                    {{ championship.name }}
+                                </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label for="search">Search:</label>
+                            <input type="text" id="search" class="form-control" placeholder="Type to search...">
+                        </div>
+                    </div>
+                </div>
+            </form>
+
+            {% if selected_championship %}
+            <div class="table-responsive">
+                <table class="table table-striped">
+                    <thead>
+                        <tr>
+                            <th style="width: 80px;">Number</th>
+                            <th>Team Name</th>
+                            {% for round in rounds %}
+                            <th style="width: 60px; text-align: center;">{{ round.name }}</th>
+                            {% endfor %}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for team in teams %}
+                        <tr class="team-row">
+                            <td>
+                                {% for championship_team in team.championship_team_set.all %}
+                                {% if championship_team.championship_id == selected_championship.id %}
+                                {{ championship_team.number }}
+                                {% endif %}
+                                {% endfor %}
+                            </td>
+                            <td class="team-name">{{ team.name }}</td>
+                            {% for round in rounds %}
+                            <td class="text-center">
+                                {% for championship_team in team.championship_team_set.all %}
+                                {% for round_team in championship_team.round_team_set.all %}
+                                {% if round_team.round_id == round.id %}
+                                <i class="fas fa-check text-success"></i>
+                                {% endif %}
+                                {% endfor %}
+                                {% endfor %}
+                            </td>
+                            {% endfor %}
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const searchInput = document.getElementById('search');
+    const rows = document.querySelectorAll('.team-row');
+
+    searchInput.addEventListener('input', function() {
+        const searchTerm = this.value.toLowerCase();
+        
+        rows.forEach(row => {
+            const teamName = row.querySelector('.team-name').textContent.toLowerCase();
+            
+            if (teamName.includes(searchTerm)) {
+                row.style.display = '';
+            } else {
+                row.style.display = 'none';
+            }
+        });
+    });
+});
+</script>
+{% endblock %} 

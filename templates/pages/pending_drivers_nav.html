@@ -1,0 +1,347 @@
+{% extends "layout/content.html" %}
+{% load timer_tags %}
+{% load static %}
+
+{% block extra_style %}
+/* Timer widget CSS */
+<link rel="stylesheet" href="{% static 'css/timer-widget.css' %}">
+
+/* White background wrapper for header and content */
+.content-wrapper {
+    background-color: white !important;
+    padding: 2rem !important;
+    border-radius: 0.5rem !important;
+    margin-bottom: 2rem !important;
+}
+
+/* Ensure header has white background and is readable */
+.content-wrapper h2 {
+    background-color: white !important;
+    padding: 0.5rem !important;
+    margin-bottom: 1rem !important;
+    border-radius: 0.25rem !important;
+}
+
+/* Ensure table uses full container width */
+.table-responsive {
+    width: 100%;
+}
+
+.pending-table {
+    width: 100%;
+    font-size: 2rem;
+    border-collapse: collapse;
+    background-color: white !important;
+    table-layout: fixed;
+}
+
+.pending-table th,
+.pending-table td {
+    border: 8px solid #ddd;
+    padding: 12px;
+    text-align: center;
+    font-weight: bold;
+    color: #333;
+    background-color: white !important;
+}
+
+.pending-table th:nth-child(1),
+.pending-table td:nth-child(1) {
+    width: 25%;
+}
+
+.pending-table th:nth-child(2),
+.pending-table td:nth-child(2) {
+    width: 50%;
+}
+
+.pending-table th:nth-child(3),
+.pending-table td:nth-child(3) {
+    width: 25%;
+}
+
+.pending-row {
+    transition: background-color 0.5s ease;
+}
+
+.pending-row.highlight {
+    background-color: rgba(255, 255, 0, 0.3);
+}
+
+.pending-row.removing {
+    background-color: rgba(255, 0, 0, 0.3);
+    opacity: 0;
+    transition: background-color 0.5s ease, opacity 1s ease;
+}
+
+@media (max-width: 768px) {
+    .pending-table {
+        font-size: 1.5rem;
+    }
+    .pending-table th,
+    .pending-table td {
+        padding: 8px;
+        border: 6px solid #ddd;
+    }
+}
+{% endblock extra_style %}
+
+{% block main_content %}
+<div class="container">
+    {% if round is None %}
+        <h2>No race today.</h2>
+    {% else %}
+        <div class="content-wrapper">
+            <div class="row mb-4">
+                <div class="col-12 text-left">
+                    <h2>Remaining Time: {% timer_widget "race-countdown" "countdownDisplay" round %}&nbsp;&nbsp;&nbsp;Waiting Drivers: <span id="pending-drivers-count">{{ pending_sessions|length }}</span></h2>
+                </div>
+            </div>
+
+            <div class="table-responsive">
+            <table class="pending-table" id="pending-sessions-table">
+                <thead>
+                    <tr>
+                        <th>Team Number</th>
+                        <th>Driver</th>
+                        <th>Next Change #</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for session in pending_sessions %}
+                        <tr id="pending-row-{{ session.driver.team.team.number }}-{{ session.driver.id }}"
+                            class="pending-row"
+                            data-driver-id="{{ session.driver.id }}"
+                            data-team-id="{{ session.driver.team.id }}"
+                            data-team-number="{{ session.driver.team.team.number }}">
+                            <td>{{ session.driver.team.team.number }}</td>
+                            <td>{{ session.driver.member.nickname }}</td>
+                            {% if round.started %}
+                                <td class="next-change-number">{{ session.team_completed_count|add:1 }}</td>
+                            {% else %}
+                                <td class="next-change-number">{{ session.team_completed_count }}</td>
+                            {% endif %}
+                            </tr>
+                        </tr>
+                    {% empty %}
+                        <tr id="no-sessions-row">
+                            <td colspan="3">No pending sessions</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            </div>
+        </div>
+    {% endif %}
+</div>
+{% endblock main_content %}
+
+{% block extra_js %}
+<script src="{% static 'js/timer-widget.js' %}"></script>
+{% if round is not None %}
+<script>
+let pendingDriversCount = {{ pending_sessions|length }};
+const pendingDriversCountElement = document.getElementById('pending-drivers-count');
+
+document.addEventListener('DOMContentLoaded', function() {
+    // Connect to WebSocket for round updates
+    const roundId = {{ round.id }};
+    let socket = null;
+    let reconnectAttempts = 0;
+    const maxReconnectAttempts = 50;
+    const reconnectDelay = 3000;
+
+    function connectWebSocket() {
+        const wsScheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
+        const wsPath = `${wsScheme}://${window.location.host}/ws/round/${roundId}/`;
+
+        if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
+            socket.close();
+        }
+
+        socket = new WebSocket(wsPath);
+
+        socket.onopen = function() {
+            console.log('WebSocket connection established');
+            reconnectAttempts = 0;
+        };
+
+        socket.onmessage = function(event) {
+            const data = JSON.parse(event.data);
+            console.log("WebSocket received:", data);
+
+            if (data.session_update) {
+                const driverId = data.driver_id;
+                const status = data.driver_status;
+                const completedSessions = data.completed_sessions;
+
+                // Update "Next Change #" for all rows of the same team
+                updateTeamNextChangeNumbers(driverId, completedSessions);
+
+                if (status === "register") {
+                    // A new session was registered - add a row
+                    addPendingDriverRow(driverId, data);
+                } else if (status === "start") {
+                    // A session was started - remove the row
+                    removePendingDriverRow(driverId);
+                }
+            } else {
+                const isPaused = data.is_paused;
+
+                // Handle countdown timer updates
+                if (data.remaining_seconds !== undefined && data.remaining_seconds !== null) {
+                    // Normal case - update all timers based on pause state
+                    timerRegistry.countdownTimers.forEach(timer => {
+                        timer.updateRemainingTime(data.remaining_seconds);
+                        timer.updatePauseState(isPaused);
+                    });
+                }
+            }
+        };
+
+        socket.onclose = function(event) {
+            if (event.wasClean) {
+                console.log(`WebSocket connection closed cleanly, code=${event.code}, reason=${event.reason}`);
+                return;
+            }
+            console.warn('WebSocket connection lost, attempting to reconnect...');
+            if (reconnectAttempts < maxReconnectAttempts) {
+                const delay = Math.min(reconnectDelay * Math.pow(1.5, reconnectAttempts), 30000);
+                reconnectAttempts++;
+                console.log(`Reconnecting in ${delay/1000} seconds... (attempt ${reconnectAttempts}/${maxReconnectAttempts})`);
+                setTimeout(connectWebSocket, delay);
+            } else {
+                console.error('Maximum reconnection attempts reached. Please refresh the page.');
+            }
+        };
+
+        socket.onerror = function(error) {
+            console.error('WebSocket error:', error);
+            if (reconnectAttempts < maxReconnectAttempts) {
+                const delay = Math.min(reconnectDelay * Math.pow(1.5, reconnectAttempts), 30000);
+                reconnectAttempts++;
+                console.log(`Reconnecting in ${delay/1000} seconds... (attempt ${reconnectAttempts}/${maxReconnectAttempts})`);
+                setTimeout(connectWebSocket, delay);
+            } else {
+                console.error('Maximum reconnection attempts reached after error. Please refresh the page.');
+            }
+        };
+    }
+
+    // Update "Next Change #" for all rows with the same team as the driver
+    function updateTeamNextChangeNumbers(driverId, completedSessions) {
+        // Find the driver's row to get the team
+        const driverRow = document.querySelector(`[data-driver-id="${driverId}"]`);
+        if (!driverRow) return;
+
+        const teamNumber = driverRow.getAttribute('data-team-number');
+        if (!teamNumber) return;
+
+        // Find all rows with the same team number
+        const teamRows = document.querySelectorAll(`[data-team-number="${teamNumber}"]`);
+        teamRows.forEach(row => {
+            const nextChangeCell = row.querySelector('.next-change-number');
+            if (nextChangeCell) {
+                nextChangeCell.textContent = completedSessions + 1;
+            }
+        });
+    }
+
+    // Add a new row for a registered session
+    function addPendingDriverRow(driverId, data) {
+        // Check if we already have this driver's row
+        if (document.querySelector(`[data-driver-id="${driverId}"]`)) {
+            return; // Row already exists
+        }
+
+        // We need to fetch some additional info from the server
+        fetch(`/api/driver/${driverId}/info/`)
+            .then(response => response.json())
+            .then(driverInfo => {
+                const tableBody = document.getElementById('pending-sessions-table').querySelector('tbody');
+
+                // Remove "No pending sessions" row if it exists
+                const noSessionsRow = document.getElementById('no-sessions-row');
+                if (noSessionsRow) {
+                    tableBody.removeChild(noSessionsRow);
+                }
+
+                // Create the new row
+                const newRow = document.createElement('tr');
+                newRow.id = `pending-row-${driverInfo.team_number}-${driverId}`;
+                newRow.className = 'pending-row highlight';
+                newRow.setAttribute('data-driver-id', driverId);
+                newRow.setAttribute('data-team-id', driverInfo.team_id);
+                newRow.setAttribute('data-team-number', driverInfo.team_number);
+
+                // Team number cell
+                const teamCell = document.createElement('td');
+                teamCell.textContent = driverInfo.team_number;
+                newRow.appendChild(teamCell);
+
+                // Driver nickname cell
+                const driverCell = document.createElement('td');
+                driverCell.textContent = driverInfo.nickname;
+                newRow.appendChild(driverCell);
+
+                // Next change number cell
+                const changeCell = document.createElement('td');
+                changeCell.className = 'next-change-number';
+                changeCell.textContent = data.completed_sessions + 1;
+                newRow.appendChild(changeCell);
+
+                tableBody.appendChild(newRow);
+
+                // Update the counter
+                pendingDriversCount++;
+                pendingDriversCountElement.textContent = pendingDriversCount;
+
+                // Remove highlight after a second
+                setTimeout(() => {
+                    newRow.classList.remove('highlight');
+                }, 1000);
+            })
+            .catch(error => {
+                console.error('Error fetching driver info:', error);
+            });
+    }
+
+    // Remove a row when a session is started
+    function removePendingDriverRow(driverId) {
+        const row = document.querySelector(`[data-driver-id="${driverId}"]`);
+        if (!row) return;
+
+        // Add the removing class for animation
+        row.classList.add('removing');
+
+        // Actually remove after animation completes
+        setTimeout(() => {
+            const tableBody = document.getElementById('pending-sessions-table').querySelector('tbody');
+            if (row.parentNode) {
+                tableBody.removeChild(row);
+                // Update the counter
+                pendingDriversCount--;
+                pendingDriversCountElement.textContent = pendingDriversCount;
+            }
+
+            // If no more rows, add the "No pending sessions" row
+            if (tableBody.children.length === 0) {
+                const noSessionsRow = document.createElement('tr');
+                noSessionsRow.id = 'no-sessions-row';
+
+                const noSessionsCell = document.createElement('td');
+                noSessionsCell.setAttribute('colspan', '3');
+                noSessionsCell.textContent = 'No waiting driver.';
+
+                noSessionsRow.appendChild(noSessionsCell);
+                tableBody.appendChild(noSessionsRow);
+            }
+        }, 1000); // Match the CSS transition time
+    }
+
+    // Initial connection
+    connectWebSocket();
+});
+</script>
+{% endif %}
+{% endblock extra_js %}

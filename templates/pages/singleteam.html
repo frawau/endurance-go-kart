@@ -1,0 +1,287 @@
+{% extends "layout/content.html" %}
+{% load timer_tags %}
+{% load static %}
+
+{% block extra_style %}
+/* Timer widget CSS */
+<link rel="stylesheet" href="{% static 'css/timer-widget.css' %}">
+
+/* Fix table background for navigation version */
+table, table th, table td {
+    background-color: white !important;
+}
+
+.card {
+    background-color: white !important;
+}
+
+/* White background wrapper for header and content */
+.content-wrapper {
+    background-color: white !important;
+    padding: 2rem;
+    border-radius: 0.5rem;
+    margin-bottom: 2rem;
+}
+
+/* Preserve timer color scheme */
+.timer {
+    color: #f59e0b !important; /* Orange color for inactive drivers (default) */
+}
+
+.timer.timer-active {
+    color: #000000 !important; /* Black color for active drivers */
+}
+
+.timer.timer-paused {
+    color: #f59e0b !important; /* Amber color for paused state */
+}
+
+.timer.timer-frozen {
+    color: #f59e0b !important; /* Amber color for paused state */
+}
+
+.timer.timer-ended {
+    color: #87cefa !important; /* Light blue color for ended state */
+}
+
+.timer.timer-over {
+    color: #ef4444 !important; /* Red color for over state */
+}
+
+@media (max-width: 768px) {
+    .card-title {
+        font-size: 2.5rem !important;
+    }
+    table {
+        font-size: 2rem !important;
+    }
+    th, td {
+        padding: 8px !important;
+        border: 6px solid #ddd !important;
+        background-color: white !important;
+    }
+    table thead tr th:nth-child(3),
+    table tbody tr td:nth-child(3) {
+        display: none;
+    }
+    table tbody tr td:nth-child(2) {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+    }
+    table tbody tr td:nth-child(2)::after{
+        content: attr(data-current-session);
+    }
+}
+
+.team-selection-container {
+    margin-bottom: 2rem;
+}
+
+/* Increase dropdown font size */
+.form-select {
+    font-size: 1.25rem !important;
+    height: auto !important;
+    padding: 0.75rem 1rem !important;
+}
+
+/* Make the dropdown text bold for better visibility */
+.form-select option {
+    font-size: 1.25rem !important;
+    font-weight: 500;
+}
+
+@media (max-width: 768px) {
+    .form-select, .form-select option {
+        font-size: 1.5rem !important;
+    }
+
+    .form-select {
+        padding: 1rem !important;
+    }
+}
+{% endblock extra_style %}
+
+{% block main_content %}
+<div class="container">
+    {% if round is None %}
+        <h2>Hu?</h2>
+        <div class="card" style="background-color: transparent;">
+            <div class="card-body">
+                <h1>No race today</h1>
+            </div>
+        </div>
+    {% else %}
+        <div class="content-wrapper">
+            <div class="row mb-4">
+                <div class="col-12 text-left">
+                    <h1>{{ round.name }}&nbsp;&nbsp;Remaining Time: {% timer_widget "race-countdown" "countdownDisplay" round %}</h1>
+                </div>
+            </div>
+
+            <div class="row mb-4 team-selection-container">
+            <div class="col-12">
+                <form method="post" class="form-inline team-selection-form">
+                    {% csrf_token %}
+                    <div class="form-group">
+                        <select name="team_id" class="form-select" id="team-select">
+                            <option value="">-- Select a Team --</option>
+                            {% for round_team in teams %}
+                                <option value="{{ round_team.id }}" {% if selected_team and selected_team.id == round_team.id %}selected{% endif %}>
+                                    {{ round_team.name }} ({{ round_team.number }})
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div id="teamDisplay">
+            {% if selected_team %}
+                {% with round_team=selected_team %}
+                    {% include "layout/teamcard.html" with round_team=round_team %}
+                {% endwith %}
+            {% else %}
+                <div class="alert alert-info">
+                    Please select a team to view details
+                </div>
+            {% endif %}
+        </div>
+        </div>
+    {% endif %}
+</div>
+{% endblock main_content %}
+
+{% block extra_js %}
+<script src="{% static 'js/timer-widget.js' %}"></script>
+{% if round is not None %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Handle team selection change
+    const teamSelect = document.getElementById('team-select');
+    if (teamSelect) {
+        teamSelect.addEventListener('change', function() {
+            // Submit the form when selection changes
+            this.form.submit();
+        });
+    }
+
+    // Connect to WebSocket for round updates
+    const roundId = {{ round.id }};
+    let socket = null;
+    let reconnectAttempts = 0;
+    const maxReconnectAttempts = 50;
+    const reconnectDelay = 3000;
+
+    function connectWebSocket() {
+        const wsScheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
+        const wsPath = `${wsScheme}://${window.location.host}/ws/round/${roundId}/`;
+
+        if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
+            socket.close();
+        }
+
+        socket = new WebSocket(wsPath);
+
+        socket.onopen = function() {
+            console.log('WebSocket connection established');
+            reconnectAttempts = 0;
+        };
+
+        socket.onmessage = function(event) {
+            const data = JSON.parse(event.data);
+            console.log("WebSocket received:", data);
+
+            if (data.session_update) {
+                // Handle driver session updates
+                console.log(`Handling session update for driver ${data.driver_id}, active: ${data.driver_active}, status ${data.driver_status}`);
+                const driverTimers = timerRegistry.byDriverId[data.driver_id];
+                const newOntrack = data.driver_status == "start";
+
+                // Update UI elements
+                const driverRow = document.getElementById(`driver-row-${data.driver_id}`);
+                if (driverRow) {
+                    driverRow.setAttribute('data-ontrack', newOntrack ? 'true' : 'false');
+                }
+
+                // Update timer widgets
+                if (driverTimers) {
+                    driverTimers.forEach(timer => {
+                        console.log(`Updating timer ${timer.element.id} (type: ${timer.timerType}) for driver ${data.driver_id}`);
+                        timer.handleSessionUpdate(data.driver_status, data.time_spent);
+                    });
+                } else {
+                    console.warn(`No timers found in registry for driver ${data.driver_id}`);
+                }
+
+                // Update the completed sessions count in header for the specific team
+                if ( newOntrack && driverRow && data.completed_sessions !== undefined) {
+                    let table = driverRow.closest('table');
+                    if (!table) return;
+                    // Find the header row in this table
+                    let headerRow = table.querySelector('thead tr');
+                    if (!headerRow) return;
+                    let changesHeader = headerRow.querySelector('th:first-child');
+                    if (changesHeader) {
+                        changesHeader.textContent = `${data.completed_sessions} Changes`;
+                    console.log(`Updated header to: ${data.completed_sessions} Changes`);
+                    }
+                }
+            } else {
+                const isPaused = data.is_paused;
+
+                // Handle countdown timer updates
+                if (data.remaining_seconds !== undefined && data.remaining_seconds !== null) {
+                    // Normal case - update all timers based on pause state
+                    timerRegistry.countdownTimers.forEach(timer => {
+                        timer.updateRemainingTime(data.remaining_seconds);
+                        timer.updatePauseState(isPaused);
+                    });
+
+                    // For all other timers, update based on round state
+                    // Only update non-session timers here
+                    timerRegistry.allTimers
+                        .filter(timer => ['sessiontime', 'totaltime'].includes(timer.timerType))
+                        .forEach(timer => {
+                            timer.updatePauseState(isPaused);
+                        });
+                }
+            }
+        };
+
+        socket.onclose = function(event) {
+            if (event.wasClean) {
+                console.log(`WebSocket connection closed cleanly, code=${event.code}, reason=${event.reason}`);
+                return;
+            }
+            console.warn('WebSocket connection lost, attempting to reconnect...');
+            if (reconnectAttempts < maxReconnectAttempts) {
+                const delay = Math.min(reconnectDelay * Math.pow(1.5, reconnectAttempts), 30000);
+                reconnectAttempts++;
+                console.log(`Reconnecting in ${delay/1000} seconds... (attempt ${reconnectAttempts}/${maxReconnectAttempts})`);
+                setTimeout(connectWebSocket, delay);
+            } else {
+                console.error('Maximum reconnection attempts reached. Please refresh the page.');
+            }
+        };
+
+        socket.onerror = function(error) {
+            console.error('WebSocket error:', error);
+            if (reconnectAttempts < maxReconnectAttempts) {
+                const delay = Math.min(reconnectDelay * Math.pow(1.5, reconnectAttempts), 30000);
+                reconnectAttempts++;
+                console.log(`Reconnecting in ${delay/1000} seconds... (attempt ${reconnectAttempts}/${maxReconnectAttempts})`);
+                setTimeout(connectWebSocket, delay);
+            } else {
+                console.error('Maximum reconnection attempts reached after error. Please refresh the page.');
+            }
+        };
+    }
+
+    // Initial connection
+    connectWebSocket();
+});
+</script>
+{% endif %}
+{% endblock extra_js %}

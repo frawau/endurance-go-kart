@@ -1,0 +1,220 @@
+{% extends "layout/fscontent.html" %}
+{% load timer_tags %}
+
+{% block extra_style %}
+@media (max-width: 768px) {
+    .card-title {
+        font-size: 2.5rem !important;
+    }
+    table {
+        font-size: 2rem !important;
+    }
+    th, td {
+        padding: 8px !important;
+        border: 6px solid #ddd !important;
+    }
+    table thead tr th:nth-child(3),
+    table tbody tr td:nth-child(3) {
+        display: none;
+    }
+    table tbody tr td:nth-child(2) {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+    }
+    table tbody tr td:nth-child(2)::after{
+        content: attr(data-current-session);
+    }
+}
+{% endblock extra_style %}
+
+{% block main_content %}
+<div class="container-fluid">
+    {% if round is None %}
+        <h2>Hu?</h2>
+        <div id="teamCarousel" class="carousel slide" data-ride="carousel">
+            <div class="carousel-inner">
+                <div class="carousel-item active">
+                    <div class="card" style="background-color: transparent;">
+                        <div class="card-body">
+                            <h1>No race today</h1>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    {% else %}
+        <div class="row mb-4">
+            <div class="col-12 text-left">
+                <h1>{{ round.name }}&nbsp;&nbsp;Remaining Time: {% timer_widget "race-countdown" "countdownDisplay" round %}</h1>
+            </div>
+        </div>
+
+        <div id="teamCarousel" class="carousel slide" data-bs-ride="carousel" data-bs-interval="10000">
+            <div class="carousel-inner">
+                {% for round_team in teams_with_limits %}
+                    <div class="carousel-item {% if forloop.first %}active{% endif %}" id="team-slide-{{ round_team.id }}">
+                        {% include "layout/teamcard.html" with round_team=round_team %}
+                    </div>
+                {% endfor %}
+            </div>
+
+            <button class="carousel-control-prev" type="button" data-bs-target="#teamCarousel" data-bs-slide="prev">
+                <span class="carousel-control-prev-icon" aria-hidden="true"></span>
+                <span class="visually-hidden">Previous</span>
+            </button>
+            <button class="carousel-control-next" type="button" data-bs-target="#teamCarousel" data-bs-slide="next">
+                <span class="carousel-control-next-icon" aria-hidden="true"></span>
+                <span class="visually-hidden">Next</span>
+            </button>
+        </div>
+    {% endif %}
+</div>
+{% endblock main_content %}
+
+{% block extra_js %}
+{% if round is not None %}
+<script>
+// Add this to your extra_js block in teamcarousel.html
+document.addEventListener('DOMContentLoaded', function() {
+    // Initialize Bootstrap Carousel
+    const carousel = document.getElementById('teamCarousel');
+    if (carousel) {
+        // Check if we're using Bootstrap 5
+        if (typeof bootstrap !== 'undefined') {
+            // Bootstrap 5
+            const carouselInstance = new bootstrap.Carousel(carousel, {
+                interval: 5000, // 5 seconds between slides
+                wrap: true,     // Cycle continuously
+                pause: false    // Don't pause on hover
+            });
+        } else {
+            // Bootstrap 4 (fallback)
+            $(carousel).carousel({
+                interval: {{ display_timeout|default:5 }} * 1000,
+                wrap: true,
+                pause: false
+            });
+        }
+    }
+
+    // Connect to WebSocket for round updates
+    const roundId = {{ round.id }};
+    let socket = null;
+    let reconnectAttempts = 0;
+    const maxReconnectAttempts = 50;
+    const reconnectDelay = 3000;
+
+    function connectWebSocket() {
+        const wsScheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
+        const wsPath = `${wsScheme}://${window.location.host}/ws/round/${roundId}/`;
+
+        if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
+            socket.close();
+        }
+
+        socket = new WebSocket(wsPath);
+
+        socket.onopen = function() {
+            console.log('WebSocket connection established');
+            reconnectAttempts = 0;
+        };
+
+        socket.onmessage = function(event) {
+            const data = JSON.parse(event.data);
+            console.log("WebSocket received:", data);
+
+            if (data.session_update) {
+                // Handle driver session updates
+                console.log(`Handling session update for driver ${data.driver_id}, active: ${data.driver_active}, status ${data.driver_status}`);
+                const driverTimers = timerRegistry.byDriverId[data.driver_id];
+                const newOntrack = data.driver_status == "start";
+
+                // Update UI elements
+                const driverRow = document.getElementById(`driver-row-${data.driver_id}`);
+                if (driverRow) {
+                    driverRow.setAttribute('data-ontrack', newOntrack ? 'true' : 'false');
+                }
+
+                // Update timer widgets
+                if (driverTimers) {
+                    driverTimers.forEach(timer => {
+                        console.log(`Updating timer ${timer.element.id} (type: ${timer.timerType}) for driver ${data.driver_id}`);
+                        timer.handleSessionUpdate(data.driver_status, data.time_spent);
+                        });
+                } else {
+                    console.warn(`No timers found in registry for driver ${data.driver_id}`);
+                }
+
+                // Update the completed sessions count in header for the specific team
+                if ( newOntrack && driverRow && data.completed_sessions !== undefined) {
+                    let table = driverRow.closest('table');
+                    if (!table) return;
+                    // Find the header row in this table
+                    let headerRow = table.querySelector('thead tr');
+                    if (!headerRow) return;
+                    let changesHeader = headerRow.querySelector('th:first-child');
+                    if (changesHeader) {
+                        const completedSessions = Math.max(0, parseInt(data.completed_sessions) || 0);
+                        changesHeader.textContent = `${completedSessions} Changes`;
+                    console.log(`Updated header to: ${completedSessions} Changes`);
+                    }
+                }
+
+            } else {
+                const isPaused = data.is_paused;
+
+                // Handle countdown timer updates
+                if (data.remaining_seconds !== undefined && data.remaining_seconds !== null) {
+                    // Normal case - update all timers based on pause state
+                    timerRegistry.countdownTimers.forEach(timer => {
+                        timer.updateRemainingTime(data.remaining_seconds);
+                        timer.updatePauseState(isPaused);
+                    });
+
+                    // For all other timers, update based on round state
+                    // Only update non-session timers here
+                    timerRegistry.allTimers
+                        .filter(timer => ['sessiontime', 'totaltime'].includes(timer.timerType))
+                        .forEach(timer => {
+                            timer.updatePauseState(isPaused);
+                        });
+                }
+            }
+        };
+
+        socket.onclose = function(event) {
+            if (event.wasClean) {
+                console.log(`WebSocket connection closed cleanly, code=${event.code}, reason=${event.reason}`);
+                return;
+            }
+            console.warn('WebSocket connection lost, attempting to reconnect...');
+            if (reconnectAttempts < maxReconnectAttempts) {
+                const delay = Math.min(reconnectDelay * Math.pow(1.5, reconnectAttempts), 30000);
+                reconnectAttempts++;
+                console.log(`Reconnecting in ${delay/1000} seconds... (attempt ${reconnectAttempts}/${maxReconnectAttempts})`);
+                setTimeout(connectWebSocket, delay);
+            } else {
+                console.error('Maximum reconnection attempts reached. Please refresh the page.');
+            }
+        };
+
+        socket.onerror = function(error) {
+            console.error('WebSocket error:', error);
+            if (reconnectAttempts < maxReconnectAttempts) {
+                const delay = Math.min(reconnectDelay * Math.pow(1.5, reconnectAttempts), 30000);
+                reconnectAttempts++;
+                console.log(`Reconnecting in ${delay/1000} seconds... (attempt ${reconnectAttempts}/${maxReconnectAttempts})`);
+                setTimeout(connectWebSocket, delay);
+            } else {
+                console.error('Maximum reconnection attempts reached after error. Please refresh the page.');
+            }
+        };
+    }
+
+    // Initial connection
+    connectWebSocket();
+});
+</script>
+{% endif %}
+{% endblock extra_js %}

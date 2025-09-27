@@ -1,0 +1,157 @@
+{% extends 'layout/content.html' %}
+{% load static %}
+
+{% block main_content %}
+<div class="container mt-5">
+    <div class="card">
+        <div class="card-header bg-primary text-white">
+            <h4>Team Members Viewer</h4>
+            <p class="mb-0">Current Round: {{ current_round.name }} ({{ current_round.championship.name }})</p>
+        </div>
+
+        <div class="card-body">
+            <!-- Team Selection Form -->
+            <form method="post" class="mb-4">
+                {% csrf_token %}
+                <input type="hidden" name="select_team" value="1">
+                <div class="row">
+                    <div class="col-md-8">
+                        <div class="form-group">
+                            {{ team_form.team.label_tag }}
+                            {{ team_form.team }}
+                        </div>
+                    </div>
+                    <div class="col-md-4 d-flex align-items-end">
+                        <button type="submit" class="btn btn-primary">Select Team</button>
+                    </div>
+                </div>
+            </form>
+
+            {% if selected_team %}
+            <hr>
+            <h5>Team: {{ selected_team.team.name }} ({{ selected_team.number }})</h5>
+
+            <!-- Members List -->
+            <div class="table-responsive">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Member</th>
+                            <th>Driver</th>
+                            <th>Manager</th>
+                            <th>Weight</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for data in member_data %}
+                        <tr>
+                            <td>
+                                {{ data.member.member.nickname }} ({{ data.member.member.firstname }} {{ data.member.member.surname }})
+                            </td>
+                            <td class="text-center">
+                                {% if data.member.driver %}
+                                <i class="fa-solid fa-check text-success"></i>
+                                {% else %}
+                                <i class="fa-solid fa-times text-danger"></i>
+                                {% endif %}
+                            </td>
+                            <td class="text-center">
+                                {% if data.member.manager %}
+                                <i class="fa-solid fa-check text-success"></i>
+                                {% else %}
+                                <i class="fa-solid fa-times text-danger"></i>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {{ data.member.weight }}
+                            </td>
+                            <td>
+                                <button type="button" class="btn btn-info btn-sm print-btn" data-member="{{ data.member.id }}">
+                                    <i class="fa-solid fa-print"></i> Print
+                                </button>
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="5" class="text-center">No members in this team yet.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Print Cards Form -->
+            <form id="printCardsForm" action="{% url 'generate_cards' %}" method="post" target="_blank" class="mt-4">
+                {% csrf_token %}
+                <input type="hidden" name="round_team_id" value="{{ round_team_obj.id }}">
+                <button type="submit" class="btn btn-info">
+                    <i class="fa-solid fa-print"></i> Print Cards
+                </button>
+            </form>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<style>
+/* Fix font awesome icon spacing */
+.fa-check, .fa-times {
+    font-size: 1.25rem;
+}
+
+.fa-print {
+    font-size: 1rem;
+    vertical-align: middle;
+}
+</style>
+
+<script>
+document.querySelectorAll('.print-btn').forEach(btn => {
+    btn.addEventListener('click', function() {
+        const memberId = this.getAttribute('data-member');
+        const csrfToken = document.querySelector('input[name="csrfmiddlewaretoken"]').value;
+        
+        fetch('{% url "generate_cards" %}', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': csrfToken
+            },
+            body: JSON.stringify({
+                member_id: memberId
+            })
+        })
+        .then(response => response.blob())
+        .then(blob => {
+            const url = URL.createObjectURL(blob);
+            window.open(url, '_blank').focus();
+        });
+    });
+});
+
+document.getElementById('printCardsForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+    const formData = new FormData(this);
+    const data = {
+        round_team_id: formData.get('round_team_id')
+    };
+
+    fetch(this.action, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': formData.get('csrfmiddlewaretoken')
+        },
+        body: JSON.stringify(data)
+    })
+    .then(response => response.blob())
+    .then(blob => {
+        const url = URL.createObjectURL(blob);
+        window.open(url, '_blank').focus();
+    });
+});
+</script>
+{% endblock %} 

@@ -1,0 +1,31 @@
+[Unit]
+Description=Go-Kart Race Control Django Application
+After=network.target postgresql.service
+Requires=network.target
+
+[Service]
+Type=exec
+User=__USER__
+Group=__GROUP__
+WorkingDirectory=__WORKDIR__
+Environment=PATH=__WORKDIR__/venv/bin
+Environment=DJANGO_SETTINGS_MODULE=core.settings
+ExecStart=__WORKDIR__/venv/bin/python manage.py runserver 127.0.0.1:8000
+ExecReload=/bin/kill -s HUP $MAINPID
+KillMode=mixed
+TimeoutStopSec=5
+PrivateTmp=true
+Restart=on-failure
+RestartSec=10
+
+# Security settings
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=__WORKDIR__
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+
+[Install]
+WantedBy=multi-user.target

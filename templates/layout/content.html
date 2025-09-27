@@ -1,0 +1,21 @@
+{% extends "layout/base.html" %}
+{% load static %}
+
+{% block body %}index-page bg-gray-200{% endblock body %}
+
+{% block content %}
+
+<div class="container">
+<br />
+<br />
+<br />
+<br />
+<div class="d-flex {% if organiser_logo %}justify-content-between{% else %}justify-content-end{% endif %} align-items-center" style="height: 80px;">
+    {% if organiser_logo %}
+    <img src="{{ organiser_logo.image.url }}" class="img-fluid" alt="{{ organiser_logo.name }}" style="height: 80px; width: auto;">
+    {% endif %}
+    <img src="{% static 'logos/gokartrace-logo.svg' %}" class="img-fluid" alt="GoKartRace" style="height: 80px; width: auto;">
+</div>
+</div>
+{% block main_content %} {% endblock main_content %}
+{% endblock content %}
