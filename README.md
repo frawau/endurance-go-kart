@@ -62,8 +62,8 @@ A comprehensive Django-based management system for endurance go-kart races and c
 
 ```bash
 # Clone the repository
-git clone https://github.com/frawau/gokartrace.git
-cd gokartrace
+git clone https://github.com/frawau/endurance-go-kart.git
+cd endurance-go-kart
 
 # Create virtual environment
 python -m venv env
