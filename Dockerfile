@@ -33,6 +33,7 @@ RUN fc-cache -fv
 # Set UP
 RUN python manage.py makemigrations
 RUN python manage.py migrate
+RUN python manage.py essentialdb
 RUN python manage.py collectstatic --no-input
 
 #__API_GENERATOR__
