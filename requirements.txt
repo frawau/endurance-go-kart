@@ -16,6 +16,7 @@ django-admin-material-dashboard
 django_countries
 channels
 channels-redis
+daphne
 asgiref
 pillow
 faker
