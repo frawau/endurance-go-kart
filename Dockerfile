@@ -31,9 +31,9 @@ RUN mkdir -p static/flags static/logos
 RUN fc-cache -fv
 
 # Set UP
-RUN python manage.py collectstatic --no-input
 RUN python manage.py makemigrations
 RUN python manage.py migrate
+RUN python manage.py collectstatic --no-input
 
 #__API_GENERATOR__
 RUN python manage.py generate-api -f
