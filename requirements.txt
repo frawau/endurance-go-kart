@@ -16,7 +16,7 @@ django-admin-material-dashboard
 django_countries
 channels
 channels-redis
-daphne
+uvicorn[standard]
 asgiref
 pillow
 faker
@@ -24,3 +24,4 @@ langdetect
 requests
 djangorestframework
 netifaces
+django-advanced-filters

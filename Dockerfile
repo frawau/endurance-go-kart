@@ -41,4 +41,4 @@ RUN python manage.py generate-api -f
 
 # Start Server
 EXPOSE 5005
-CMD ["gunicorn", "--config", "gunicorn-cfg.py", "core.wsgi"]
+CMD ["uvicorn", "core.asgi:application", "--host", "0.0.0.0", "--port", "5005", "--workers", "1"]

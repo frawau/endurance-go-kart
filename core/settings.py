@@ -66,7 +66,6 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "channels",
-    "daphne",
     "race",
     "django.contrib.staticfiles",
     "theme_material_kit",
