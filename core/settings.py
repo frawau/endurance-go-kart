@@ -26,7 +26,8 @@ STOPANDGO_HMAC_SECRET = os.environ.get(
 )
 
 DEBUG = os.environ.get("DEBUG", True)
-APP_DOMAIN = os.getenv("APP_DOMAIN", "gokart.wautier.eu")
+APP_DOMAIN = os.getenv("APP_DOMAIN", "albi.wautier.eu")
+APP_PORT = os.getenv("APP_PORT", "5085")
 
 # HOSTs List
 ALLOWED_HOSTS = [
@@ -46,8 +47,8 @@ CSRF_TRUSTED_ORIGINS = [
     "http://127.0.0.1:5085",
     f"http://{APP_DOMAIN}",
     f"https://{APP_DOMAIN}",
-    f"http://{APP_DOMAIN}:8000",
-    f"https://{APP_DOMAIN}:8000",
+    f"http://{APP_DOMAIN}:{APP_PORT}",
+    f"https://{APP_DOMAIN}:{APP_PORT}",
 ]
 
 RENDER_EXTERNAL_HOSTNAME = os.environ.get("RENDER_EXTERNAL_HOSTNAME")
@@ -182,7 +183,7 @@ USE_TZ = False
 # https://docs.djangoproject.com/en/4.1/howto/static-files/
 
 STATIC_URL = "/static/"
-STATIC_ROOT = BASE_DIR
+STATIC_ROOT = os.path.join(BASE_DIR, "collected_static") if not DEBUG else BASE_DIR
 
 STATICFILES_DIRS = (os.path.join(BASE_DIR, "static"),)
 
