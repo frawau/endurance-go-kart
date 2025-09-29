@@ -10,12 +10,10 @@ class RaceConfig(AppConfig):
         import race.signals
         import sys
 
-        # Only run in main thread and not in reloader thread or during migrations/management commands
+        # Only run in main thread and not in reloader thread or during migrations
         if (threading.current_thread() == threading.main_thread()
             and 'migrate' not in sys.argv
-            and 'makemigrations' not in sys.argv
-            and 'collectstatic' not in sys.argv
-            and 'essentialdb' not in sys.argv):
+            and 'makemigrations' not in sys.argv):
             # Use a slightly delayed start to avoid DB access during initialization
             def delayed_start():
                 import time
