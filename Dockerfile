@@ -3,6 +3,7 @@ FROM python:3.12
 # set environment variables
 ENV PYTHONDONTWRITEBYTECODE 1
 ENV PYTHONUNBUFFERED 1
+ENV DJANGO_SETTINGS_MODULE core.settings
 
 # Install system dependencies for fonts and other packages
 RUN apt-get update && apt-get install -y \
