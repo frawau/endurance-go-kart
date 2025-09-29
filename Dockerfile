@@ -22,11 +22,11 @@ RUN pip install --no-cache-dir -r requirements.txt --root-user-action=ignore
 
 COPY . .
 
-# Install assets (fonts and flags)
-RUN python3 install_assets.py
-
 # Create static directories
 RUN mkdir -p static/flags static/logos
+
+# Install assets (fonts and flags)
+RUN python3 install_assets.py
 
 # Update font cache
 RUN fc-cache -fv
