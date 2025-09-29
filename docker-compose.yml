@@ -8,7 +8,7 @@ services:
     environment:
       - DEBUG=False
     volumes:
-      - static_volume:/app/static
+      - static_volume:/static
     networks:
       - db_network
       - web_network
