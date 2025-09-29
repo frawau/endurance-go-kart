@@ -1,3 +1,5 @@
+volumes:
+  static_volume:
 services:
   appseed-app:
     container_name: appseed_app
@@ -5,6 +7,8 @@ services:
     build: .
     environment:
       - DEBUG=False
+    volumes:
+      - static_volume:/app/static
     networks:
       - db_network
       - web_network
@@ -23,6 +27,7 @@ services:
       - "5085:5085"
     volumes:
       - ./nginx:/etc/nginx/conf.d
+      - static_volume:/app/static
     networks:
       - web_network
     depends_on:
