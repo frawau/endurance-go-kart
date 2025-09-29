@@ -12,6 +12,9 @@ services:
     container_name: redis
     restart: always
     image: "redis:alpine"
+    command: redis-server --save 20 1 --loglevel warning
+    sysctls:
+      - vm.overcommit_memory=1
     networks:
       - db_network
   nginx:
