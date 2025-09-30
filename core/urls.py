@@ -20,7 +20,7 @@ urlpatterns = [
     # path("", include("theme_material_kit.urls")),
     path("login/jwt/", view=obtain_auth_token),
     path("accounts/", include("django.contrib.auth.urls")),
-    re_path(r"^advanced_filters/", include("advanced_filters.urls")),
+    # re_path(r"^advanced_filters/", include("advanced_filters.urls")),
 ]
 
 
