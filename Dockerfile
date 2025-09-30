@@ -32,9 +32,6 @@ COPY wait-for-postgres.sh run-app.sh ./
 
 # Set UP
 
-#__API_GENERATOR__
-RUN python manage.py generate-api -f
-#__API_GENERATOR__END
 
 # Start Server
 EXPOSE 5005
