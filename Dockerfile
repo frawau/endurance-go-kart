@@ -31,7 +31,6 @@ RUN fc-cache -fv
 COPY wait-for-postgres.sh run-app.sh ./
 
 # Set UP
-RUN python manage.py collectstatic --no-input
 
 #__API_GENERATOR__
 RUN python manage.py generate-api -f

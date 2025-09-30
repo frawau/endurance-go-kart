@@ -6,6 +6,7 @@ set -e
 # Check if this is the first run
 if [ ! -f /app/.first_run_complete ]; then
   # Apply database migrations
+  python manage.py collectstatic --no-input
   python manage.py makemigrations
   python manage.py migrate
 
