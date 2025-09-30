@@ -159,7 +159,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = "en-gb"
 
-TIME_ZONE = "Asia/Bangkok"
+TIME_ZONE = os.getenv("TZ", "Asia/Bangkok")
 
 USE_I18N = True
 
