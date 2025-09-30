@@ -2,16 +2,22 @@
 
 # Wait for postgres to be ready
 echo "Waiting for postgres..."
-while ! python -c "
+until python -c "
 import socket
 import sys
+import time
+print('Checking PostgreSQL connection...', flush=True)
 try:
-    socket.create_connection(('postgres', 5432), timeout=1)
+    sock = socket.create_connection(('postgres', 5432), timeout=5)
+    sock.close()
+    print('PostgreSQL connection successful!', flush=True)
     sys.exit(0)
-except:
+except Exception as e:
+    print(f'PostgreSQL not ready: {e}', flush=True)
     sys.exit(1)
-" 2>/dev/null; do
-  sleep 1
+"; do
+  echo "PostgreSQL not ready, waiting..."
+  sleep 2
 done
 echo "PostgreSQL started"
 
