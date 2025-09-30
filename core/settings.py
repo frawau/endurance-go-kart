@@ -27,6 +27,7 @@ STOPANDGO_HMAC_SECRET = os.environ.get(
 
 DEBUG = os.environ.get("DEBUG", True)
 APP_DOMAIN = os.getenv("APP_DOMAIN", "gokart.wautier.eu")
+APP_PORT = os.getenv("APP_PORT", "5085")
 
 # HOSTs List
 ALLOWED_HOSTS = [
@@ -48,6 +49,8 @@ CSRF_TRUSTED_ORIGINS = [
     f"https://{APP_DOMAIN}",
     f"http://{APP_DOMAIN}:8000",
     f"https://{APP_DOMAIN}:8000",
+    f"http://{APP_DOMAIN}:{APP_PORT}",
+    f"https://{APP_DOMAIN}:{APP_PORT}",
 ]
 
 RENDER_EXTERNAL_HOSTNAME = os.environ.get("RENDER_EXTERNAL_HOSTNAME")
