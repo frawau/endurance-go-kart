@@ -2,8 +2,16 @@
 
 # Wait for postgres to be ready
 echo "Waiting for postgres..."
-while ! nc -z postgres 5432; do
-  sleep 0.1
+while ! python -c "
+import socket
+import sys
+try:
+    socket.create_connection(('postgres', 5432), timeout=1)
+    sys.exit(0)
+except:
+    sys.exit(1)
+" 2>/dev/null; do
+  sleep 1
 done
 echo "PostgreSQL started"
 
