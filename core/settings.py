@@ -66,7 +66,7 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "channels",
-    "daphne",
+
     "race",
     "django.contrib.staticfiles",
     "theme_material_kit",
@@ -92,7 +92,7 @@ MIDDLEWARE = [
 
 ROOT_URLCONF = "core.urls"
 
-HOME_TEMPLATES = os.path.join(BASE_DIR, "templates")
+HOME_TEMPLATES = BASE_DIR / "templates"
 
 TEMPLATES = [
     {
@@ -122,29 +122,14 @@ INTERNAL_IPS = [
 # Database
 # https://docs.djangoproject.com/en/4.1/ref/settings/#databases
 
-DB_ENGINE = os.getenv("DB_ENGINE", None)
-DB_USERNAME = os.getenv("DB_USERNAME", None)
-DB_PASS = os.getenv("DB_PASS", None)
-DB_HOST = os.getenv("DB_HOST", None)
-DB_PORT = os.getenv("DB_PORT", None)
-DB_NAME = os.getenv("DB_NAME", None)
-
-if DB_ENGINE and DB_NAME and DB_USERNAME:
     DATABASES = {
         "default": {
-            "ENGINE": "django.db.backends." + DB_ENGINE,
-            "NAME": DB_NAME,
-            "USER": DB_USERNAME,
-            "PASSWORD": DB_PASS,
-            "HOST": DB_HOST,
-            "PORT": DB_PORT,
-        },
-    }
-else:
-    DATABASES = {
-        "default": {
-            "ENGINE": "django.db.backends.sqlite3",
-            "NAME": "db.sqlite3",
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": os.environ.get("POSTGRES_DB"),
+            "USER": os.environ.get("POSTGRES_USER"),
+            "PASSWORD": os.environ.get("POSTGRES_PASSWORD"),
+            "HOST": os.environ.get("POSTGRES_HOST"),
+            "PORT": os.environ.get("POSTGRES_PORT"),
         }
     }
 
@@ -183,9 +168,9 @@ USE_TZ = False
 # https://docs.djangoproject.com/en/4.1/howto/static-files/
 
 STATIC_URL = "/static/"
-STATIC_ROOT = BASE_DIR
+STATIC_ROOT = BASE_DIR / "static"
 
-STATICFILES_DIRS = (os.path.join(BASE_DIR, "static"),)
+STATICFILES_DIRS = []
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/4.1/ref/settings/#default-auto-field

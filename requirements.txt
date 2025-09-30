@@ -1,3 +1,4 @@
+uvicorn[standard]
 django==4.2.8
 gunicorn==21.2.0
 whitenoise==6.6.0
@@ -24,3 +25,4 @@ langdetect
 requests
 djangorestframework
 netifaces
+psycopg2-binary
