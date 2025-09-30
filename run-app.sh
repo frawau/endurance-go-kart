@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Set Django settings module
+export DJANGO_SETTINGS_MODULE=core.settings
+
 # Wait for postgres to be ready
 echo "Waiting for postgres..."
 until python -c "
@@ -25,15 +28,15 @@ echo "PostgreSQL started"
 echo "Collecting static files..."
 python manage.py collectstatic --no-input
 
-# Check if first-run setup has been completed
-if [ ! -f /app/.first_run_complete ]; then
+# Check if first-run setup has been completed (use current directory)
+if [ ! -f .first_run_complete ]; then
     echo "First run detected - running initial setup..."
     python manage.py makemigrations
     python manage.py migrate
     python manage.py createsuperuser_with_password --username ${DJANGO_SUPERUSER_USERNAME} --password ${DJANGO_SUPERUSER_PASSWORD}
 
     # Mark first run as complete
-    touch /app/.first_run_complete
+    touch .first_run_complete
     echo "First run setup complete"
 else
     echo "Checking for new migrations..."
