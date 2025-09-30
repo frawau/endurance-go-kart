@@ -28,13 +28,9 @@ RUN python3 install_assets.py
 # Update font cache
 RUN fc-cache -fv
 
-# Set UP
-RUN python manage.py collectstatic --no-input
-RUN python manage.py makemigrations
-RUN python manage.py migrate
-
-RUN python manage.py createsuperuser_with_password --username ${DJANGO_SUPERUSER_USERNAME} --password ${DJANGO_SUPERUSER_PASSWORD}
+# Make startup script executable
+RUN chmod +x run-app.sh
 
 # Start Server
 EXPOSE 5005
-CMD ["gunicorn", "--config", "gunicorn-cfg.py", "core.asgi"]
+CMD ["./run-app.sh"]
