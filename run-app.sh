@@ -33,6 +33,7 @@ if [ ! -f .first_run_complete ]; then
     echo "First run detected - running initial setup..."
     python manage.py makemigrations
     python manage.py migrate
+    python manage.py setup_essential_data
     python manage.py createsuperuser_with_password --username ${DJANGO_SUPERUSER_USERNAME} --password ${DJANGO_SUPERUSER_PASSWORD}
 
     # Mark first run as complete
