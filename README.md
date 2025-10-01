@@ -88,7 +88,7 @@ python manage.py runserver
 
 The application will be available at `http://127.0.0.1:8000`
 
-### Docker Installation (Recommended)
+### 🐳 Docker Installation (Recommended)
 
 For production deployment, use Docker for easier setup and consistent environment:
 
@@ -117,6 +117,10 @@ For production deployment, use Docker for easier setup and consistent environmen
    DJANGO_SUPERUSER_USERNAME=admin
    DJANGO_SUPERUSER_PASSWORD=admin
 
+   # Security keys (generate your own - see examples below!)
+   SECRET_KEY=your-django-secret-key-change-this-to-something-random-and-secure
+   STOPANDGO_HMAC_SECRET=your-hmac-secret-for-station-security-also-change-this
+
    # Your domain and port
    APP_DOMAIN=your-domain.com
    APP_PORT=5085
@@ -124,6 +128,27 @@ For production deployment, use Docker for easier setup and consistent environmen
    # Timezone for all containers
    TZ=Asia/Bangkok
    ```
+
+   **Generate Secure Keys:**
+
+   Use one of these methods to generate random secrets:
+
+   ```bash
+   # Using OpenSSL (recommended)
+   openssl rand -base64 64
+
+   # Using Python
+   python -c "import secrets; print(secrets.token_urlsafe(64))"
+
+   # Using online generator
+   # Visit: https://djecrety.ir/ (Django-specific secret generator)
+   ```
+
+   **Important Security Notes:**
+   - `SECRET_KEY`: Django's secret key for cryptographic signing. Generate a unique 50+ character random string
+   - `STOPANDGO_HMAC_SECRET`: Used for secure communication with hardware penalty stations. **This same secret must be configured on your Stop & Go station hardware**
+   - Change default admin credentials immediately after first login
+   - Use strong, unique passwords for production deployments
 
 3. **Start the application**
    ```bash

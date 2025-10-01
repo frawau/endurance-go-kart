@@ -32,11 +32,8 @@ APP_PORT = os.getenv("APP_PORT", "5085")
 # HOSTs List
 ALLOWED_HOSTS = [
     "127.0.0.1",
-    "192.168.77.8",
-    "192.168.77.97",
     "localhost",
     APP_DOMAIN,
-    ".wautier.eu",
 ]
 
 # Add here your deployment HOSTS
@@ -118,8 +115,6 @@ WSGI_APPLICATION = "core.wsgi.application"
 # For the debug tool bar
 INTERNAL_IPS = [
     "127.0.0.1",
-    "192.168.77.8",
-    "192.168.77.1",
 ]
 # Database
 # https://docs.djangoproject.com/en/4.1/ref/settings/#databases
