@@ -28,19 +28,26 @@ echo "PostgreSQL started"
 echo "Collecting static files..."
 python manage.py collectstatic --no-input
 
-# Check if first-run setup has been completed (use current directory)
-if [ ! -f .first_run_complete ]; then
+# Check if essential data exists in database
+echo "Checking database initialization..."
+PENALTY_EXISTS=$(python manage.py shell -c "
+from race.models import Penalty
+try:
+    penalty_count = Penalty.objects.count()
+    print('EXISTS' if penalty_count > 0 else 'MISSING')
+except Exception as e:
+    print('MISSING')
+")
+
+if [ "$PENALTY_EXISTS" = "MISSING" ]; then
     echo "First run detected - running initial setup..."
     python manage.py makemigrations
     python manage.py migrate
     python manage.py setup_essential_data
     python manage.py createsuperuser_with_password --username ${DJANGO_SUPERUSER_USERNAME} --password ${DJANGO_SUPERUSER_PASSWORD}
-
-    # Mark first run as complete
-    touch .first_run_complete
     echo "First run setup complete"
 else
-    echo "Checking for new migrations..."
+    echo "Database already initialized - checking for new migrations..."
     python manage.py makemigrations
     python manage.py migrate
 fi
