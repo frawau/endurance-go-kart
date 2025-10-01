@@ -389,9 +389,10 @@ document.addEventListener('DOMContentLoaded', function() {
     const currentRoundId = document.getElementById('current-round-id').value;
     const hasSelectedTeam = document.getElementById('has-selected-team').value === 'true';
 
-    // Connect to the round WebSocket
+    // Connect to the round WebSocket (auto-detect protocol)
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const roundSocket = new WebSocket(
-        'ws://' + window.location.host + '/ws/round/' + currentRoundId + '/'
+        wsProtocol + '//' + window.location.host + '/ws/round/' + currentRoundId + '/'
     );
 
     roundSocket.onmessage = function(e) {
