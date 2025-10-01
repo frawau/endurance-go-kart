@@ -88,6 +88,103 @@ python manage.py runserver
 
 The application will be available at `http://127.0.0.1:8000`
 
+### Docker Installation (Recommended)
+
+For production deployment, use Docker for easier setup and consistent environment:
+
+#### Prerequisites
+- Docker and Docker Compose
+- Git
+
+#### Setup Steps
+
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/frawau/endurance-go-kart.git
+   cd endurance-go-kart
+   ```
+
+2. **Configure environment variables**
+
+   Edit the `.env` file to match your setup:
+   ```bash
+   # Database settings
+   POSTGRES_USER=gokart
+   POSTGRES_PASSWORD=gokart
+   POSTGRES_DB=gokart
+
+   # Admin user (created automatically)
+   DJANGO_SUPERUSER_USERNAME=admin
+   DJANGO_SUPERUSER_PASSWORD=admin
+
+   # Your domain and port
+   APP_DOMAIN=your-domain.com
+   APP_PORT=5085
+
+   # Timezone for all containers
+   TZ=Asia/Bangkok
+   ```
+
+3. **Start the application**
+   ```bash
+   docker compose up -d
+   ```
+
+   The application will be available at `http://your-domain:5085`
+
+4. **Initial setup and configuration**
+
+   a. **Login with default admin**
+      - Navigate to your site
+      - Login with username: `admin`, password: `admin`
+
+   b. **Change admin password**
+      - Go to Admin menu → Administration
+      - Change the admin user password
+
+   c. **Create a new admin user**
+      - In Django admin, go to Users
+      - Add a new user with your preferred credentials
+      - Assign the user to groups: `Admin` and `Race Director`
+
+   d. **Switch to your new user**
+      - Logout from the default admin account
+      - Login with your new user credentials
+      - You can now start configuring championships and races
+
+#### Container Management
+
+```bash
+# View logs
+docker compose logs -f
+
+# Stop the application
+docker compose down
+
+# Reset database (removes all data)
+docker compose down
+docker volume rm endurance-go-kart_postgres_data
+docker compose up -d
+
+# Update application
+git pull
+docker compose down
+docker compose up -d --build
+```
+
+#### Accessing the Database
+
+```bash
+# Connect to PostgreSQL container
+docker exec -it postgres psql -U gokart -d gokart
+
+# Backup database
+docker exec postgres pg_dump -U gokart gokart > backup.sql
+
+# Restore database
+docker exec -i postgres psql -U gokart gokart < backup.sql
+```
+
 ## 🏆 Championship Setup
 
 1. **Create Championship**: Define championship parameters and rounds
