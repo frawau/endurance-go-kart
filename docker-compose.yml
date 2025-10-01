@@ -44,21 +44,47 @@ services:
       - postgres_data:/var/lib/postgresql/data
     networks:
       - db_network
+  # Conditional acme.sh service for automatic SSL certificates
+  acme-sh:
+    image: neilpang/acme.sh:latest
+    container_name: acme_sh
+    restart: unless-stopped
+    environment:
+      - TZ=${TZ}
+      - LE_WORKING_DIR=/acme.sh
+    volumes:
+      - acme_data:/acme.sh
+      - ssl_certs:/etc/ssl/certs
+      - acme_webroot:/var/www/certbot
+    command: daemon
+    networks:
+      - web_network
+    profiles:
+      - ssl-acme
+
   nginx:
     container_name: nginx
     restart: always
     image: "nginx:latest"
     ports:
-      - "5085:5085"
+      - "${APP_PORT:-5085}:80"
+      - "443:443"
     environment:
       - TZ=${TZ}
+      - SSL_MODE=${SSL_MODE:-none}
+      - APP_DOMAIN=${APP_DOMAIN:-localhost}
+      - APP_PORT=${APP_PORT:-5085}
     volumes:
-      - ./nginx:/etc/nginx/conf.d
+      - ./nginx/templates:/etc/nginx/templates:ro
+      - ./nginx/ssl-setup.sh:/usr/local/bin/ssl-setup.sh:ro
+      - ssl_certs:/etc/ssl/certs:ro
+      - acme_webroot:/var/www/certbot:ro
       - static_volume:/static
     networks:
       - web_network
     depends_on:
       - appseed-app
+    command: ["/usr/local/bin/ssl-setup.sh"]
 networks:
   db_network:
     driver: bridge
@@ -67,4 +93,7 @@ networks:
 volumes:
   postgres_data:
   static_volume:
+  ssl_certs:
+  acme_data:
+  acme_webroot:
  

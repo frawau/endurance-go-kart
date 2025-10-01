@@ -210,6 +210,94 @@ docker exec postgres pg_dump -U gokart gokart > backup.sql
 docker exec -i postgres psql -U gokart gokart < backup.sql
 ```
 
+### 🔒 SSL/HTTPS Configuration (Optional)
+
+The application supports three SSL modes through a single docker-compose.yml:
+
+#### SSL Modes
+
+1. **None (Default)** - HTTP only, no SSL
+2. **Automatic (acme.sh)** - Automatic certificate generation with Let's Encrypt
+3. **Manual** - Use your own SSL certificates
+
+#### Quick Setup with Race Manager
+
+Use the included race manager script - one script to rule them all:
+
+```bash
+# Start application (HTTP mode)
+./race-manager.sh start
+# Equivalent: docker compose up -d
+
+# Check current status
+./race-manager.sh status
+
+# Enable automatic SSL with Let's Encrypt
+./race-manager.sh enable-acme
+./race-manager.sh generate-cert
+# Equivalent: Edit .env + docker compose --profile ssl-acme up -d + acme.sh commands
+
+# Enable manual SSL (provide your own certificates)
+./race-manager.sh enable-manual
+./race-manager.sh install-cert
+# Equivalent: Edit .env + place certs in ./ssl/ + docker compose up -d
+
+# Disable SSL (back to HTTP only)
+./race-manager.sh disable-ssl
+./race-manager.sh restart
+# Equivalent: Edit .env + docker compose down + docker compose up -d
+
+# Other useful commands
+./race-manager.sh stop      # Stop all services
+./race-manager.sh logs      # View logs
+```
+
+#### Manual SSL Configuration
+
+1. **Enable automatic SSL** by editing `.env`:
+   ```bash
+   SSL_MODE=acme
+   SSL_EMAIL=admin@your-domain.com
+   ACME_CHALLENGE=http
+   ```
+
+2. **Start with SSL services**:
+   ```bash
+   docker compose --profile ssl-acme up -d
+   ```
+
+3. **Generate certificate**:
+   ```bash
+   docker compose exec acme-sh acme.sh --issue -d your-domain.com --webroot /var/www/certbot
+   ```
+
+4. **For manual certificates**, place your files in `./ssl/`:
+   - `fullchain.pem` - Full certificate chain
+   - `privkey.pem` - Private key (**MUST be unencrypted/no passphrase**)
+
+#### SSL Requirements
+
+- **Private key must be unencrypted** - nginx cannot handle password-protected keys
+- **Domain must point to your server** - required for Let's Encrypt validation
+- **Port 80 must be accessible** - needed for HTTP ACME challenge
+
+#### SSL Environment Variables
+
+```bash
+# SSL Configuration (uncomment to enable)
+# SSL_MODE=none              # none|acme|manual
+# SSL_EMAIL=admin@your-domain.com
+#
+# For manual mode
+# SSL_CERT_PATH=./ssl/fullchain.pem
+# SSL_KEY_PATH=./ssl/privkey.pem
+#
+# For acme.sh mode
+# ACME_CHALLENGE=http        # http|dns-cloudflare|dns-route53
+```
+
+**Important**: The application automatically detects HTTP vs HTTPS and uses the appropriate WebSocket protocol (ws:// or wss://).
+
 ## 🏆 Championship Setup
 
 1. **Create Championship**: Define championship parameters and rounds

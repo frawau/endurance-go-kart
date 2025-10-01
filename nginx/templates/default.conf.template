@@ -1,0 +1,92 @@
+upstream webapp {
+    server appseed_app:5005;
+}
+
+# HTTP server configuration
+server {
+    listen 80;
+    server_name ${APP_DOMAIN} localhost;
+
+    # For ACME HTTP challenge (when SSL_MODE=acme)
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    # SSL redirect or serve content based on SSL_MODE
+    location / {
+        # If SSL is enabled, redirect HTTP to HTTPS
+        if ($ssl_redirect = "yes") {
+            return 301 https://$server_name$request_uri;
+        }
+
+        # Otherwise serve content normally
+        proxy_pass http://webapp;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # WebSocket location for HTTP mode
+    location /ws/ {
+        # If SSL is enabled, redirect WebSocket to HTTPS
+        if ($ssl_redirect = "yes") {
+            return 301 https://$server_name$request_uri;
+        }
+
+        # Otherwise proxy WebSocket normally
+        proxy_pass http://webapp;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+    }
+}
+
+# HTTPS server configuration (only when SSL is enabled)
+server {
+    listen 443 ssl http2;
+    server_name ${APP_DOMAIN};
+
+    # SSL configuration (only active when SSL_MODE != none)
+    ssl_certificate /etc/ssl/certs/fullchain.pem;
+    ssl_certificate_key /etc/ssl/certs/privkey.pem;
+
+    # Modern SSL configuration
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-RSA-AES256-GCM-SHA512:DHE-RSA-AES256-GCM-SHA512:ECDHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES256-GCM-SHA384;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 1d;
+
+    # Security headers
+    add_header Strict-Transport-Security "max-age=63072000" always;
+    add_header X-Frame-Options DENY always;
+    add_header X-Content-Type-Options nosniff always;
+
+    # Regular HTTP traffic
+    location / {
+        proxy_pass http://webapp;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # WebSocket location for HTTPS
+    location /ws/ {
+        proxy_pass http://webapp;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+    }
+}
