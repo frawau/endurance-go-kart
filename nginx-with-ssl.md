@@ -1,140 +1,280 @@
-# SSL Implementation Plan for GoKartRace
+# SSL Implementation Guide for GoKartRace
 
 ## Architecture Overview
 
 **Two-container approach:**
-1. **acme.sh container** - Handles certificate generation/renewal
+1. **acme.sh container** - Handles certificate generation/renewal (uses Let's Encrypt)
 2. **nginx container** - Serves HTTPS with certificates
 
-## Implementation Strategy
+## SSL Modes
 
-### 1. Certificate Generation Container
-- Use `neilpang/acme.sh` Docker image
-- Run as a separate service in docker-compose
-- Generate certificates using DNS or HTTP-01 challenge
-- Store certificates in shared volume
-- Run certificate renewal as cron job
+The system supports three SSL modes controlled by the `SSL_MODE` environment variable:
 
-### 2. Nginx Configuration
-- **Development mode**: HTTP only (current setup)
-- **Production mode**: HTTPS with SSL certificates
-- Conditional nginx config based on environment variable
-- Redirect HTTP → HTTPS in production
+1. **`none`** - HTTP only (default, no SSL)
+2. **`acme`** - Automatic SSL with Let's Encrypt via acme.sh
+3. **`manual`** - Manual SSL (you provide your own certificates)
 
-### 3. Environment Variables
+## Quick Start
+
+### Automatic SSL (Recommended)
+
 ```bash
-SSL_ENABLED=true|false
-SSL_DOMAIN=your-domain.com
+# 1. Enable acme mode (updates .env)
+./race-manager.sh enable-acme
+
+# 2. Generate certificate (uses Let's Encrypt)
+./race-manager.sh generate-cert
+
+# Your site is now available at https://your-domain.com
+```
+
+### Environment Variables
+
+Required in `.env` file:
+
+```bash
+SSL_MODE=acme                           # or 'none' or 'manual'
+APP_DOMAIN=your-domain.com              # Your domain name
+SSL_EMAIL=admin@your-domain.com         # Email for Let's Encrypt notifications
+APP_PORT=5085                           # HTTP port (default: 5085)
+```
+
+## How It Works
+
+### Certificate Generation Container (acme.sh)
+- Uses official `neilpang/acme.sh` Docker image
+- Configured to use **Let's Encrypt** (not ZeroSSL)
+- Generates certificates using HTTP-01 challenge
+- Stores certificates in shared Docker volume
+- Automatic renewal via daemon mode
+
+### Nginx Configuration
+- Reads `SSL_MODE` environment variable at startup
+- **HTTP only mode** (`SSL_MODE=none`): Serves on port 80
+- **HTTPS mode** (`SSL_MODE=acme` or `manual`): Serves on ports 80 and 443
+  - Port 80: Redirects to HTTPS (except /.well-known/acme-challenge/)
+  - Port 443: Serves HTTPS with SSL certificates
+
+### Startup Orchestration
+1. acme.sh container starts when `--profile ssl-acme` is used
+2. `race-manager.sh generate-cert` configures Let's Encrypt as CA
+3. Registers your email with Let's Encrypt
+4. Generates certificate via HTTP-01 challenge
+5. Installs certificates to shared volume
+6. nginx automatically picks up certificates and enables HTTPS
+
+## race-manager.sh Commands
+
+The `race-manager.sh` script simplifies SSL management:
+
+### Service Management
+```bash
+./race-manager.sh start           # Start application (HTTP mode)
+./race-manager.sh stop            # Stop all services
+./race-manager.sh restart         # Restart with current configuration
+./race-manager.sh logs            # Show service logs
+./race-manager.sh status          # Show SSL configuration status
+```
+
+### SSL Management
+```bash
+./race-manager.sh enable-acme     # Enable automatic SSL mode
+./race-manager.sh enable-manual   # Enable manual SSL mode
+./race-manager.sh disable-ssl     # Disable SSL (HTTP only)
+./race-manager.sh generate-cert   # Generate Let's Encrypt certificate
+./race-manager.sh install-cert    # Install manual certificates
+```
+
+## Detailed Setup Guide
+
+### Prerequisites
+
+1. **Domain Name**: Your domain must point to your server's IP
+   ```bash
+   # Check DNS resolution
+   nslookup your-domain.com
+   ```
+
+2. **Firewall**: Ports 80 and 443 must be accessible from the internet
+   ```bash
+   # Check if ports are open
+   sudo ufw status
+   sudo ufw allow 80/tcp
+   sudo ufw allow 443/tcp
+   ```
+
+3. **Email Address**: Required for Let's Encrypt notifications
+
+### Step-by-Step Setup
+
+**1. Configure Environment Variables**
+
+Edit `.env` file:
+```bash
+SSL_MODE=acme
+APP_DOMAIN=your-domain.com
 SSL_EMAIL=admin@your-domain.com
-ACME_CHALLENGE=http|dns-cloudflare|dns-route53
+APP_PORT=5085
 ```
 
-### 4. Volume Strategy
+Or use the helper command:
+```bash
+./race-manager.sh enable-acme
+# Then edit .env to set APP_DOMAIN and SSL_EMAIL
+```
+
+**2. Generate Certificate**
+
+```bash
+./race-manager.sh generate-cert
+```
+
+This command will:
+- Start acme.sh container
+- Configure Let's Encrypt as the CA
+- Register your email
+- Generate certificate via HTTP-01 challenge
+- Install certificate
+- Restart nginx with HTTPS enabled
+
+**3. Verify HTTPS**
+
+Visit your site:
+```
+https://your-domain.com
+```
+
+Check certificate:
+```bash
+openssl s_client -connect your-domain.com:443 -servername your-domain.com
+```
+
+### Manual SSL Setup
+
+If you have your own certificates:
+
+**1. Enable manual mode**
+```bash
+./race-manager.sh enable-manual
+```
+
+**2. Place certificates in `./ssl/` directory**
+```bash
+mkdir -p ssl
+cp fullchain.pem ssl/
+cp privkey.pem ssl/
+```
+
+**3. Install certificates**
+```bash
+./race-manager.sh install-cert
+```
+
+## Certificate Renewal
+
+Let's Encrypt certificates are valid for 90 days. The acme.sh daemon automatically renews certificates when they have 60 days or less remaining.
+
+**Check renewal status:**
+```bash
+docker compose exec acme-sh acme.sh --list
+```
+
+**Force renewal (for testing):**
+```bash
+docker compose exec acme-sh acme.sh --renew -d your-domain.com --force
+docker compose restart nginx
+```
+
+## Troubleshooting
+
+### Certificate Generation Fails
+
+**Error**: "Verify error: Invalid response from http://your-domain.com/.well-known/acme-challenge/..."
+
+**Solutions:**
+1. Check DNS: `nslookup your-domain.com` (should point to your server)
+2. Check firewall: Port 80 must be open
+3. Check nginx is running: `docker ps | grep nginx`
+4. Wait for DNS propagation (can take up to 48 hours)
+
+**Error**: "Please add email address"
+
+**Solution:**
+Ensure `SSL_EMAIL` is set in `.env`:
+```bash
+SSL_EMAIL=admin@your-domain.com
+```
+
+### HTTPS Not Working After Certificate Generation
+
+**Check certificates exist:**
+```bash
+docker compose exec nginx ls -la /etc/ssl/certs/
+```
+
+**Check nginx configuration:**
+```bash
+docker compose exec nginx cat /etc/nginx/conf.d/default.conf
+```
+
+**Restart nginx:**
+```bash
+docker compose restart nginx
+```
+
+### Port 443 Connection Refused
+
+**Check nginx is listening on 443:**
+```bash
+docker compose exec nginx netstat -tlnp | grep 443
+```
+
+**Check firewall:**
+```bash
+sudo ufw status
+sudo ufw allow 443/tcp
+```
+
+## Security Best Practices
+
+The nginx configuration includes:
+
+1. **Modern TLS protocols**: TLSv1.2 and TLSv1.3 only
+2. **Strong ciphers**: ECDHE-RSA-AES256-GCM-SHA512 and similar
+3. **HSTS**: Strict-Transport-Security header with 2-year max-age
+4. **Security headers**: X-Frame-Options, X-Content-Type-Options
+5. **HTTP to HTTPS redirect**: All HTTP traffic redirected to HTTPS
+
+## WebSocket Support
+
+WebSocket connections are fully supported over both HTTP and HTTPS:
+
+- `ws://your-domain.com/ws/` (HTTP mode)
+- `wss://your-domain.com/ws/` (HTTPS mode)
+
+The nginx configuration automatically upgrades WebSocket connections and sets appropriate headers.
+
+## Architecture Details
+
+### Docker Volumes
+
 ```yaml
-volumes:
-  ssl_certs:/etc/ssl/certs
-  nginx_conf:/etc/nginx/conf.d
+ssl_certs:/etc/ssl/certs          # Shared between acme-sh and nginx
+acme_data:/acme.sh                # acme.sh working directory
+acme_webroot:/var/www/certbot     # HTTP-01 challenge directory
 ```
 
-### 5. Configuration Files
-- **nginx-http.conf** (development)
-- **nginx-https.conf** (production)
-- **acme.sh config** for DNS providers
+### Docker Networks
 
-### 6. Startup Orchestration
-1. acme.sh container starts first
-2. Generates certificates if needed
-3. nginx waits for certificates (depends_on + healthcheck)
-4. nginx starts with appropriate config
-
-## Challenges to Consider
-
-1. **DNS Provider Integration** - Different APIs for different providers
-2. **Certificate Renewal** - Nginx reload without downtime
-3. **Initial Setup** - First-time certificate generation delay
-4. **Domain Validation** - Ensuring domain points to server
-5. **Fallback Strategy** - What if certificate generation fails?
-
-## User Experience
-- Single environment variable toggles SSL
-- Automatic certificate generation on first run
-- Transparent renewal process
-- Clear error messages if setup fails
-
-## Implementation Steps
-
-### Phase 1: Basic SSL Setup
-1. Add SSL environment variables to .env
-2. Create conditional nginx configurations
-3. Add acme.sh service to docker-compose
-4. Create shared volumes for certificates
-
-### Phase 2: Certificate Generation
-1. Implement HTTP-01 challenge (simplest)
-2. Add certificate generation script
-3. Test certificate creation process
-4. Implement nginx reload mechanism
-
-### Phase 3: DNS Challenge Support
-1. Add support for major DNS providers (Cloudflare, Route53)
-2. Environment variable configuration for DNS APIs
-3. Documentation for DNS setup
-
-### Phase 4: Renewal & Monitoring
-1. Automatic certificate renewal
-2. Certificate expiry monitoring
-3. Email notifications for failures
-4. Health checks for SSL status
-
-## Configuration Examples
-
-### Docker Compose Addition
 ```yaml
-acme-sh:
-  image: neilpang/acme.sh
-  container_name: acme_sh
-  environment:
-    - SSL_DOMAIN=${SSL_DOMAIN}
-    - SSL_EMAIL=${SSL_EMAIL}
-    - ACME_CHALLENGE=${ACME_CHALLENGE}
-  volumes:
-    - ssl_certs:/acme.sh
-    - ./acme-config:/acme.sh/config
-  command: daemon
-  networks:
-    - web_network
+web_network:                       # nginx and acme-sh
+db_network:                        # Django app, PostgreSQL, Redis
 ```
 
-### Nginx SSL Config Template
-```nginx
-server {
-    listen 443 ssl http2;
-    server_name ${SSL_DOMAIN};
+### Container Communication
 
-    ssl_certificate /etc/ssl/certs/${SSL_DOMAIN}/fullchain.cer;
-    ssl_certificate_key /etc/ssl/certs/${SSL_DOMAIN}/${SSL_DOMAIN}.key;
-
-    # SSL best practices
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers ECDHE-RSA-AES256-GCM-SHA512:DHE-RSA-AES256-GCM-SHA512:ECDHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES256-GCM-SHA384;
-    ssl_prefer_server_ciphers off;
-
-    # HSTS
-    add_header Strict-Transport-Security "max-age=63072000" always;
-
-    location / {
-        proxy_pass http://appseed-app:5005;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-}
-
-# HTTP redirect to HTTPS
-server {
-    listen 80;
-    server_name ${SSL_DOMAIN};
-    return 301 https://$server_name$request_uri;
-}
+```
+Internet → nginx:80/443 → appseed_app:5005 → Django
+                ↓
+            acme.sh (certificate renewal)
 ```

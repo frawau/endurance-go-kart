@@ -212,63 +212,82 @@ docker exec -i postgres psql -U gokart gokart < backup.sql
 
 ### 🔒 SSL/HTTPS Configuration (Optional)
 
-The application supports three SSL modes through a single docker-compose.yml:
+The application supports three SSL modes controlled by the `SSL_MODE` environment variable:
 
 #### SSL Modes
 
-1. **None (Default)** - HTTP only, no SSL
-2. **Automatic (acme.sh)** - Automatic certificate generation with Let's Encrypt
-3. **Manual** - Use your own SSL certificates
+1. **`none`** (Default) - HTTP only, no SSL
+2. **`acme`** - Automatic SSL with Let's Encrypt (via acme.sh)
+3. **`manual`** - Manual SSL (provide your own certificates)
 
-#### Quick Setup with Race Manager
+#### Quick Setup with Race Manager (Recommended)
 
-Use the included race manager script - one script to rule them all:
+Use the included race manager script for easy SSL management:
 
 ```bash
 # Start application (HTTP mode)
 ./race-manager.sh start
-# Equivalent: docker compose up -d
 
-# Check current status
+# Check current SSL status
 ./race-manager.sh status
 
 # Enable automatic SSL with Let's Encrypt
-./race-manager.sh enable-acme
-./race-manager.sh generate-cert
-# Equivalent: Edit .env + docker compose --profile ssl-acme up -d + acme.sh commands
+./race-manager.sh enable-acme      # Updates .env to SSL_MODE=acme
+./race-manager.sh generate-cert    # Generates and installs certificate
+# Your site is now available at https://your-domain.com
 
 # Enable manual SSL (provide your own certificates)
-./race-manager.sh enable-manual
-./race-manager.sh install-cert
-# Equivalent: Edit .env + place certs in ./ssl/ + docker compose up -d
+./race-manager.sh enable-manual    # Updates .env to SSL_MODE=manual
+# Place certificates in ./ssl/fullchain.pem and ./ssl/privkey.pem
+./race-manager.sh install-cert     # Installs certificates
 
 # Disable SSL (back to HTTP only)
-./race-manager.sh disable-ssl
-./race-manager.sh restart
-# Equivalent: Edit .env + docker compose down + docker compose up -d
+./race-manager.sh disable-ssl      # Updates .env to SSL_MODE=none
+./race-manager.sh restart          # Applies changes
 
 # Other useful commands
-./race-manager.sh stop      # Stop all services
-./race-manager.sh logs      # View logs
+./race-manager.sh stop             # Stop all services
+./race-manager.sh restart          # Restart with current configuration
+./race-manager.sh logs             # View logs
 ```
 
 #### Manual SSL Configuration
 
-1. **Enable automatic SSL** by editing `.env`:
+If you prefer to configure SSL manually without using `race-manager.sh`:
+
+**For Automatic SSL (Let's Encrypt):**
+
+1. Edit `.env`:
    ```bash
    SSL_MODE=acme
+   APP_DOMAIN=your-domain.com
    SSL_EMAIL=admin@your-domain.com
-   ACME_CHALLENGE=http
    ```
 
-2. **Start with SSL services**:
+2. Start services with acme.sh profile:
    ```bash
    docker compose --profile ssl-acme up -d
    ```
 
-3. **Generate certificate**:
+3. Configure Let's Encrypt and generate certificate:
    ```bash
+   # Set Let's Encrypt as CA (fixes ZeroSSL email requirement)
+   docker compose exec acme-sh acme.sh --set-default-ca --server letsencrypt
+
+   # Register account
+   docker compose exec acme-sh acme.sh --register-account -m admin@your-domain.com
+
+   # Generate certificate
    docker compose exec acme-sh acme.sh --issue -d your-domain.com --webroot /var/www/certbot
+
+   # Install certificate
+   docker compose exec acme-sh acme.sh --install-cert -d your-domain.com \
+       --cert-file /etc/ssl/certs/cert.pem \
+       --key-file /etc/ssl/certs/privkey.pem \
+       --fullchain-file /etc/ssl/certs/fullchain.pem
+
+   # Restart nginx
+   docker compose restart nginx
    ```
 
 4. **For manual certificates**, place your files in `./ssl/`:

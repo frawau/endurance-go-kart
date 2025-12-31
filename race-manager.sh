@@ -151,11 +151,23 @@ generate_cert() {
         exit 1
     fi
 
+    if [ -z "${SSL_EMAIL}" ]; then
+        log_error "SSL_EMAIL not set in .env file"
+        log_info "Please add: SSL_EMAIL=your-email@example.com"
+        exit 1
+    fi
+
     log_info "Starting services with acme.sh profile..."
     docker compose --profile ssl-acme up -d
 
     log_info "Waiting for services to start..."
     sleep 5
+
+    log_info "Configuring acme.sh to use Let's Encrypt..."
+    docker compose exec acme-sh acme.sh --set-default-ca --server letsencrypt
+
+    log_info "Registering account with Let's Encrypt (${SSL_EMAIL})..."
+    docker compose exec acme-sh acme.sh --register-account -m "${SSL_EMAIL}"
 
     log_info "Generating SSL certificate for ${APP_DOMAIN}..."
     docker compose exec acme-sh acme.sh --issue -d "${APP_DOMAIN}" --webroot /var/www/certbot
@@ -171,12 +183,14 @@ generate_cert() {
         log_success "SSL certificate generated and installed!"
         log_info "Restarting nginx to enable HTTPS..."
         docker compose restart nginx
+        log_success "HTTPS is now enabled at https://${APP_DOMAIN}"
     else
         log_error "Certificate generation failed!"
         log_info "Check that:"
         log_info "  - ${APP_DOMAIN} points to this server"
         log_info "  - Port 80 is accessible from the internet"
         log_info "  - No firewall is blocking the connection"
+        log_info "  - DNS propagation is complete (try: nslookup ${APP_DOMAIN})"
         exit 1
     fi
 }
