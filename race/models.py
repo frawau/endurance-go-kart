@@ -113,9 +113,39 @@ class Team(models.Model):
 
 
 class Championship(models.Model):
+    ENDING_MODES = (
+        ("CROSS_AFTER_TIME", "Cross Start/Finish Line after time"),
+        ("CROSS_AFTER_LAPS", "Cross Start/Finish line after Nb laps"),
+        ("QUALIFYING", "Qualifying - Best lap time before time elapses"),
+        (
+            "QUALIFYING_PLUS",
+            "Qualifying+ - Best time crossing line, last lap starts after time",
+        ),
+        ("FULL_LAPS", "Full laps - Race ends when you complete set number of laps"),
+        (
+            "TIME_ONLY",
+            "Time Only - Positions frozen at last crossing before time expired",
+        ),
+        ("AUTO_TRANSFORM", "Auto-transform to CROSS_AFTER_TIME when max time expires"),
+    )
+
     name = models.CharField(max_length=128, unique=True)
     start = models.DateField()
     end = models.DateField()
+
+    # Race ending mode configuration (LOCKED for all rounds in this championship)
+    default_ending_mode = models.CharField(
+        max_length=32,
+        choices=ENDING_MODES,
+        default="TIME_ONLY",
+        verbose_name="Default Race Ending Mode",
+    )
+    default_lap_count = models.IntegerField(
+        null=True, blank=True, verbose_name="Default Lap Count"
+    )
+    default_time_limit = models.DurationField(
+        null=True, blank=True, verbose_name="Default Time Limit"
+    )
 
     @property
     def ongoing(self):
@@ -183,6 +213,26 @@ class Round(models.Model):
         null=True,
         help_text="Weight penalty configuration in format: ['oper', [limit1, value1], [limit2, value2], ...]",
     )
+
+    # Lap-based timing configuration (rounds can only adjust parameters, not change mode)
+    uses_legacy_session_model = models.BooleanField(
+        default=True,
+        verbose_name="Use Legacy Session Model",
+        help_text="True=time-only (legacy), False=lap-based timing",
+    )
+    lap_count_adjustment = models.IntegerField(
+        null=True,
+        blank=True,
+        verbose_name="Lap Count Adjustment",
+        help_text="Override championship default lap count for this round",
+    )
+    time_limit_adjustment = models.DurationField(
+        null=True,
+        blank=True,
+        verbose_name="Time Limit Adjustment",
+        help_text="Override championship default time limit for this round",
+    )
+
     # No user serviceable parts below
     ready = models.BooleanField(default=False)
     started = models.DateTimeField(null=True, blank=True)
@@ -814,6 +864,93 @@ class Round(models.Model):
         return f"{self.name} of {self.championship.name}"
 
 
+class Race(models.Model):
+    """
+    Represents a single race within a Round.
+    A Round can contain multiple races (e.g., Q1, Q2, Q3, Main).
+    """
+
+    RACE_TYPES = (
+        ("Q1", "Qualifying 1"),
+        ("Q2", "Qualifying 2"),
+        ("Q3", "Qualifying 3"),
+        ("MAIN", "Main Race"),
+        ("PRACTICE", "Practice"),
+    )
+
+    round = models.ForeignKey(Round, on_delete=models.CASCADE, related_name="races")
+    race_type = models.CharField(max_length=16, choices=RACE_TYPES)
+    sequence_number = models.IntegerField(
+        verbose_name="Sequence Number",
+        help_text="Order within round (1=first, 2=second, etc.)",
+    )
+
+    # Inherits mode from Championship, can override parameters
+    ending_mode = models.CharField(
+        max_length=32,
+        choices=Championship.ENDING_MODES,
+        verbose_name="Race Ending Mode",
+    )
+    lap_count_override = models.IntegerField(
+        null=True, blank=True, verbose_name="Lap Count Override"
+    )
+    time_limit_override = models.DurationField(
+        null=True, blank=True, verbose_name="Time Limit Override"
+    )
+    count_crossings_during_suspension = models.BooleanField(
+        default=False, verbose_name="Count Crossings During Suspension"
+    )
+
+    # State (mirrors Round pattern)
+    started = models.DateTimeField(null=True, blank=True)
+    ended = models.DateTimeField(null=True, blank=True)
+    ready = models.BooleanField(default=False)
+
+    # Dependencies
+    depends_on_race = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="dependent_races",
+        verbose_name="Depends On Race",
+    )
+    grid_locked = models.BooleanField(default=False, verbose_name="Grid Locked")
+
+    class Meta:
+        verbose_name = _("Race")
+        verbose_name_plural = _("Races")
+        unique_together = ("round", "sequence_number")
+        ordering = ["round", "sequence_number"]
+
+    def __str__(self):
+        return f"{self.get_race_type_display()} - {self.round.name}"
+
+    def get_effective_lap_count(self):
+        """Get the effective lap count (override or round adjustment or championship default)"""
+        if self.lap_count_override is not None:
+            return self.lap_count_override
+        if self.round.lap_count_adjustment is not None:
+            return self.round.lap_count_adjustment
+        return self.round.championship.default_lap_count or 0
+
+    def get_effective_time_limit(self):
+        """Get the effective time limit (override or round adjustment or championship default)"""
+        if self.time_limit_override is not None:
+            return self.time_limit_override
+        if self.round.time_limit_adjustment is not None:
+            return self.round.time_limit_adjustment
+        return self.round.championship.default_time_limit or dt.timedelta(hours=4)
+
+    def get_participating_teams_count(self):
+        """Get count of teams participating in this race"""
+        return self.round.round_team_set.count()
+
+    def get_participating_teams(self):
+        """Get teams participating in this race"""
+        return self.round.round_team_set.all()
+
+
 class round_pause(models.Model):
     round = models.ForeignKey(Round, on_delete=models.CASCADE)
     start = models.DateTimeField(default=dt.datetime.now)
@@ -1064,6 +1201,11 @@ class Session(models.Model):
     start = models.DateTimeField(null=True, blank=True)
     end = models.DateTimeField(null=True, blank=True)
 
+    # Link to specific race within round (for lap-based timing)
+    race = models.ForeignKey(
+        Race, null=True, blank=True, on_delete=models.CASCADE, verbose_name="Race"
+    )
+
     class Meta:
         verbose_name = _("Session")
         verbose_name_plural = _("Sessions")
@@ -1101,6 +1243,195 @@ class Session(models.Model):
 
         total_time += session_time - paused_time
         return total_time
+
+
+class Transponder(models.Model):
+    """Hardware transponder registration"""
+
+    transponder_id = models.CharField(
+        max_length=32, unique=True, verbose_name="Transponder ID"
+    )
+    description = models.CharField(
+        max_length=128, blank=True, verbose_name="Description"
+    )
+    active = models.BooleanField(default=True, verbose_name="Active")
+    last_seen = models.DateTimeField(null=True, blank=True, verbose_name="Last Seen")
+
+    class Meta:
+        verbose_name = _("Transponder")
+        verbose_name_plural = _("Transponders")
+
+    def __str__(self):
+        return f"Transponder {self.transponder_id}"
+
+
+class RaceTransponderAssignment(models.Model):
+    """Matching phase: transponder → team/kart"""
+
+    race = models.ForeignKey(
+        Race, on_delete=models.CASCADE, related_name="transponder_assignments"
+    )
+    transponder = models.ForeignKey(Transponder, on_delete=models.CASCADE)
+    team = models.ForeignKey("round_team", on_delete=models.CASCADE)
+    kart_number = models.IntegerField(
+        validators=[MinValueValidator(1), MaxValueValidator(99)],
+        verbose_name="Kart Number",
+    )
+    confirmed = models.BooleanField(default=False, verbose_name="Confirmed")
+    assigned_at = models.DateTimeField(auto_now_add=True, verbose_name="Assigned At")
+
+    class Meta:
+        verbose_name = _("Race Transponder Assignment")
+        verbose_name_plural = _("Race Transponder Assignments")
+        unique_together = [
+            ("race", "transponder"),
+            ("race", "team"),
+            ("race", "kart_number"),
+        ]
+
+    def __str__(self):
+        return f"{self.transponder.transponder_id} → Team {self.team} (Kart #{self.kart_number})"
+
+
+class LapCrossing(models.Model):
+    """Core lap timing data - records each finish line crossing"""
+
+    race = models.ForeignKey(
+        Race, on_delete=models.CASCADE, related_name="lap_crossings"
+    )
+    team = models.ForeignKey("round_team", on_delete=models.CASCADE)
+    transponder = models.ForeignKey(
+        Transponder, on_delete=models.CASCADE, null=True, blank=True
+    )
+
+    # Lap timing data
+    lap_number = models.IntegerField(
+        validators=[MinValueValidator(1)], verbose_name="Lap Number"
+    )
+    crossing_time = models.DateTimeField(verbose_name="Crossing Time")
+    lap_time = models.DurationField(null=True, blank=True, verbose_name="Lap Time")
+
+    # Lap status
+    is_valid = models.BooleanField(default=True, verbose_name="Valid")
+    is_suspicious = models.BooleanField(default=False, verbose_name="Suspicious")
+    was_split = models.BooleanField(default=False, verbose_name="Was Split")
+    split_from = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="split_laps",
+        verbose_name="Split From",
+    )
+    counted_during_suspension = models.BooleanField(
+        default=False, verbose_name="Counted During Suspension"
+    )
+    session = models.ForeignKey(
+        Session, null=True, blank=True, on_delete=models.SET_NULL
+    )
+
+    class Meta:
+        verbose_name = _("Lap Crossing")
+        verbose_name_plural = _("Lap Crossings")
+        ordering = ["race", "team", "lap_number"]
+        indexes = [
+            models.Index(fields=["race", "team", "lap_number"]),
+            models.Index(fields=["race", "crossing_time"]),
+            models.Index(fields=["is_suspicious"]),
+            models.Index(fields=["transponder", "crossing_time"]),
+        ]
+
+    def __str__(self):
+        return f"Lap {self.lap_number} - Team {self.team} @ {self.crossing_time}"
+
+
+class GridPosition(models.Model):
+    """Starting positions for races"""
+
+    AUTO_SOURCES = (
+        ("QUALIFYING", "From Qualifying Result"),
+        ("COMBINED_Q", "From Combined Qualifying Results"),
+        ("KNOCKOUT", "From Knockout Qualifying"),
+        ("CHAMPIONSHIP", "From Championship Standings"),
+        ("MANUAL", "Manually Assigned"),
+    )
+
+    race = models.ForeignKey(
+        Race, on_delete=models.CASCADE, related_name="grid_positions"
+    )
+    team = models.ForeignKey("round_team", on_delete=models.CASCADE)
+    position = models.IntegerField(
+        validators=[MinValueValidator(1)], verbose_name="Grid Position"
+    )
+
+    # Position source tracking
+    source = models.CharField(
+        max_length=32, choices=AUTO_SOURCES, default="MANUAL", verbose_name="Source"
+    )
+    source_race = models.ForeignKey(
+        Race,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="grid_source_for",
+        verbose_name="Source Race",
+    )
+
+    # Override capability
+    manually_overridden = models.BooleanField(
+        default=False, verbose_name="Manually Overridden"
+    )
+    override_reason = models.TextField(blank=True, verbose_name="Override Reason")
+
+    class Meta:
+        verbose_name = _("Grid Position")
+        verbose_name_plural = _("Grid Positions")
+        unique_together = [
+            ("race", "team"),
+            ("race", "position"),
+        ]
+        ordering = ["race", "position"]
+
+    def __str__(self):
+        return f"P{self.position} - Team {self.team}"
+
+
+class QualifyingKnockoutRule(models.Model):
+    """Complex qualifying logic - knockout rules"""
+
+    qualifying_race = models.ForeignKey(
+        Race,
+        on_delete=models.CASCADE,
+        related_name="knockout_rules",
+        verbose_name="Qualifying Race",
+    )
+    eliminates_to_position_range_start = models.IntegerField(
+        verbose_name="Eliminate From Position", help_text="e.g., -5 for bottom 5 teams"
+    )
+    eliminates_to_position_range_end = models.IntegerField(
+        verbose_name="Eliminate To Position", help_text="e.g., -1 for last team"
+    )
+
+    # What happens to eliminated teams
+    sets_grid_positions_for = models.ForeignKey(
+        Race,
+        on_delete=models.CASCADE,
+        related_name="knockout_sources",
+        verbose_name="Sets Grid For Race",
+    )
+    grid_position_offset = models.IntegerField(
+        default=0,
+        verbose_name="Grid Position Offset",
+        help_text="Where to place them in main race grid",
+    )
+
+    class Meta:
+        verbose_name = _("Qualifying Knockout Rule")
+        verbose_name_plural = _("Qualifying Knockout Rules")
+        ordering = ["qualifying_race", "eliminates_to_position_range_start"]
+
+    def __str__(self):
+        return f"{self.qualifying_race} → {self.sets_grid_positions_for} (positions {self.eliminates_to_position_range_start} to {self.eliminates_to_position_range_end})"
 
 
 class ChangeLane(models.Model):
