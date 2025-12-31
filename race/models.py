@@ -1088,6 +1088,169 @@ class Race(models.Model):
                 self.save()
             return self._check_cross_after_time()
 
+    def get_qualifying_results(self):
+        """
+        Get qualifying results sorted by best lap time.
+        Returns list of tuples: [(team, best_lap_time), ...]
+        """
+        results = []
+        for team in self.get_participating_teams():
+            # Get best (minimum) valid lap time for this team
+            best_lap = (
+                self.lap_crossings.filter(
+                    team=team, is_valid=True, lap_time__isnull=False
+                )
+                .order_by("lap_time")
+                .first()
+            )
+            if best_lap:
+                results.append((team, best_lap.lap_time))
+            else:
+                # Team didn't complete any valid laps - put at end with max time
+                results.append((team, dt.timedelta(hours=99)))
+
+        # Sort by lap time
+        results.sort(key=lambda x: x[1])
+        return results
+
+    def process_qualifying_knockout(self):
+        """
+        Process qualifying knockout rules for this race.
+        Applies all knockout rules to set grid positions for dependent races.
+        """
+        if self.race_type not in ["Q1", "Q2", "Q3"]:
+            return  # Only qualifying races have knockout rules
+
+        results = self.get_qualifying_results()
+
+        for rule in self.qualifyingknockoutrule_set.all():
+            # Get eliminated teams based on position range
+            # Negative indices mean from end (e.g., -5 = bottom 5)
+            start_idx = rule.eliminates_to_position_range_start
+            end_idx = rule.eliminates_to_position_range_end
+
+            if start_idx < 0 and end_idx < 0:
+                # Both negative - slice from end
+                eliminated = results[start_idx : end_idx + 1 if end_idx != -1 else None]
+            else:
+                # Positive indices
+                eliminated = results[start_idx : end_idx + 1]
+
+            # Set grid positions for target race
+            for idx, (team, _) in enumerate(eliminated):
+                GridPosition.objects.update_or_create(
+                    race=rule.sets_grid_positions_for,
+                    team=team,
+                    defaults={
+                        "position": rule.grid_position_offset + idx + 1,
+                        "source": "KNOCKOUT",
+                        "source_race": self,
+                        "manually_overridden": False,
+                    },
+                )
+
+    @staticmethod
+    def combine_qualifying_results(qualifying_races, main_race, method="best"):
+        """
+        Combine results from multiple qualifying races to set grid for main race.
+
+        Args:
+            qualifying_races: List of Race objects (Q1, Q2, Q3, etc.)
+            main_race: Race object to set grid positions for
+            method: "best" (best lap) or "average" (average of best laps)
+        """
+        combined = {}
+
+        for race in qualifying_races:
+            for team, best_lap in race.get_qualifying_results():
+                if best_lap < dt.timedelta(hours=99):  # Valid lap time
+                    combined.setdefault(team, []).append(best_lap)
+
+        # Calculate final times
+        if method == "average":
+            final = [
+                (team, sum(times, dt.timedelta()) / len(times))
+                for team, times in combined.items()
+            ]
+        else:  # "best"
+            final = [(team, min(times)) for team, times in combined.items()]
+
+        # Sort by time
+        final.sort(key=lambda x: x[1])
+
+        # Assign grid positions
+        for position, (team, _) in enumerate(final, 1):
+            GridPosition.objects.update_or_create(
+                race=main_race,
+                team=team,
+                defaults={
+                    "position": position,
+                    "source": "COMBINED_Q",
+                    "manually_overridden": False,
+                },
+            )
+
+    def auto_assign_grid_positions(self, source_type="CHAMPIONSHIP"):
+        """
+        Auto-assign grid positions based on source.
+
+        Args:
+            source_type: "CHAMPIONSHIP" (championship standings) or "QUALIFYING" (from depends_on_race)
+        """
+        if self.grid_locked:
+            return  # Grid is locked, cannot auto-assign
+
+        if source_type == "QUALIFYING" and self.depends_on_race:
+            # Use qualifying race results
+            results = self.depends_on_race.get_qualifying_results()
+            for position, (team, _) in enumerate(results, 1):
+                GridPosition.objects.update_or_create(
+                    race=self,
+                    team=team,
+                    defaults={
+                        "position": position,
+                        "source": "QUALIFYING",
+                        "source_race": self.depends_on_race,
+                        "manually_overridden": False,
+                    },
+                )
+        elif source_type == "CHAMPIONSHIP":
+            # Use championship standings (placeholder - would need championship_team ordering)
+            teams = list(self.get_participating_teams())
+            for position, team in enumerate(teams, 1):
+                GridPosition.objects.update_or_create(
+                    race=self,
+                    team=team,
+                    defaults={
+                        "position": position,
+                        "source": "CHAMPIONSHIP",
+                        "manually_overridden": False,
+                    },
+                )
+
+    def lock_grid(self):
+        """Lock grid positions to prevent further auto-assignment"""
+        self.grid_locked = True
+        self.save()
+
+    def unlock_grid(self):
+        """Unlock grid positions to allow auto-assignment"""
+        self.grid_locked = False
+        self.save()
+
+    def reset_grid_to_auto(self):
+        """Reset grid to auto-assigned positions (remove manual overrides)"""
+        if self.grid_locked:
+            return
+
+        # Delete all grid positions and re-auto-assign
+        GridPosition.objects.filter(race=self).delete()
+
+        if self.depends_on_race:
+            self.auto_assign_grid_positions(source_type="QUALIFYING")
+        else:
+            self.auto_assign_grid_positions(source_type="CHAMPIONSHIP")
+
 
 class round_pause(models.Model):
     round = models.ForeignKey(Round, on_delete=models.CASCADE)

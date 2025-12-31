@@ -48,6 +48,11 @@ from .models import (
     RoundPenalty,
     PenaltyQueue,
     Logo,
+    Race,
+    GridPosition,
+    Transponder,
+    RaceTransponderAssignment,
+    LapCrossing,
 )
 from .signals import race_end_requested
 from .serializers import ChangeLaneSerializer
@@ -2703,3 +2708,187 @@ def get_sponsor_logos(round_obj):
     return [
         {"name": "GoKartRace", "image": {"url": "/static/logos/gokartrace-logo.svg"}}
     ]
+
+
+# ============================================================
+# Grid Management Views (Phase 4 - Qualifying & Grid System)
+# ============================================================
+
+
+@login_required
+@user_passes_test(is_admin_user)
+def race_grid_management(request, race_id):
+    """Grid management view for race directors"""
+    race = get_object_or_404(Race, id=race_id)
+
+    # Get current grid positions (ordered by position)
+    grid_positions = GridPosition.objects.filter(race=race).order_by("position")
+
+    # Get teams not yet assigned to grid
+    assigned_team_ids = grid_positions.values_list("team_id", flat=True)
+    unassigned_teams = race.get_participating_teams().exclude(id__in=assigned_team_ids)
+
+    context = {
+        "race": race,
+        "grid_positions": grid_positions,
+        "unassigned_teams": unassigned_teams,
+        "is_locked": race.grid_locked,
+    }
+
+    return render(request, "pages/race_grid_management.html", context)
+
+
+@login_required
+@user_passes_test(is_admin_user)
+@csrf_exempt
+def update_grid_position(request, race_id):
+    """API endpoint to update a single grid position"""
+    if request.method != "POST":
+        return JsonResponse({"error": "Only POST method allowed"}, status=405)
+
+    try:
+        data = json.loads(request.body)
+        race = get_object_or_404(Race, id=race_id)
+
+        if race.grid_locked:
+            return JsonResponse(
+                {"success": False, "error": "Grid is locked"}, status=400
+            )
+
+        team_id = data.get("team_id")
+        new_position = data.get("position")
+
+        team = get_object_or_404(round_team, id=team_id)
+
+        GridPosition.objects.update_or_create(
+            race=race,
+            team=team,
+            defaults={
+                "position": new_position,
+                "source": "MANUAL",
+                "manually_overridden": True,
+                "override_reason": data.get("reason", "Manual adjustment"),
+            },
+        )
+
+        return JsonResponse({"success": True})
+
+    except Exception as e:
+        return JsonResponse({"success": False, "error": str(e)}, status=400)
+
+
+@login_required
+@user_passes_test(is_admin_user)
+@csrf_exempt
+def reorder_grid_positions(request, race_id):
+    """API endpoint to reorder multiple grid positions (drag & drop)"""
+    if request.method != "POST":
+        return JsonResponse({"error": "Only POST method allowed"}, status=405)
+
+    try:
+        data = json.loads(request.body)
+        race = get_object_or_404(Race, id=race_id)
+
+        if race.grid_locked:
+            return JsonResponse(
+                {"success": False, "error": "Grid is locked"}, status=400
+            )
+
+        # data should be list of {team_id, position}
+        positions_data = data.get("positions", [])
+
+        for item in positions_data:
+            team_id = item.get("team_id")
+            position = item.get("position")
+
+            team = get_object_or_404(round_team, id=team_id)
+
+            GridPosition.objects.update_or_create(
+                race=race,
+                team=team,
+                defaults={
+                    "position": position,
+                    "source": "MANUAL",
+                    "manually_overridden": True,
+                    "override_reason": "Drag and drop reorder",
+                },
+            )
+
+        return JsonResponse({"success": True})
+
+    except Exception as e:
+        return JsonResponse({"success": False, "error": str(e)}, status=400)
+
+
+@login_required
+@user_passes_test(is_admin_user)
+@require_POST
+def lock_grid(request, race_id):
+    """Lock grid positions"""
+    race = get_object_or_404(Race, id=race_id)
+    race.lock_grid()
+    messages.success(request, "Grid positions locked successfully")
+    return redirect("race_grid_management", race_id=race_id)
+
+
+@login_required
+@user_passes_test(is_admin_user)
+@require_POST
+def unlock_grid(request, race_id):
+    """Unlock grid positions"""
+    race = get_object_or_404(Race, id=race_id)
+    race.unlock_grid()
+    messages.success(request, "Grid positions unlocked successfully")
+    return redirect("race_grid_management", race_id=race_id)
+
+
+@login_required
+@user_passes_test(is_admin_user)
+@require_POST
+def reset_grid_to_auto(request, race_id):
+    """Reset grid to auto-assigned positions"""
+    race = get_object_or_404(Race, id=race_id)
+
+    if race.grid_locked:
+        messages.error(request, "Cannot reset - grid is locked")
+        return redirect("race_grid_management", race_id=race_id)
+
+    race.reset_grid_to_auto()
+    messages.success(request, "Grid positions reset to auto-assigned")
+    return redirect("race_grid_management", race_id=race_id)
+
+
+@login_required
+@user_passes_test(is_admin_user)
+@require_POST
+def auto_assign_from_qualifying(request, race_id):
+    """Auto-assign grid from qualifying results"""
+    race = get_object_or_404(Race, id=race_id)
+
+    if race.grid_locked:
+        messages.error(request, "Cannot auto-assign - grid is locked")
+        return redirect("race_grid_management", race_id=race_id)
+
+    if not race.depends_on_race:
+        messages.error(request, "No qualifying race configured")
+        return redirect("race_grid_management", race_id=race_id)
+
+    race.auto_assign_grid_positions(source_type="QUALIFYING")
+    messages.success(request, "Grid assigned from qualifying results")
+    return redirect("race_grid_management", race_id=race_id)
+
+
+@login_required
+@user_passes_test(is_admin_user)
+@require_POST
+def auto_assign_from_championship(request, race_id):
+    """Auto-assign grid from championship standings"""
+    race = get_object_or_404(Race, id=race_id)
+
+    if race.grid_locked:
+        messages.error(request, "Cannot auto-assign - grid is locked")
+        return redirect("race_grid_management", race_id=race_id)
+
+    race.auto_assign_grid_positions(source_type="CHAMPIONSHIP")
+    messages.success(request, "Grid assigned from championship standings")
+    return redirect("race_grid_management", race_id=race_id)

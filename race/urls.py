@@ -154,4 +154,45 @@ urlpatterns = [
         views.delay_penalty,
         name="delay_penalty",
     ),
+    # Grid Management (Phase 4 - Qualifying & Grid System)
+    path(
+        "race/<int:race_id>/grid/",
+        views.race_grid_management,
+        name="race_grid_management",
+    ),
+    path(
+        "api/race/<int:race_id>/grid/update/",
+        views.update_grid_position,
+        name="update_grid_position",
+    ),
+    path(
+        "api/race/<int:race_id>/grid/reorder/",
+        views.reorder_grid_positions,
+        name="reorder_grid_positions",
+    ),
+    path(
+        "race/<int:race_id>/grid/lock/",
+        views.lock_grid,
+        name="lock_grid",
+    ),
+    path(
+        "race/<int:race_id>/grid/unlock/",
+        views.unlock_grid,
+        name="unlock_grid",
+    ),
+    path(
+        "race/<int:race_id>/grid/reset/",
+        views.reset_grid_to_auto,
+        name="reset_grid_to_auto",
+    ),
+    path(
+        "race/<int:race_id>/grid/auto-assign-qualifying/",
+        views.auto_assign_from_qualifying,
+        name="auto_assign_from_qualifying",
+    ),
+    path(
+        "race/<int:race_id>/grid/auto-assign-championship/",
+        views.auto_assign_from_championship,
+        name="auto_assign_from_championship",
+    ),
 ]
