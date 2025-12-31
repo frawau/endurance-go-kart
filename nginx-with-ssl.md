@@ -3,26 +3,39 @@
 ## Architecture Overview
 
 **Two-container approach:**
-1. **acme.sh container** - Handles certificate generation/renewal (uses Let's Encrypt)
+1. **acme.sh container** - Handles certificate generation/renewal (supports Let's Encrypt and ZeroSSL)
 2. **nginx container** - Serves HTTPS with certificates
 
 ## SSL Modes
 
-The system supports three SSL modes controlled by the `SSL_MODE` environment variable:
+The system supports four SSL modes controlled by the `SSL_MODE` environment variable:
 
 1. **`none`** - HTTP only (default, no SSL)
-2. **`acme`** - Automatic SSL with Let's Encrypt via acme.sh
-3. **`manual`** - Manual SSL (you provide your own certificates)
+2. **`letsencrypt`** - Automatic SSL with Let's Encrypt via acme.sh (recommended)
+3. **`acme`** - Automatic SSL with ZeroSSL via acme.sh (requires email registration)
+4. **`manual`** - Manual SSL (you provide your own certificates)
 
 ## Quick Start
 
-### Automatic SSL (Recommended)
+### Automatic SSL with Let's Encrypt (Recommended)
 
 ```bash
-# 1. Enable acme mode (updates .env)
+# 1. Enable Let's Encrypt mode (updates .env)
+./race-manager.sh enable-letsencrypt
+
+# 2. Generate certificate
+./race-manager.sh generate-cert
+
+# Your site is now available at https://your-domain.com
+```
+
+### Automatic SSL with ZeroSSL (Alternative)
+
+```bash
+# 1. Enable ZeroSSL mode (updates .env)
 ./race-manager.sh enable-acme
 
-# 2. Generate certificate (uses Let's Encrypt)
+# 2. Generate certificate
 ./race-manager.sh generate-cert
 
 # Your site is now available at https://your-domain.com
@@ -33,9 +46,9 @@ The system supports three SSL modes controlled by the `SSL_MODE` environment var
 Required in `.env` file:
 
 ```bash
-SSL_MODE=acme                           # or 'none' or 'manual'
+SSL_MODE=letsencrypt                    # or 'acme', 'manual', or 'none'
 APP_DOMAIN=your-domain.com              # Your domain name
-SSL_EMAIL=admin@your-domain.com         # Email for Let's Encrypt notifications
+SSL_EMAIL=admin@your-domain.com         # Email for certificate notifications
 APP_PORT=5085                           # HTTP port (default: 5085)
 ```
 
@@ -43,7 +56,7 @@ APP_PORT=5085                           # HTTP port (default: 5085)
 
 ### Certificate Generation Container (acme.sh)
 - Uses official `neilpang/acme.sh` Docker image
-- Configured to use **Let's Encrypt** (not ZeroSSL)
+- Supports both **Let's Encrypt** and **ZeroSSL** certificate authorities
 - Generates certificates using HTTP-01 challenge
 - Stores certificates in shared Docker volume
 - Automatic renewal via daemon mode
@@ -51,17 +64,18 @@ APP_PORT=5085                           # HTTP port (default: 5085)
 ### Nginx Configuration
 - Reads `SSL_MODE` environment variable at startup
 - **HTTP only mode** (`SSL_MODE=none`): Serves on port 80
-- **HTTPS mode** (`SSL_MODE=acme` or `manual`): Serves on ports 80 and 443
+- **HTTPS mode** (`SSL_MODE=letsencrypt`, `acme`, or `manual`): Serves on ports 80 and 443
   - Port 80: Redirects to HTTPS (except /.well-known/acme-challenge/)
   - Port 443: Serves HTTPS with SSL certificates
 
 ### Startup Orchestration
 1. acme.sh container starts when `--profile ssl-acme` is used
-2. `race-manager.sh generate-cert` configures Let's Encrypt as CA
-3. Registers your email with Let's Encrypt
-4. Generates certificate via HTTP-01 challenge
-5. Installs certificates to shared volume
-6. nginx automatically picks up certificates and enables HTTPS
+2. `race-manager.sh generate-cert` configures certificate authority:
+   - **letsencrypt mode**: Sets Let's Encrypt as CA, registers email
+   - **acme mode**: Uses ZeroSSL (default), registers email
+3. Generates certificate via HTTP-01 challenge
+4. Installs certificates to shared volume
+5. nginx automatically picks up certificates and enables HTTPS
 
 ## race-manager.sh Commands
 
@@ -78,11 +92,12 @@ The `race-manager.sh` script simplifies SSL management:
 
 ### SSL Management
 ```bash
-./race-manager.sh enable-acme     # Enable automatic SSL mode
-./race-manager.sh enable-manual   # Enable manual SSL mode
-./race-manager.sh disable-ssl     # Disable SSL (HTTP only)
-./race-manager.sh generate-cert   # Generate Let's Encrypt certificate
-./race-manager.sh install-cert    # Install manual certificates
+./race-manager.sh enable-letsencrypt  # Enable Let's Encrypt SSL (recommended)
+./race-manager.sh enable-acme         # Enable ZeroSSL
+./race-manager.sh enable-manual       # Enable manual SSL mode
+./race-manager.sh disable-ssl         # Disable SSL (HTTP only)
+./race-manager.sh generate-cert       # Generate certificate (auto-detects mode)
+./race-manager.sh install-cert        # Install manual certificates
 ```
 
 ## Detailed Setup Guide
@@ -111,7 +126,7 @@ The `race-manager.sh` script simplifies SSL management:
 
 Edit `.env` file:
 ```bash
-SSL_MODE=acme
+SSL_MODE=letsencrypt               # or 'acme' for ZeroSSL
 APP_DOMAIN=your-domain.com
 SSL_EMAIL=admin@your-domain.com
 APP_PORT=5085
@@ -119,7 +134,7 @@ APP_PORT=5085
 
 Or use the helper command:
 ```bash
-./race-manager.sh enable-acme
+./race-manager.sh enable-letsencrypt   # or enable-acme for ZeroSSL
 # Then edit .env to set APP_DOMAIN and SSL_EMAIL
 ```
 
@@ -131,7 +146,7 @@ Or use the helper command:
 
 This command will:
 - Start acme.sh container
-- Configure Let's Encrypt as the CA
+- Configure certificate authority (Let's Encrypt or ZeroSSL based on SSL_MODE)
 - Register your email
 - Generate certificate via HTTP-01 challenge
 - Install certificate

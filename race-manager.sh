@@ -45,26 +45,27 @@ show_help() {
     echo "Usage: $0 [command]"
     echo ""
     echo "Service Management:"
-    echo "  start           Start application (HTTP mode)"
-    echo "  stop            Stop all services"
-    echo "  restart         Restart services with current configuration"
-    echo "  logs            Show service logs"
-    echo "  status          Show current configuration and service status"
+    echo "  start              Start application (HTTP mode)"
+    echo "  stop               Stop all services"
+    echo "  restart            Restart services with current configuration"
+    echo "  logs               Show service logs"
+    echo "  status             Show current configuration and service status"
     echo ""
     echo "SSL Management:"
-    echo "  enable-acme     Enable automatic SSL with Let's Encrypt"
-    echo "  enable-manual   Enable manual SSL (provide your own certificates)"
-    echo "  disable-ssl     Disable SSL (HTTP only mode)"
-    echo "  generate-cert   Generate SSL certificate (acme mode only)"
-    echo "  install-cert    Install manual SSL certificates"
+    echo "  enable-letsencrypt Enable automatic SSL with Let's Encrypt (recommended)"
+    echo "  enable-acme        Enable automatic SSL with ZeroSSL"
+    echo "  enable-manual      Enable manual SSL (provide your own certificates)"
+    echo "  disable-ssl        Disable SSL (HTTP only mode)"
+    echo "  generate-cert      Generate SSL certificate (automatic modes only)"
+    echo "  install-cert       Install manual SSL certificates"
     echo ""
     echo "Utility:"
-    echo "  help            Show this help message"
+    echo "  help               Show this help message"
     echo ""
     echo "Examples:"
     echo "  $0 start                    # Start in HTTP mode"
-    echo "  $0 enable-acme              # Configure automatic SSL"
-    echo "  $0 generate-cert            # Generate Let's Encrypt certificate"
+    echo "  $0 enable-letsencrypt       # Configure Let's Encrypt SSL"
+    echo "  $0 generate-cert            # Generate certificate"
     echo ""
 }
 
@@ -88,15 +89,30 @@ show_status() {
     fi
 }
 
+enable_letsencrypt() {
+    log_info "Enabling automatic SSL with Let's Encrypt..."
+
+    # Update .env file
+    sed -i 's/^# SSL_MODE=.*/SSL_MODE=letsencrypt/' "$ENV_FILE"
+    sed -i 's/^SSL_MODE=.*/SSL_MODE=letsencrypt/' "$ENV_FILE"
+    sed -i 's/^# SSL_EMAIL=.*/SSL_EMAIL='"${SSL_EMAIL:-admin@$APP_DOMAIN}"'/' "$ENV_FILE"
+
+    log_success "SSL mode set to 'letsencrypt'"
+    log_info "To apply changes, run: $0 restart"
+    log_info "To generate certificate, run: $0 generate-cert"
+}
+
 enable_acme() {
-    log_info "Enabling automatic SSL with acme.sh..."
+    log_info "Enabling automatic SSL with ZeroSSL..."
+    log_warning "Note: ZeroSSL requires email registration first"
+    log_info "For easier setup, use: $0 enable-letsencrypt"
 
     # Update .env file
     sed -i 's/^# SSL_MODE=.*/SSL_MODE=acme/' "$ENV_FILE"
+    sed -i 's/^SSL_MODE=.*/SSL_MODE=acme/' "$ENV_FILE"
     sed -i 's/^# SSL_EMAIL=.*/SSL_EMAIL='"${SSL_EMAIL:-admin@$APP_DOMAIN}"'/' "$ENV_FILE"
-    sed -i 's/^# ACME_CHALLENGE=.*/ACME_CHALLENGE=http/' "$ENV_FILE"
 
-    log_success "SSL mode set to 'acme'"
+    log_success "SSL mode set to 'acme' (ZeroSSL)"
     log_info "To apply changes, run: $0 restart"
     log_info "To generate certificate, run: $0 generate-cert"
 }
@@ -145,9 +161,10 @@ show_logs() {
 }
 
 generate_cert() {
-    if [ "${SSL_MODE}" != "acme" ]; then
-        log_error "Certificate generation only available in 'acme' mode"
-        log_info "Run '$0 enable-acme' first"
+    if [ "${SSL_MODE}" != "acme" ] && [ "${SSL_MODE}" != "letsencrypt" ]; then
+        log_error "Certificate generation only available in automatic SSL modes"
+        log_info "Run '$0 enable-letsencrypt' or '$0 enable-acme' first"
+        log_info "Current SSL_MODE: ${SSL_MODE:-not set}"
         exit 1
     fi
 
@@ -163,11 +180,18 @@ generate_cert() {
     log_info "Waiting for services to start..."
     sleep 5
 
-    log_info "Configuring acme.sh to use Let's Encrypt..."
-    docker compose exec acme-sh acme.sh --set-default-ca --server letsencrypt
+    # Configure CA based on SSL_MODE
+    if [ "${SSL_MODE}" = "letsencrypt" ]; then
+        log_info "Configuring acme.sh to use Let's Encrypt..."
+        docker compose exec acme-sh acme.sh --set-default-ca --server letsencrypt
 
-    log_info "Registering account with Let's Encrypt (${SSL_EMAIL})..."
-    docker compose exec acme-sh acme.sh --register-account -m "${SSL_EMAIL}"
+        log_info "Registering account with Let's Encrypt (${SSL_EMAIL})..."
+        docker compose exec acme-sh acme.sh --register-account -m "${SSL_EMAIL}"
+    elif [ "${SSL_MODE}" = "acme" ]; then
+        log_info "Configuring acme.sh to use ZeroSSL (default)..."
+        log_info "Registering account with ZeroSSL (${SSL_EMAIL})..."
+        docker compose exec acme-sh acme.sh --register-account -m "${SSL_EMAIL}"
+    fi
 
     log_info "Generating SSL certificate for ${APP_DOMAIN}..."
     docker compose exec acme-sh acme.sh --issue -d "${APP_DOMAIN}" --webroot /var/www/certbot
@@ -183,7 +207,12 @@ generate_cert() {
         log_success "SSL certificate generated and installed!"
         log_info "Restarting nginx to enable HTTPS..."
         docker compose restart nginx
-        log_success "HTTPS is now enabled at https://${APP_DOMAIN}"
+
+        if [ "${SSL_MODE}" = "letsencrypt" ]; then
+            log_success "HTTPS is now enabled at https://${APP_DOMAIN} (Let's Encrypt)"
+        else
+            log_success "HTTPS is now enabled at https://${APP_DOMAIN} (ZeroSSL)"
+        fi
     else
         log_error "Certificate generation failed!"
         log_info "Check that:"
@@ -218,7 +247,7 @@ install_cert() {
 restart_services() {
     log_info "Restarting services with current configuration..."
 
-    if [ "${SSL_MODE}" = "acme" ]; then
+    if [ "${SSL_MODE}" = "acme" ] || [ "${SSL_MODE}" = "letsencrypt" ]; then
         log_info "Starting with acme.sh profile..."
         docker compose --profile ssl-acme down
         docker compose --profile ssl-acme up -d
@@ -246,6 +275,9 @@ case "${1:-help}" in
         ;;
     "status")
         show_status
+        ;;
+    "enable-letsencrypt")
+        enable_letsencrypt
         ;;
     "enable-acme")
         enable_acme

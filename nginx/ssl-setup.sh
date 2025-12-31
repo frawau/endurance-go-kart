@@ -33,7 +33,7 @@ case "$SSL_MODE" in
         sed -i '/if ($ssl_redirect = "yes")/,/}/d' /etc/nginx/conf.d/default.conf
         ;;
 
-    "acme"|"manual")
+    "letsencrypt"|"acme"|"manual")
         echo "SSL Setup: Configuring HTTPS mode (${SSL_MODE})"
         # Set variables for HTTPS
         export ssl_redirect="yes"
@@ -57,7 +57,7 @@ case "$SSL_MODE" in
 
     *)
         echo "SSL Setup: Error - Invalid SSL_MODE: $SSL_MODE"
-        echo "SSL Setup: Valid options: none, acme, manual"
+        echo "SSL Setup: Valid options: none, letsencrypt, acme, manual"
         exit 1
         ;;
 esac
