@@ -875,3 +875,62 @@ class TimingConsumer(AsyncWebsocketConsumer):
         message = {"type": "command", "command": command_type, **kwargs}
         signed = self.sign_message(message)
         await self.send(text_data=json.dumps(signed))
+
+
+class LeaderboardConsumer(AsyncWebsocketConsumer):
+    """
+    WebSocket consumer for real-time leaderboard updates.
+    Broadcasts standings updates when lap crossings occur.
+    """
+
+    async def connect(self):
+        self.race_id = self.scope["url_route"]["kwargs"]["race_id"]
+        self.race_group_name = f"leaderboard_{self.race_id}"
+
+        # Join race leaderboard group
+        await self.channel_layer.group_add(self.race_group_name, self.channel_name)
+
+        await self.accept()
+
+        # Send initial standings
+        standings = await self.get_current_standings()
+        await self.send(
+            text_data=json.dumps({"type": "standings_update", "standings": standings})
+        )
+
+    async def disconnect(self, close_code):
+        # Leave race leaderboard group
+        await self.channel_layer.group_discard(self.race_group_name, self.channel_name)
+
+    async def receive(self, text_data):
+        """Handle incoming messages (if needed for future features)"""
+        pass
+
+    async def lap_crossing_update(self, event):
+        """
+        Called when a lap crossing occurs.
+        Recalculate and broadcast standings.
+        """
+        # Debounce: only send updates at most once per second
+        current_time = time.time()
+        if not hasattr(self, "_last_update"):
+            self._last_update = 0
+
+        if current_time - self._last_update < 1.0:
+            return  # Skip this update
+
+        self._last_update = current_time
+
+        standings = await self.get_current_standings()
+        await self.send(
+            text_data=json.dumps({"type": "standings_update", "standings": standings})
+        )
+
+    @database_sync_to_async
+    def get_current_standings(self):
+        """Get current race standings"""
+        try:
+            race = Race.objects.get(id=self.race_id)
+            return race.calculate_race_standings()
+        except Race.DoesNotExist:
+            return []

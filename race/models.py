@@ -1251,6 +1251,96 @@ class Race(models.Model):
         else:
             self.auto_assign_grid_positions(source_type="CHAMPIONSHIP")
 
+    def calculate_race_standings(self):
+        """
+        Calculate current race standings.
+        Returns list of dicts with team info, laps, times, positions, and gaps.
+        """
+        if not self.started:
+            return []
+
+        standings = []
+        for team in self.get_participating_teams():
+            # Get all valid lap crossings for this team
+            laps = self.lap_crossings.filter(team=team, is_valid=True).order_by(
+                "crossing_time"
+            )
+
+            if laps.exists():
+                laps_completed = laps.count()
+                last_crossing = laps.last()
+                total_time = last_crossing.crossing_time - self.started
+                last_lap_time = last_crossing.lap_time
+            else:
+                laps_completed = 0
+                total_time = None
+                last_lap_time = None
+
+            # Get grid position if available
+            try:
+                grid_pos = GridPosition.objects.get(race=self, team=team)
+                starting_position = grid_pos.position
+            except GridPosition.DoesNotExist:
+                starting_position = None
+
+            standings.append(
+                {
+                    "team_id": team.id,
+                    "team_number": team.team.number,
+                    "team_name": team.team.name,
+                    "laps_completed": laps_completed,
+                    "total_time": total_time.total_seconds() if total_time else None,
+                    "total_time_formatted": str(total_time).split(".")[0]
+                    if total_time
+                    else "—",
+                    "last_lap_time": last_lap_time.total_seconds()
+                    if last_lap_time
+                    else None,
+                    "last_lap_time_formatted": str(last_lap_time).split(".")[0]
+                    if last_lap_time
+                    else "—",
+                    "starting_position": starting_position,
+                }
+            )
+
+        # Sort by laps (desc), then total time (asc)
+        standings.sort(
+            key=lambda x: (
+                -x["laps_completed"],
+                x["total_time"] if x["total_time"] is not None else float("inf"),
+            )
+        )
+
+        # Add positions and gaps
+        for idx, standing in enumerate(standings, 1):
+            standing["position"] = idx
+
+            if idx == 1:
+                standing["gap_to_leader"] = "—"
+                standing["position_change"] = 0
+            else:
+                leader = standings[0]
+                if standing["laps_completed"] < leader["laps_completed"]:
+                    lap_diff = leader["laps_completed"] - standing["laps_completed"]
+                    standing[
+                        "gap_to_leader"
+                    ] = f"-{lap_diff} lap{'s' if lap_diff > 1 else ''}"
+                elif standing["total_time"] and leader["total_time"]:
+                    time_diff = standing["total_time"] - leader["total_time"]
+                    standing["gap_to_leader"] = f"+{time_diff:.1f}s"
+                else:
+                    standing["gap_to_leader"] = "—"
+
+                # Calculate position change from starting grid
+                if standing["starting_position"]:
+                    standing["position_change"] = (
+                        standing["starting_position"] - standing["position"]
+                    )
+                else:
+                    standing["position_change"] = 0
+
+        return standings
+
 
 class round_pause(models.Model):
     round = models.ForeignKey(Round, on_delete=models.CASCADE)

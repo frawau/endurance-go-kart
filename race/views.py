@@ -2892,3 +2892,29 @@ def auto_assign_from_championship(request, race_id):
     race.auto_assign_grid_positions(source_type="CHAMPIONSHIP")
     messages.success(request, "Grid assigned from championship standings")
     return redirect("race_grid_management", race_id=race_id)
+
+
+# ============================================================
+# Leaderboard Views (Phase 5 - Leaderboard & Displays)
+# ============================================================
+
+
+def public_leaderboard(request, race_id):
+    """Public full-screen leaderboard display"""
+    race = get_object_or_404(Race, id=race_id)
+
+    # Get initial standings
+    standings = race.calculate_race_standings() if race.started else []
+
+    # Get race configuration
+    effective_lap_count = race.get_effective_lap_count()
+    effective_time_limit = race.get_effective_time_limit()
+
+    context = {
+        "race": race,
+        "standings": standings,
+        "effective_lap_count": effective_lap_count,
+        "effective_time_limit": effective_time_limit,
+    }
+
+    return render(request, "pages/public_leaderboard.html", context)

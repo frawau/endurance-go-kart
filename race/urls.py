@@ -195,4 +195,10 @@ urlpatterns = [
         views.auto_assign_from_championship,
         name="auto_assign_from_championship",
     ),
+    # Leaderboard (Phase 5 - Leaderboard & Displays)
+    path(
+        "leaderboard/<int:race_id>/",
+        views.public_leaderboard,
+        name="public_leaderboard",
+    ),
 ]
