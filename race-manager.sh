@@ -222,8 +222,7 @@ generate_cert() {
         docker compose exec acme-sh acme.sh --install-cert -d "${APP_DOMAIN}" \
             --cert-file /etc/ssl/certs/cert.pem \
             --key-file /etc/ssl/certs/privkey.pem \
-            --fullchain-file /etc/ssl/certs/fullchain.pem \
-            --reloadcmd "docker restart nginx"
+            --fullchain-file /etc/ssl/certs/fullchain.pem
 
         log_success "SSL certificate generated and installed!"
         log_info "Restarting nginx to enable HTTPS..."
