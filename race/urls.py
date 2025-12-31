@@ -227,4 +227,35 @@ urlpatterns = [
         views.validate_lap,
         name="validate_lap",
     ),
+    # Transponder Matching (Phase 7 - Race Director Workflow)
+    path(
+        "race/<int:race_id>/transponders/",
+        views.transponder_matching,
+        name="transponder_matching",
+    ),
+    path(
+        "api/race/<int:race_id>/transponder-assignments/",
+        views.get_transponder_assignments,
+        name="get_transponder_assignments",
+    ),
+    path(
+        "api/race/<int:race_id>/assign-transponder/",
+        views.assign_transponder,
+        name="assign_transponder",
+    ),
+    path(
+        "api/transponder-assignment/<int:assignment_id>/remove/",
+        views.remove_transponder_assignment,
+        name="remove_transponder_assignment",
+    ),
+    path(
+        "api/race/<int:race_id>/lock-transponder-assignments/",
+        views.lock_transponder_assignments,
+        name="lock_transponder_assignments",
+    ),
+    path(
+        "api/race/<int:race_id>/available-transponders/",
+        views.get_available_transponders,
+        name="get_available_transponders",
+    ),
 ]

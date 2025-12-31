@@ -3108,3 +3108,187 @@ def validate_lap(request, crossing_id):
 
     except Exception as e:
         return JsonResponse({"success": False, "error": str(e)}, status=400)
+
+
+# ============================================================
+# Race Director Workflow (Phase 7 - Transponder Matching & UI Updates)
+# ============================================================
+
+
+@login_required
+@user_passes_test(is_admin_user)
+def transponder_matching(request, race_id):
+    """Transponder matching interface for race setup"""
+    race = get_object_or_404(Race, id=race_id)
+
+    # Get all transponders
+    transponders = Transponder.objects.filter(active=True).order_by("transponder_id")
+
+    # Get current assignments
+    assignments = RaceTransponderAssignment.objects.filter(race=race).select_related(
+        "team", "transponder"
+    )
+
+    context = {
+        "race": race,
+        "transponders": transponders,
+        "assignments": assignments,
+    }
+
+    return render(request, "pages/transponder_matching.html", context)
+
+
+@login_required
+@user_passes_test(is_admin_user)
+def get_transponder_assignments(request, race_id):
+    """API endpoint to get current transponder assignments"""
+    race = get_object_or_404(Race, id=race_id)
+
+    assignments = RaceTransponderAssignment.objects.filter(race=race).select_related(
+        "team__team", "transponder"
+    )
+
+    data = []
+    for assignment in assignments:
+        data.append(
+            {
+                "id": assignment.id,
+                "team_id": assignment.team.id,
+                "team_number": assignment.team.team.number,
+                "team_name": assignment.team.team.name,
+                "kart_number": assignment.kart_number,
+                "transponder_id": assignment.transponder.transponder_id,
+                "confirmed": assignment.confirmed,
+            }
+        )
+
+    return JsonResponse({"assignments": data})
+
+
+@login_required
+@user_passes_test(is_admin_user)
+@csrf_exempt
+@require_POST
+def assign_transponder(request, race_id):
+    """Manually assign a transponder to a team"""
+    try:
+        data = json.loads(request.body)
+        race = get_object_or_404(Race, id=race_id)
+
+        team_id = data.get("team_id")
+        transponder_id = data.get("transponder_id")
+        kart_number = data.get("kart_number")
+
+        team = get_object_or_404(round_team, id=team_id)
+        transponder = get_object_or_404(Transponder, transponder_id=transponder_id)
+
+        # Create or update assignment
+        assignment, created = RaceTransponderAssignment.objects.update_or_create(
+            race=race,
+            team=team,
+            defaults={
+                "transponder": transponder,
+                "kart_number": kart_number,
+                "confirmed": True,
+            },
+        )
+
+        return JsonResponse(
+            {
+                "success": True,
+                "message": f"Transponder {transponder_id} assigned to Team #{team.team.number}",
+                "assignment_id": assignment.id,
+            }
+        )
+
+    except Exception as e:
+        return JsonResponse({"success": False, "error": str(e)}, status=400)
+
+
+@login_required
+@user_passes_test(is_admin_user)
+@csrf_exempt
+@require_POST
+def remove_transponder_assignment(request, assignment_id):
+    """Remove a transponder assignment"""
+    try:
+        assignment = get_object_or_404(RaceTransponderAssignment, id=assignment_id)
+        team_number = assignment.team.team.number
+        assignment.delete()
+
+        return JsonResponse(
+            {
+                "success": True,
+                "message": f"Transponder assignment removed from Team #{team_number}",
+            }
+        )
+
+    except Exception as e:
+        return JsonResponse({"success": False, "error": str(e)}, status=400)
+
+
+@login_required
+@user_passes_test(is_admin_user)
+@csrf_exempt
+@require_POST
+def lock_transponder_assignments(request, race_id):
+    """Lock all transponder assignments for the race"""
+    try:
+        race = get_object_or_404(Race, id=race_id)
+
+        # Check if all teams have assignments
+        participating_teams = race.get_participating_teams_count()
+        assigned_teams = RaceTransponderAssignment.objects.filter(race=race).count()
+
+        if assigned_teams < participating_teams:
+            return JsonResponse(
+                {
+                    "success": False,
+                    "error": f"Not all teams have transponders assigned ({assigned_teams}/{participating_teams})",
+                },
+                status=400,
+            )
+
+        # Mark all as confirmed
+        RaceTransponderAssignment.objects.filter(race=race).update(confirmed=True)
+
+        return JsonResponse(
+            {
+                "success": True,
+                "message": f"All {assigned_teams} transponder assignments locked",
+            }
+        )
+
+    except Exception as e:
+        return JsonResponse({"success": False, "error": str(e)}, status=400)
+
+
+@login_required
+@user_passes_test(is_admin_user)
+def get_available_transponders(request, race_id):
+    """API endpoint to get transponders not yet assigned to this race"""
+    race = get_object_or_404(Race, id=race_id)
+
+    # Get assigned transponder IDs
+    assigned_transponder_ids = RaceTransponderAssignment.objects.filter(
+        race=race
+    ).values_list("transponder__transponder_id", flat=True)
+
+    # Get unassigned active transponders
+    available = Transponder.objects.filter(active=True).exclude(
+        transponder_id__in=assigned_transponder_ids
+    )
+
+    data = []
+    for transponder in available:
+        data.append(
+            {
+                "transponder_id": transponder.transponder_id,
+                "description": transponder.description,
+                "last_seen": transponder.last_seen.isoformat()
+                if transponder.last_seen
+                else None,
+            }
+        )
+
+    return JsonResponse({"transponders": data})
