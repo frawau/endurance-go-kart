@@ -508,6 +508,32 @@ class StopAndGoConsumer(AsyncWebsocketConsumer):
             )
         )
 
+    async def race_lap_update(self, event):
+        """Broadcast lap crossing updates to race control"""
+        await self.send(
+            text_data=json.dumps(
+                {
+                    "type": "race_lap_update",
+                    "race_id": event["race_id"],
+                    "team_number": event["team_number"],
+                    "lap_number": event["lap_number"],
+                    "is_suspicious": event.get("is_suspicious", False),
+                }
+            )
+        )
+
+    async def race_finished(self, event):
+        """Broadcast race finished notification to race control"""
+        await self.send(
+            text_data=json.dumps(
+                {
+                    "type": "race_finished",
+                    "race_id": event["race_id"],
+                    "race_type": event["race_type"],
+                }
+            )
+        )
+
     async def handle_penalty_served_from_station(self, team_number):
         """Handle when station reports a penalty as served"""
         from channels.db import database_sync_to_async
@@ -845,6 +871,34 @@ class TimingConsumer(AsyncWebsocketConsumer):
                     },
                 )
             )
+
+            # Also broadcast to race control (round group)
+            asyncio.create_task(
+                self.channel_layer.group_send(
+                    f"round_{race.round.id}",
+                    {
+                        "type": "race_lap_update",
+                        "race_id": race_id,
+                        "team_number": team_number,
+                        "lap_number": lap_number,
+                        "is_suspicious": crossing.is_suspicious,
+                    },
+                )
+            )
+
+            # Check if race is finished
+            if race.is_race_finished():
+                print(f"🏁 Race {race_id} finished!")
+                asyncio.create_task(
+                    self.channel_layer.group_send(
+                        f"round_{race.round.id}",
+                        {
+                            "type": "race_finished",
+                            "race_id": race_id,
+                            "race_type": race.race_type,
+                        },
+                    )
+                )
 
         except Race.DoesNotExist:
             print(f"Timing: Race {race_id} not found")
