@@ -18,7 +18,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/4.1/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.environ.get("SECRET_KEY", "TODO_SET_SECRET_KEY" )
+SECRET_KEY = os.environ.get("SECRET_KEY", "TODO_SET_SECRET_KEY")
 
 # Stop and Go Station HMAC Secret
 STOPANDGO_HMAC_SECRET = os.environ.get(
@@ -27,15 +27,13 @@ STOPANDGO_HMAC_SECRET = os.environ.get(
 
 DEBUG = os.environ.get("DEBUG", True)
 APP_DOMAIN = os.getenv("APP_DOMAIN", "gokart.wautier.eu")
+APP_PORT = os.getenv("APP_PORT", "5085")
 
 # HOSTs List
 ALLOWED_HOSTS = [
     "127.0.0.1",
-    "192.168.77.8",
-    "192.168.77.97",
     "localhost",
     APP_DOMAIN,
-    ".wautier.eu",
 ]
 
 # Add here your deployment HOSTS
@@ -48,6 +46,8 @@ CSRF_TRUSTED_ORIGINS = [
     f"https://{APP_DOMAIN}",
     f"http://{APP_DOMAIN}:8000",
     f"https://{APP_DOMAIN}:8000",
+    f"http://{APP_DOMAIN}:{APP_PORT}",
+    f"https://{APP_DOMAIN}:{APP_PORT}",
 ]
 
 RENDER_EXTERNAL_HOSTNAME = os.environ.get("RENDER_EXTERNAL_HOSTNAME")
@@ -66,7 +66,6 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "channels",
-    "daphne",
     "race",
     "django.contrib.staticfiles",
     "theme_material_kit",
@@ -92,7 +91,7 @@ MIDDLEWARE = [
 
 ROOT_URLCONF = "core.urls"
 
-HOME_TEMPLATES = os.path.join(BASE_DIR, "templates")
+HOME_TEMPLATES = BASE_DIR / "templates"
 
 TEMPLATES = [
     {
@@ -116,37 +115,20 @@ WSGI_APPLICATION = "core.wsgi.application"
 # For the debug tool bar
 INTERNAL_IPS = [
     "127.0.0.1",
-    "192.168.77.8",
-    "192.168.77.1",
 ]
 # Database
 # https://docs.djangoproject.com/en/4.1/ref/settings/#databases
 
-DB_ENGINE = os.getenv("DB_ENGINE", None)
-DB_USERNAME = os.getenv("DB_USERNAME", None)
-DB_PASS = os.getenv("DB_PASS", None)
-DB_HOST = os.getenv("DB_HOST", None)
-DB_PORT = os.getenv("DB_PORT", None)
-DB_NAME = os.getenv("DB_NAME", None)
-
-if DB_ENGINE and DB_NAME and DB_USERNAME:
-    DATABASES = {
-        "default": {
-            "ENGINE": "django.db.backends." + DB_ENGINE,
-            "NAME": DB_NAME,
-            "USER": DB_USERNAME,
-            "PASSWORD": DB_PASS,
-            "HOST": DB_HOST,
-            "PORT": DB_PORT,
-        },
+DATABASES = {
+    "default": {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": os.environ.get("POSTGRES_DB"),
+        "USER": os.environ.get("POSTGRES_USER"),
+        "PASSWORD": os.environ.get("POSTGRES_PASSWORD"),
+        "HOST": os.environ.get("POSTGRES_HOST"),
+        "PORT": os.environ.get("POSTGRES_PORT"),
     }
-else:
-    DATABASES = {
-        "default": {
-            "ENGINE": "django.db.backends.sqlite3",
-            "NAME": "db.sqlite3",
-        }
-    }
+}
 
 # Password validation
 # https://docs.djangoproject.com/en/4.1/ref/settings/#auth-password-validators
@@ -172,7 +154,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = "en-gb"
 
-TIME_ZONE = "Asia/Bangkok"
+TIME_ZONE = os.getenv("TZ", "Asia/Bangkok")
 
 USE_I18N = True
 
@@ -183,9 +165,9 @@ USE_TZ = False
 # https://docs.djangoproject.com/en/4.1/howto/static-files/
 
 STATIC_URL = "/static/"
-STATIC_ROOT = BASE_DIR
+STATIC_ROOT = BASE_DIR / "static"
 
-STATICFILES_DIRS = (os.path.join(BASE_DIR, "static"),)
+STATICFILES_DIRS = []
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/4.1/ref/settings/#default-auto-field

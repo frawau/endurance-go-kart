@@ -11,7 +11,7 @@ def active_round_data(request):
     myvals = {}
 
     if locv is None:
-        locv = "active_round_change_lanes"
+        locv = "active_round_change_lanes,has_active_round"
         # Value not in cache, fetch from database
         end_date = dt.date.today()
         start_date = end_date - dt.timedelta(days=1)
@@ -20,6 +20,7 @@ def active_round_data(request):
         ).first()
 
         myvals["active_round_change_lanes"] = cround.change_lanes if cround else 0
+        myvals["has_active_round"] = cround is not None
 
         # Cache the value for 1 hour (or however long you need)
         cache.set(
@@ -27,6 +28,7 @@ def active_round_data(request):
             myvals["active_round_change_lanes"],
             3 * 60 * 60,
         )
+        cache.set("has_active_round", myvals["has_active_round"], 3 * 60 * 60)
 
         props = Config.objects.all()
         for aprop in props:

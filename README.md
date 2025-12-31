@@ -88,6 +88,216 @@ python manage.py runserver
 
 The application will be available at `http://127.0.0.1:8000`
 
+### 🐳 Docker Installation (Recommended)
+
+For production deployment, use Docker for easier setup and consistent environment:
+
+#### Prerequisites
+- Docker and Docker Compose
+- Git
+
+#### Setup Steps
+
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/frawau/endurance-go-kart.git
+   cd endurance-go-kart
+   ```
+
+2. **Configure environment variables**
+
+   Edit the `.env` file to match your setup:
+   ```bash
+   # Database settings
+   POSTGRES_USER=gokart
+   POSTGRES_PASSWORD=gokart
+   POSTGRES_DB=gokart
+
+   # Admin user (created automatically)
+   DJANGO_SUPERUSER_USERNAME=admin
+   DJANGO_SUPERUSER_PASSWORD=admin
+
+   # Security keys (generate your own - see examples below!)
+   SECRET_KEY=your-django-secret-key-change-this-to-something-random-and-secure
+   STOPANDGO_HMAC_SECRET=your-hmac-secret-for-station-security-also-change-this
+
+   # Your domain and port
+   APP_DOMAIN=your-domain.com
+   APP_PORT=5085
+
+   # Timezone for all containers
+   TZ=Asia/Bangkok
+   ```
+
+   **Generate Secure Keys:**
+
+   Use one of these methods to generate random secrets:
+
+   ```bash
+   # Using OpenSSL (recommended)
+   openssl rand -base64 64
+
+   # Using Python
+   python -c "import secrets; print(secrets.token_urlsafe(64))"
+
+   # Using online generator
+   # Visit: https://djecrety.ir/ (Django-specific secret generator)
+   ```
+
+   **Important Security Notes:**
+   - `SECRET_KEY`: Django's secret key for cryptographic signing. Generate a unique 50+ character random string
+   - `STOPANDGO_HMAC_SECRET`: Used for secure communication with hardware penalty stations. **This same secret must be configured on your Stop & Go station hardware**
+   - Change default admin credentials immediately after first login
+   - Use strong, unique passwords for production deployments
+
+3. **Start the application**
+   ```bash
+   docker compose up -d
+   ```
+
+   The application will be available at `http://your-domain:5085`
+
+4. **Initial setup and configuration**
+
+   a. **Login with default admin**
+      - Navigate to your site
+      - Login with username: `admin`, password: `admin`
+
+   b. **Change admin password**
+      - Go to Admin menu → Administration
+      - Change the admin user password
+
+   c. **Create a new admin user**
+      - In Django admin, go to Users
+      - Add a new user with your preferred credentials
+      - Assign the user to groups: `Admin` and `Race Director`
+
+   d. **Switch to your new user**
+      - Logout from the default admin account
+      - Login with your new user credentials
+      - You can now start configuring championships and races
+
+#### Container Management
+
+```bash
+# View logs
+docker compose logs -f
+
+# Stop the application
+docker compose down
+
+# Reset database (removes all data)
+docker compose down
+docker volume rm endurance-go-kart_postgres_data
+docker compose up -d
+
+# Update application
+git pull
+docker compose down
+docker compose up -d --build
+```
+
+#### Accessing the Database
+
+```bash
+# Connect to PostgreSQL container
+docker exec -it postgres psql -U gokart -d gokart
+
+# Backup database
+docker exec postgres pg_dump -U gokart gokart > backup.sql
+
+# Restore database
+docker exec -i postgres psql -U gokart gokart < backup.sql
+```
+
+### 🔒 SSL/HTTPS Configuration (Optional)
+
+The application supports three SSL modes through a single docker-compose.yml:
+
+#### SSL Modes
+
+1. **None (Default)** - HTTP only, no SSL
+2. **Automatic (acme.sh)** - Automatic certificate generation with Let's Encrypt
+3. **Manual** - Use your own SSL certificates
+
+#### Quick Setup with Race Manager
+
+Use the included race manager script - one script to rule them all:
+
+```bash
+# Start application (HTTP mode)
+./race-manager.sh start
+# Equivalent: docker compose up -d
+
+# Check current status
+./race-manager.sh status
+
+# Enable automatic SSL with Let's Encrypt
+./race-manager.sh enable-acme
+./race-manager.sh generate-cert
+# Equivalent: Edit .env + docker compose --profile ssl-acme up -d + acme.sh commands
+
+# Enable manual SSL (provide your own certificates)
+./race-manager.sh enable-manual
+./race-manager.sh install-cert
+# Equivalent: Edit .env + place certs in ./ssl/ + docker compose up -d
+
+# Disable SSL (back to HTTP only)
+./race-manager.sh disable-ssl
+./race-manager.sh restart
+# Equivalent: Edit .env + docker compose down + docker compose up -d
+
+# Other useful commands
+./race-manager.sh stop      # Stop all services
+./race-manager.sh logs      # View logs
+```
+
+#### Manual SSL Configuration
+
+1. **Enable automatic SSL** by editing `.env`:
+   ```bash
+   SSL_MODE=acme
+   SSL_EMAIL=admin@your-domain.com
+   ACME_CHALLENGE=http
+   ```
+
+2. **Start with SSL services**:
+   ```bash
+   docker compose --profile ssl-acme up -d
+   ```
+
+3. **Generate certificate**:
+   ```bash
+   docker compose exec acme-sh acme.sh --issue -d your-domain.com --webroot /var/www/certbot
+   ```
+
+4. **For manual certificates**, place your files in `./ssl/`:
+   - `fullchain.pem` - Full certificate chain
+   - `privkey.pem` - Private key (**MUST be unencrypted/no passphrase**)
+
+#### SSL Requirements
+
+- **Private key must be unencrypted** - nginx cannot handle password-protected keys
+- **Domain must point to your server** - required for Let's Encrypt validation
+- **Port 80 must be accessible** - needed for HTTP ACME challenge
+
+#### SSL Environment Variables
+
+```bash
+# SSL Configuration (uncomment to enable)
+# SSL_MODE=none              # none|acme|manual
+# SSL_EMAIL=admin@your-domain.com
+#
+# For manual mode
+# SSL_CERT_PATH=./ssl/fullchain.pem
+# SSL_KEY_PATH=./ssl/privkey.pem
+#
+# For acme.sh mode
+# ACME_CHALLENGE=http        # http|dns-cloudflare|dns-route53
+```
+
+**Important**: The application automatically detects HTTP vs HTTPS and uses the appropriate WebSocket protocol (ws:// or wss://).
+
 ## 🏆 Championship Setup
 
 1. **Create Championship**: Define championship parameters and rounds

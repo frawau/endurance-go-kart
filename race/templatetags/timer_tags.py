@@ -284,3 +284,58 @@ def positive_only(value):
         return max(int(value), 0)
     except (ValueError, TypeError):
         return 0
+
+
+@register.simple_tag
+def driver_exceeded_limit(member, driver_limit):
+    """
+    Check if a driver has exceeded their time limit.
+
+    Args:
+        member: team_member instance
+        driver_limit: dict with 'mode' and 'seconds' keys
+
+    Returns:
+        True if driver exceeded limit, False otherwise
+    """
+    if (
+        not driver_limit
+        or driver_limit.get("mode") is None
+        or driver_limit.get("seconds") is None
+    ):
+        return False
+
+    try:
+        limit_seconds = float(driver_limit["seconds"])
+
+        if driver_limit["mode"] == "race":
+            # Check total driving time
+            time_spent = (
+                member.time_spent if hasattr(member, "time_spent") else dt.timedelta()
+            )
+            current_seconds = (
+                time_spent.total_seconds()
+                if isinstance(time_spent, dt.timedelta)
+                else 0
+            )
+            return current_seconds > limit_seconds
+
+        elif driver_limit["mode"] == "session":
+            # Check current session time
+            current_session = (
+                member.current_session
+                if hasattr(member, "current_session")
+                else dt.timedelta()
+            )
+            current_seconds = (
+                current_session.total_seconds()
+                if isinstance(current_session, dt.timedelta)
+                else 0
+            )
+            return current_seconds > limit_seconds
+
+    except (AttributeError, ValueError, TypeError) as e:
+        print(f"Error checking driver limit exceeded: {e}")
+        return False
+
+    return False
