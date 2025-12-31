@@ -124,11 +124,17 @@ For production deployment, use Docker for easier setup and consistent environmen
    # Your domain
    APP_DOMAIN=your-domain.com
 
+   # HTTP port (optional, default: 5085 for HTTP-only, 80 for SSL modes)
+   APP_PORT=5085
+
    # Timezone for all containers
    TZ=Asia/Bangkok
    ```
 
-   **Note**: The application runs on standard ports 80 (HTTP) and 443 (HTTPS). Port 80 is required for SSL certificate generation.
+   **Port Configuration**:
+   - **HTTP-only mode** (`SSL_MODE=none`): Uses `APP_PORT` (default: 5085) - good for development
+   - **SSL modes** (`letsencrypt`, `acme`, `manual`): Automatically uses port 80 (required for Let's Encrypt) and 443
+   - The race-manager.sh script handles port assignment automatically
 
    **Generate Secure Keys:**
 

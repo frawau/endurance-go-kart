@@ -144,9 +144,26 @@ disable_ssl() {
 
 start_services() {
     log_info "Starting GoKartRace application..."
+
+    # Set HTTP_PORT based on SSL_MODE
+    if [ "${SSL_MODE}" = "none" ] || [ -z "${SSL_MODE}" ]; then
+        # HTTP-only mode: use custom port
+        export HTTP_PORT=${APP_PORT:-5085}
+        log_info "Starting in HTTP-only mode on port ${HTTP_PORT}"
+    else
+        # SSL mode: must use port 80 for ACME challenge
+        export HTTP_PORT=80
+        log_info "Starting with SSL support (requires port 80)"
+    fi
+
     docker compose up -d
     log_success "Services started!"
-    log_info "Application available at: http://${APP_DOMAIN}"
+
+    if [ "${HTTP_PORT}" = "80" ]; then
+        log_info "Application available at: http://${APP_DOMAIN}"
+    else
+        log_info "Application available at: http://${APP_DOMAIN}:${HTTP_PORT}"
+    fi
 }
 
 stop_services() {
@@ -173,6 +190,10 @@ generate_cert() {
         log_info "Please add: SSL_EMAIL=your-email@example.com"
         exit 1
     fi
+
+    # SSL modes require port 80 for ACME challenge
+    export HTTP_PORT=80
+    log_info "Using port 80 for ACME HTTP-01 challenge"
 
     log_info "Starting services with acme.sh profile..."
     docker compose --profile ssl-acme up -d
@@ -246,6 +267,15 @@ install_cert() {
 
 restart_services() {
     log_info "Restarting services with current configuration..."
+
+    # Set HTTP_PORT based on SSL_MODE
+    if [ "${SSL_MODE}" = "none" ] || [ -z "${SSL_MODE}" ]; then
+        export HTTP_PORT=${APP_PORT:-5085}
+        log_info "Using custom port ${HTTP_PORT}"
+    else
+        export HTTP_PORT=80
+        log_info "Using standard port 80 (required for SSL)"
+    fi
 
     if [ "${SSL_MODE}" = "acme" ] || [ "${SSL_MODE}" = "letsencrypt" ]; then
         log_info "Starting with acme.sh profile..."

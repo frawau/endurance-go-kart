@@ -49,11 +49,22 @@ Required in `.env` file:
 SSL_MODE=letsencrypt                    # or 'acme', 'manual', or 'none'
 APP_DOMAIN=your-domain.com              # Your domain name
 SSL_EMAIL=admin@your-domain.com         # Email for certificate notifications
+APP_PORT=5085                           # Optional: custom port for HTTP-only mode
 ```
 
-**Note**: The application runs on standard ports:
-- Port 80 (HTTP) - Required for Let's Encrypt HTTP-01 challenge
-- Port 443 (HTTPS) - Serves HTTPS traffic when SSL is enabled
+**Port Configuration**:
+- **HTTP-only mode** (`SSL_MODE=none`):
+  - nginx listens on `APP_PORT` (default: 5085)
+  - Good for development environments
+  - Access: `http://your-domain.com:5085`
+
+- **SSL modes** (`letsencrypt`, `acme`, `manual`):
+  - nginx automatically uses ports 80 and 443
+  - Port 80 required for Let's Encrypt HTTP-01 challenge
+  - Port 443 serves HTTPS traffic
+  - Access: `https://your-domain.com`
+
+The race-manager.sh script automatically configures ports based on SSL_MODE.
 
 ## How It Works
 
@@ -113,7 +124,7 @@ The `race-manager.sh` script simplifies SSL management:
    nslookup your-domain.com
    ```
 
-2. **Firewall**: Ports 80 and 443 must be accessible from the internet
+2. **Firewall**: For SSL modes, ports 80 and 443 must be accessible from the internet
    ```bash
    # Check if ports are open
    sudo ufw status
@@ -121,7 +132,9 @@ The `race-manager.sh` script simplifies SSL management:
    sudo ufw allow 443/tcp
    ```
 
-   **⚠️ Critical**: Port 80 is **required** for Let's Encrypt HTTP-01 challenge to verify domain ownership. The application now runs on standard port 80 (HTTP) and 443 (HTTPS), not on a custom port.
+   **⚠️ Critical for SSL**: Port 80 is **required** for Let's Encrypt HTTP-01 challenge to verify domain ownership.
+   - **SSL modes** (`letsencrypt`, `acme`, `manual`): Require ports 80 and 443
+   - **HTTP-only mode** (`none`): Can use any port (e.g., 5085 for development)
 
 3. **Email Address**: Required for Let's Encrypt notifications
 
@@ -131,9 +144,10 @@ The `race-manager.sh` script simplifies SSL management:
 
 Edit `.env` file:
 ```bash
-SSL_MODE=letsencrypt               # or 'acme' for ZeroSSL
+SSL_MODE=letsencrypt               # or 'acme' for ZeroSSL, 'none' for HTTP-only
 APP_DOMAIN=your-domain.com
 SSL_EMAIL=admin@your-domain.com
+APP_PORT=5085                      # Optional: used only in HTTP-only mode
 ```
 
 Or use the helper command:
