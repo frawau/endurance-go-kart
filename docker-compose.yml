@@ -67,13 +67,12 @@ services:
     restart: always
     image: "nginx:latest"
     ports:
-      - "${APP_PORT:-5085}:80"
+      - "80:80"
       - "443:443"
     environment:
       - TZ=${TZ}
       - SSL_MODE=${SSL_MODE:-none}
       - APP_DOMAIN=${APP_DOMAIN:-localhost}
-      - APP_PORT=${APP_PORT:-5085}
     volumes:
       - ./nginx/templates:/etc/nginx/templates:ro
       - ./nginx/ssl-setup.sh:/usr/local/bin/ssl-setup.sh:ro

@@ -49,8 +49,11 @@ Required in `.env` file:
 SSL_MODE=letsencrypt                    # or 'acme', 'manual', or 'none'
 APP_DOMAIN=your-domain.com              # Your domain name
 SSL_EMAIL=admin@your-domain.com         # Email for certificate notifications
-APP_PORT=5085                           # HTTP port (default: 5085)
 ```
+
+**Note**: The application runs on standard ports:
+- Port 80 (HTTP) - Required for Let's Encrypt HTTP-01 challenge
+- Port 443 (HTTPS) - Serves HTTPS traffic when SSL is enabled
 
 ## How It Works
 
@@ -118,6 +121,8 @@ The `race-manager.sh` script simplifies SSL management:
    sudo ufw allow 443/tcp
    ```
 
+   **⚠️ Critical**: Port 80 is **required** for Let's Encrypt HTTP-01 challenge to verify domain ownership. The application now runs on standard port 80 (HTTP) and 443 (HTTPS), not on a custom port.
+
 3. **Email Address**: Required for Let's Encrypt notifications
 
 ### Step-by-Step Setup
@@ -129,7 +134,6 @@ Edit `.env` file:
 SSL_MODE=letsencrypt               # or 'acme' for ZeroSSL
 APP_DOMAIN=your-domain.com
 SSL_EMAIL=admin@your-domain.com
-APP_PORT=5085
 ```
 
 Or use the helper command:

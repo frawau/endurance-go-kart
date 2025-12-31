@@ -146,7 +146,7 @@ start_services() {
     log_info "Starting GoKartRace application..."
     docker compose up -d
     log_success "Services started!"
-    log_info "Application available at: http://${APP_DOMAIN}:${APP_PORT}"
+    log_info "Application available at: http://${APP_DOMAIN}"
 }
 
 stop_services() {

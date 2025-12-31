@@ -121,13 +121,14 @@ For production deployment, use Docker for easier setup and consistent environmen
    SECRET_KEY=your-django-secret-key-change-this-to-something-random-and-secure
    STOPANDGO_HMAC_SECRET=your-hmac-secret-for-station-security-also-change-this
 
-   # Your domain and port
+   # Your domain
    APP_DOMAIN=your-domain.com
-   APP_PORT=5085
 
    # Timezone for all containers
    TZ=Asia/Bangkok
    ```
+
+   **Note**: The application runs on standard ports 80 (HTTP) and 443 (HTTPS). Port 80 is required for SSL certificate generation.
 
    **Generate Secure Keys:**
 
