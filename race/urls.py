@@ -201,4 +201,30 @@ urlpatterns = [
         views.public_leaderboard,
         name="public_leaderboard",
     ),
+    # Lap Management (Phase 6 - Lap Splitting & Suspicious Lap Detection)
+    path(
+        "race/<int:race_id>/laps/",
+        views.race_lap_management,
+        name="race_lap_management",
+    ),
+    path(
+        "api/race/<int:race_id>/laps/",
+        views.get_race_laps,
+        name="get_race_laps",
+    ),
+    path(
+        "api/lap/<int:crossing_id>/split/",
+        views.split_lap,
+        name="split_lap",
+    ),
+    path(
+        "api/lap/<int:crossing_id>/invalidate/",
+        views.invalidate_lap,
+        name="invalidate_lap",
+    ),
+    path(
+        "api/lap/<int:crossing_id>/validate/",
+        views.validate_lap,
+        name="validate_lap",
+    ),
 ]

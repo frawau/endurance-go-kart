@@ -2918,3 +2918,193 @@ def public_leaderboard(request, race_id):
     }
 
     return render(request, "pages/public_leaderboard.html", context)
+
+
+# ============================================================
+# Lap Management Views (Phase 6 - Lap Splitting & Suspicious Lap Detection)
+# ============================================================
+
+
+@login_required
+@user_passes_test(is_admin_user)
+def race_lap_management(request, race_id):
+    """Lap management view for race directors"""
+    race = get_object_or_404(Race, id=race_id)
+
+    context = {
+        "race": race,
+    }
+
+    return render(request, "pages/race_lap_management.html", context)
+
+
+@login_required
+@user_passes_test(is_admin_user)
+def get_race_laps(request, race_id):
+    """API endpoint to get all laps for a race"""
+    race = get_object_or_404(Race, id=race_id)
+
+    laps = []
+    for team in race.get_participating_teams():
+        team_laps = (
+            LapCrossing.objects.filter(race=race, team=team)
+            .order_by("lap_number")
+            .values(
+                "id",
+                "lap_number",
+                "crossing_time",
+                "lap_time",
+                "is_valid",
+                "is_suspicious",
+                "was_split",
+                "counted_during_suspension",
+            )
+        )
+
+        for lap in team_laps:
+            laps.append(
+                {
+                    "id": lap["id"],
+                    "team_id": team.id,
+                    "team_number": team.team.number,
+                    "team_name": team.team.name,
+                    "lap_number": lap["lap_number"],
+                    "crossing_time": lap["crossing_time"].isoformat(),
+                    "lap_time": str(lap["lap_time"]).split(".")[0]
+                    if lap["lap_time"]
+                    else "—",
+                    "lap_time_seconds": lap["lap_time"].total_seconds()
+                    if lap["lap_time"]
+                    else None,
+                    "is_valid": lap["is_valid"],
+                    "is_suspicious": lap["is_suspicious"],
+                    "was_split": lap["was_split"],
+                    "counted_during_suspension": lap["counted_during_suspension"],
+                }
+            )
+
+    return JsonResponse({"laps": laps})
+
+
+@login_required
+@user_passes_test(is_admin_user)
+@csrf_exempt
+@require_POST
+def split_lap(request, crossing_id):
+    """Split a suspicious lap into two laps"""
+    try:
+        crossing = get_object_or_404(LapCrossing, id=crossing_id)
+
+        # Find previous crossing
+        prev_crossing = (
+            LapCrossing.objects.filter(
+                race=crossing.race,
+                team=crossing.team,
+                lap_number__lt=crossing.lap_number,
+            )
+            .order_by("-lap_number")
+            .first()
+        )
+
+        if not prev_crossing:
+            return JsonResponse(
+                {"success": False, "error": "No previous crossing found"}, status=400
+            )
+
+        # Calculate mid-point time
+        time_delta = crossing.crossing_time - prev_crossing.crossing_time
+        mid_time = prev_crossing.crossing_time + (time_delta / 2)
+        half_lap_time = time_delta / 2
+
+        # Create first split lap (replace current lap number)
+        first_lap = LapCrossing.objects.create(
+            race=crossing.race,
+            team=crossing.team,
+            transponder=crossing.transponder,
+            lap_number=crossing.lap_number,
+            crossing_time=mid_time,
+            lap_time=half_lap_time,
+            is_valid=True,
+            is_suspicious=False,
+            was_split=True,
+            split_from=crossing,
+            counted_during_suspension=crossing.counted_during_suspension,
+            session=crossing.session,
+        )
+
+        # Increment all subsequent lap numbers first
+        LapCrossing.objects.filter(
+            race=crossing.race,
+            team=crossing.team,
+            lap_number__gt=crossing.lap_number,
+        ).update(lap_number=models.F("lap_number") + 1)
+
+        # Create second split lap (at incremented position)
+        second_lap = LapCrossing.objects.create(
+            race=crossing.race,
+            team=crossing.team,
+            transponder=crossing.transponder,
+            lap_number=crossing.lap_number + 1,
+            crossing_time=crossing.crossing_time,
+            lap_time=half_lap_time,
+            is_valid=True,
+            is_suspicious=False,
+            was_split=True,
+            split_from=crossing,
+            counted_during_suspension=crossing.counted_during_suspension,
+            session=crossing.session,
+        )
+
+        # Mark original as invalid
+        crossing.is_valid = False
+        crossing.save()
+
+        return JsonResponse(
+            {
+                "success": True,
+                "message": f"Lap {crossing.lap_number} split successfully",
+                "first_lap_id": first_lap.id,
+                "second_lap_id": second_lap.id,
+            }
+        )
+
+    except Exception as e:
+        return JsonResponse({"success": False, "error": str(e)}, status=400)
+
+
+@login_required
+@user_passes_test(is_admin_user)
+@csrf_exempt
+@require_POST
+def invalidate_lap(request, crossing_id):
+    """Mark a lap as invalid"""
+    try:
+        crossing = get_object_or_404(LapCrossing, id=crossing_id)
+        crossing.is_valid = False
+        crossing.save()
+
+        return JsonResponse(
+            {"success": True, "message": f"Lap {crossing.lap_number} marked as invalid"}
+        )
+
+    except Exception as e:
+        return JsonResponse({"success": False, "error": str(e)}, status=400)
+
+
+@login_required
+@user_passes_test(is_admin_user)
+@csrf_exempt
+@require_POST
+def validate_lap(request, crossing_id):
+    """Mark a lap as valid"""
+    try:
+        crossing = get_object_or_404(LapCrossing, id=crossing_id)
+        crossing.is_valid = True
+        crossing.save()
+
+        return JsonResponse(
+            {"success": True, "message": f"Lap {crossing.lap_number} marked as valid"}
+        )
+
+    except Exception as e:
+        return JsonResponse({"success": False, "error": str(e)}, status=400)
