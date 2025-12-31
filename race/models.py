@@ -950,6 +950,144 @@ class Race(models.Model):
         """Get teams participating in this race"""
         return self.round.round_team_set.all()
 
+    def is_race_finished(self):
+        """Check if race ended based on configured mode"""
+        if not self.started:
+            return False
+
+        mode_checkers = {
+            "CROSS_AFTER_TIME": self._check_cross_after_time,
+            "CROSS_AFTER_LAPS": self._check_cross_after_laps,
+            "QUALIFYING": self._check_qualifying,
+            "QUALIFYING_PLUS": self._check_qualifying_plus,
+            "FULL_LAPS": self._check_full_laps,
+            "TIME_ONLY": self._check_time_only,
+            "AUTO_TRANSFORM": self._check_auto_transform,
+        }
+        checker = mode_checkers.get(self.ending_mode)
+        if checker:
+            return checker()
+        return False
+
+    def _check_cross_after_time(self):
+        """All teams crossed line after time limit"""
+        time_limit = self.get_effective_time_limit()
+        cutoff_time = self.started + time_limit
+
+        teams_finished = (
+            self.lap_crossings.filter(crossing_time__gte=cutoff_time)
+            .values_list("team_id", flat=True)
+            .distinct()
+        )
+
+        return len(teams_finished) == self.get_participating_teams_count()
+
+    def _check_cross_after_laps(self):
+        """
+        When first racer completes required laps and crosses line, THAT racer's race ends.
+        Other racers' races end individually when THEY cross the line after completing laps.
+        Race is finished when all racers have crossed after completing required laps.
+        """
+        required_laps = self.get_effective_lap_count()
+
+        # Check if any team has completed required laps
+        teams_completed = (
+            self.lap_crossings.filter(lap_number__gte=required_laps, is_valid=True)
+            .values_list("team_id", flat=True)
+            .distinct()
+        )
+
+        if not teams_completed:
+            return False  # No one has finished yet
+
+        # Race is finished when all teams have crossed after completing laps
+        return len(teams_completed) == self.get_participating_teams_count()
+
+    def _check_qualifying(self):
+        """Time elapsed - all laps that finish before time count"""
+        time_limit = self.get_effective_time_limit()
+        elapsed = timezone.now() - self.started
+        return elapsed >= time_limit
+
+    def _check_qualifying_plus(self):
+        """
+        Last lap that counts MUST have started before time expired
+        but can finish after time (last start-finish crossing after time ran out).
+        This is F1 qualifying style.
+        """
+        time_limit = self.get_effective_time_limit()
+        cutoff_time = self.started + time_limit
+
+        if timezone.now() < cutoff_time:
+            return False  # Time hasn't expired yet
+
+        # Find all teams that started a lap before cutoff but haven't finished it yet
+        teams_still_on_final_lap = set()
+
+        for team in self.get_participating_teams():
+            last_crossing = (
+                self.lap_crossings.filter(team=team, is_valid=True)
+                .order_by("-crossing_time")
+                .first()
+            )
+
+            if last_crossing and last_crossing.crossing_time < cutoff_time:
+                # Started a lap before cutoff
+                # Check if they've crossed since cutoff
+                crossed_after_cutoff = self.lap_crossings.filter(
+                    team=team, crossing_time__gt=cutoff_time, is_valid=True
+                ).exists()
+
+                if not crossed_after_cutoff:
+                    teams_still_on_final_lap.add(team.id)
+
+        # Race finished when all teams that started final lap have crossed
+        return len(teams_still_on_final_lap) == 0
+
+    def _check_full_laps(self):
+        """All teams completed required laps"""
+        required_laps = self.get_effective_lap_count()
+        teams_finished = (
+            self.lap_crossings.filter(lap_number=required_laps, is_valid=True)
+            .values_list("team_id", flat=True)
+            .distinct()
+        )
+
+        return len(teams_finished) == self.get_participating_teams_count()
+
+    def _check_time_only(self):
+        """Time limit reached - positions frozen at last crossing before time"""
+        time_limit = self.get_effective_time_limit()
+        elapsed = timezone.now() - self.started
+        return elapsed >= time_limit
+
+    def _check_auto_transform(self):
+        """
+        If time expired, transform to CROSS_AFTER_TIME.
+        Otherwise check lap completion.
+        """
+        time_limit = self.get_effective_time_limit()
+        elapsed = timezone.now() - self.started
+
+        if elapsed < time_limit:
+            # Still in lap-based mode
+            required_laps = self.get_effective_lap_count()
+            max_laps_result = (
+                self.lap_crossings.filter(is_valid=True)
+                .values("team")
+                .annotate(max_lap=models.Max("lap_number"))
+                .aggregate(models.Max("max_lap"))
+            )
+            max_laps = max_laps_result.get("max_lap__max")
+
+            return max_laps and max_laps >= required_laps
+        else:
+            # Time expired, transform to CROSS_AFTER_TIME
+            if self.ending_mode == "AUTO_TRANSFORM":
+                self.ending_mode = "CROSS_AFTER_TIME"
+                self.save()
+            return self._check_cross_after_time()
+
 
 class round_pause(models.Model):
     round = models.ForeignKey(Round, on_delete=models.CASCADE)
