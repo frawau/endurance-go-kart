@@ -108,6 +108,7 @@ def index(request):
         },
     )
 
+
 @xframe_options_exempt
 def team_carousel(request):
     cround = current_round()
@@ -261,6 +262,7 @@ def changedriver_info(request):
                 "sponsors_logos": get_sponsor_logos(None),
             },
         )
+
 
 @xframe_options_exempt
 def all_pitlanes(request):
@@ -886,6 +888,7 @@ def singleteam_view(request):
                 "sponsors_logos": get_sponsor_logos(None),
             },
         )
+
 
 @xframe_options_exempt
 def pending_drivers(request):

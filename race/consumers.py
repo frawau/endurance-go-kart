@@ -5,7 +5,17 @@ import hmac
 import hashlib
 from django.conf import settings
 from channels.generic.websocket import AsyncWebsocketConsumer
-from .models import ChangeLane, round_team, team_member, championship_team, Round
+from .models import (
+    ChangeLane,
+    round_team,
+    team_member,
+    championship_team,
+    Round,
+    Race,
+    Transponder,
+    RaceTransponderAssignment,
+    LapCrossing,
+)
 from django.template.loader import render_to_string
 from channels.db import database_sync_to_async
 from django.db.models import Count, Q
@@ -659,3 +669,209 @@ async def handle_race_end_request(sender, round_id, **kwargs):
 
     except Exception as e:
         print(f"❌ Error ending race {round_id}: {e}")
+
+
+class TimingConsumer(AsyncWebsocketConsumer):
+    """
+    WebSocket consumer for timing daemon communication.
+    Handles lap crossing events from timing hardware via daemon.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Get HMAC secret from settings or use default
+        self.hmac_secret = getattr(
+            settings, "TIMING_HMAC_SECRET", "timing_hmac_secret_change_me_2025"
+        ).encode("utf-8")
+
+    def sign_message(self, message_data):
+        """Sign outgoing message with HMAC"""
+        message_str = json.dumps(message_data, sort_keys=False, separators=(",", ":"))
+        signature = hmac.new(
+            self.hmac_secret,
+            message_str.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+        message_data["hmac_signature"] = signature
+        return message_data
+
+    def verify_hmac(self, message_data, provided_signature):
+        """Verify HMAC signature for incoming message"""
+        message_str = json.dumps(message_data, sort_keys=False, separators=(",", ":"))
+        expected_signature = hmac.new(
+            self.hmac_secret,
+            message_str.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+        return hmac.compare_digest(expected_signature, provided_signature)
+
+    async def connect(self):
+        self.timing_group_name = "timing"
+
+        # Join room group
+        await self.channel_layer.group_add(self.timing_group_name, self.channel_name)
+        await self.accept()
+        print("Timing daemon connected")
+
+    async def disconnect(self, close_code):
+        # Leave room group
+        await self.channel_layer.group_discard(
+            self.timing_group_name, self.channel_name
+        )
+        print("Timing daemon disconnected")
+
+    async def receive(self, text_data):
+        try:
+            data = json.loads(text_data)
+
+            # Verify HMAC signature for all incoming messages
+            provided_signature = data.pop("hmac_signature", None)
+            if not provided_signature:
+                print("Timing: Received message without HMAC signature")
+                return
+
+            if not self.verify_hmac(data, provided_signature):
+                print("Timing: HMAC verification failed - rejecting message")
+                return
+
+            message_type = data.get("type")
+
+            if message_type == "connected":
+                # Daemon connected
+                print(f"Timing daemon connected: {data.get('plugin_type')}")
+
+            elif message_type == "lap_crossing":
+                # Handle lap crossing event
+                await self.handle_lap_crossing(data)
+
+            elif message_type == "warning":
+                # Log warning from daemon
+                print(f"Timing warning: {data.get('message')}")
+
+            elif message_type == "response":
+                # Handle daemon responses
+                response_type = data.get("response")
+                print(f"Timing response: {response_type}")
+
+        except json.JSONDecodeError:
+            print(f"Timing: Invalid JSON received")
+        except Exception as e:
+            print(f"Timing: Error processing message: {e}")
+
+    @database_sync_to_async
+    def handle_lap_crossing(self, data):
+        """Process lap crossing event and create LapCrossing record"""
+        try:
+            race_id = data.get("race_id")
+            team_number = data.get("team_number")
+            transponder_id = data.get("transponder_id")
+            timestamp_str = data.get("timestamp")
+            raw_time = data.get("raw_time")
+
+            # Parse timestamp
+            crossing_time = dt.datetime.fromisoformat(timestamp_str)
+
+            # Get race
+            race = Race.objects.get(id=race_id)
+
+            # Get team by number
+            team = race.round.round_team_set.filter(team__number=team_number).first()
+
+            if not team:
+                print(f"Timing: Team {team_number} not found for race {race_id}")
+                return
+
+            # Get transponder
+            transponder = Transponder.objects.filter(
+                transponder_id=transponder_id
+            ).first()
+
+            # Calculate lap number
+            last_crossing = (
+                LapCrossing.objects.filter(race=race, team=team, is_valid=True)
+                .order_by("-lap_number")
+                .first()
+            )
+
+            lap_number = (last_crossing.lap_number + 1) if last_crossing else 1
+
+            # Calculate lap time
+            lap_time = None
+            if last_crossing:
+                lap_time = crossing_time - last_crossing.crossing_time
+
+            # Check if race is suspended
+            is_suspended = race.round.is_paused
+            should_count = True
+            if is_suspended and not race.count_crossings_during_suspension:
+                should_count = False
+
+            # Create lap crossing
+            crossing = LapCrossing.objects.create(
+                race=race,
+                team=team,
+                transponder=transponder,
+                lap_number=lap_number,
+                crossing_time=crossing_time,
+                lap_time=lap_time,
+                is_valid=should_count,
+                counted_during_suspension=is_suspended,
+            )
+
+            # Check for suspicious lap time (>2x median)
+            if lap_time and should_count:
+                if self.is_lap_suspicious(race, lap_time):
+                    crossing.is_suspicious = True
+                    crossing.save()
+                    print(
+                        f"⚠️  Suspicious lap detected: Team {team_number}, Lap {lap_number}, Time {lap_time}"
+                    )
+
+            print(
+                f"✅ Lap recorded: Team {team_number}, Lap {lap_number}, Time: {lap_time}"
+            )
+
+            # Broadcast to leaderboard
+            asyncio.create_task(
+                self.channel_layer.group_send(
+                    f"leaderboard_{race_id}",
+                    {
+                        "type": "lap_crossing_update",
+                        "crossing_data": {
+                            "team_number": team_number,
+                            "lap_number": lap_number,
+                            "lap_time": str(lap_time) if lap_time else None,
+                        },
+                    },
+                )
+            )
+
+        except Race.DoesNotExist:
+            print(f"Timing: Race {race_id} not found")
+        except Exception as e:
+            print(f"Timing: Error handling lap crossing: {e}")
+
+    def is_lap_suspicious(self, race, lap_time):
+        """Check if lap time is suspicious (>2x median)"""
+        try:
+            valid_laps = LapCrossing.objects.filter(
+                race=race, is_valid=True, lap_time__isnull=False
+            )
+
+            if valid_laps.count() < 5:  # Need at least 5 laps for comparison
+                return False
+
+            lap_times = [lap.lap_time.total_seconds() for lap in valid_laps]
+            lap_times.sort()
+            median_time = lap_times[len(lap_times) // 2]
+
+            return lap_time.total_seconds() > (median_time * 2)
+
+        except Exception:
+            return False
+
+    async def send_command(self, command_type, **kwargs):
+        """Send command to timing daemon"""
+        message = {"type": "command", "command": command_type, **kwargs}
+        signed = self.sign_message(message)
+        await self.send(text_data=json.dumps(signed))

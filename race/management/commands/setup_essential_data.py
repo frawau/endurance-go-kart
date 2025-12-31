@@ -14,22 +14,15 @@ class Command(BaseCommand):
         for group_name in groups:
             group, created = Group.objects.get_or_create(name=group_name)
             if created:
-                self.stdout.write(
-                    self.style.SUCCESS(f'Created group: "{group_name}"')
-                )
+                self.stdout.write(self.style.SUCCESS(f'Created group: "{group_name}"'))
             else:
                 self.stdout.write(f'Group "{group_name}" already exists')
 
         # 2. Create Default Configs
-        configs = [
-            ("page size", "A4"),
-            ("card size", "A6"),
-            ("display timeout", "5")
-        ]
+        configs = [("page size", "A4"), ("card size", "A6"), ("display timeout", "5")]
         for key, val in configs:
             config, created = Config.objects.get_or_create(
-                name=key,
-                defaults={"value": val}
+                name=key, defaults={"value": val}
             )
             if created:
                 self.stdout.write(
@@ -46,16 +39,13 @@ class Command(BaseCommand):
         ]
         for name, description in penalties:
             penalty, created = Penalty.objects.get_or_create(
-                name=name,
-                defaults={"description": description}
+                name=name, defaults={"description": description}
             )
             if created:
-                self.stdout.write(
-                    self.style.SUCCESS(f'Created penalty: "{name}"')
-                )
+                self.stdout.write(self.style.SUCCESS(f'Created penalty: "{name}"'))
             else:
                 self.stdout.write(f'Penalty "{name}" already exists')
 
         self.stdout.write(
-            self.style.SUCCESS('Essential data setup completed successfully!')
+            self.style.SUCCESS("Essential data setup completed successfully!")
         )

@@ -62,8 +62,16 @@ urlpatterns = [
     path("rounds/form/", views.round_form, name="round_form"),
     path("rounds/update/<int:round_id>/", views.update_round, name="update_round"),
     path("rounds/team/", TeamMembersView.as_view(), name="team_members"),
-    path("rounds/team/select/", TeamManagementSelectionView.as_view(), name="team_management_selection"),
-    path("rounds/team/<int:round_id>/", TeamMembersView.as_view(), name="team_members_by_id"),
+    path(
+        "rounds/team/select/",
+        TeamManagementSelectionView.as_view(),
+        name="team_management_selection",
+    ),
+    path(
+        "rounds/team/<int:round_id>/",
+        TeamMembersView.as_view(),
+        name="team_members_by_id",
+    ),
     path("driver/add/", views.create_driver, name="add_driver"),
     path("team/add/", views.create_team, name="add_team"),
     path("get_round_status/", views.get_round_status, name="get_round_status"),

@@ -7,4 +7,5 @@ websocket_urlpatterns = [
     path("ws/empty_teams/", consumers.EmptyTeamsConsumer.as_asgi()),
     path("ws/round/<int:round_id>/", consumers.RoundConsumer.as_asgi()),
     path("ws/stopandgo/", consumers.StopAndGoConsumer.as_asgi()),
+    path("ws/timing/", consumers.TimingConsumer.as_asgi()),
 ]
