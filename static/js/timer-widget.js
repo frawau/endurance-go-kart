@@ -189,11 +189,54 @@ class TimerWidget {
             }
 
             // Add timer-over class if limit is set and exceeded
+            let isOverLimit = false;
             if (this.limit !== null) {
                 if ((this.countDirection === 'up' && this.currentValue > this.limit) ||
                     (this.countDirection === 'down' && this.currentValue < this.limit)) {
                     this.element.classList.add('timer-over');
-                    }
+                    isOverLimit = true;
+                }
+            }
+
+            // Update LED indicator if this timer has a driver ID
+            this.updateLEDIndicator(isOverLimit);
+        }
+    }
+
+    updateLEDIndicator(isOverLimit) {
+        // Only update LED for driver-specific timers that have a limit set
+        if (!this.targetId || this.timerType === 'countdownDisplay' || this.limit === null) {
+            return;
+        }
+
+        // Find the driver row for this timer
+        const driverRow = document.querySelector(`tr[data-driver-id="${this.targetId}"]`);
+        if (!driverRow) {
+            return;
+        }
+
+        // Find the first cell (driver name cell) in the row
+        const nameCell = driverRow.querySelector('td:first-child');
+        if (!nameCell) {
+            return;
+        }
+
+        // Check if LED already exists
+        let led = nameCell.querySelector('.driver-limit-led');
+
+        if (isOverLimit) {
+            // Show LED if over limit
+            if (!led) {
+                // Create LED if it doesn't exist
+                led = document.createElement('span');
+                led.className = 'driver-limit-led';
+                led.title = 'Driver exceeded time limit';
+                nameCell.insertBefore(led, nameCell.firstChild);
+            }
+        } else {
+            // Hide/remove LED if not over limit
+            if (led) {
+                led.remove();
             }
         }
     }
@@ -273,7 +316,8 @@ function initializeTimers() {
             targetId: config.targetId,
             timerType: config.timerType,
             showHours: config.showHours,
-            showMinutes: config.showMinutes
+            showMinutes: config.showMinutes,
+            limit: config.limit || null
         });
     });
 }
@@ -301,7 +345,8 @@ document.addEventListener('refreshTeamTimers', function(e) {
                     targetId: config.targetId,
                     timerType: config.timerType,
                     showHours: config.showHours,
-                    showMinutes: config.showMinutes
+                    showMinutes: config.showMinutes,
+                    limit: config.limit || null
                 });
             });
         }
