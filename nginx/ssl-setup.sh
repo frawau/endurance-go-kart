@@ -20,38 +20,36 @@ rm -f /etc/nginx/conf.d/default.conf
 case "$SSL_MODE" in
     "none")
         echo "SSL Setup: Configuring HTTP-only mode"
-        # Set variables for HTTP-only
-        export ssl_redirect="no"
 
         # Process template for HTTP-only
-        envsubst '${APP_DOMAIN} ${ssl_redirect}' < /etc/nginx/templates/default.conf.template > /tmp/nginx.conf
+        envsubst '${APP_DOMAIN}' < /etc/nginx/templates/default.conf.template > /tmp/nginx.conf
+
+        # Keep ssl_redirect as "no" (already default in template)
 
         # Remove HTTPS server block for HTTP-only mode
-        sed '/# HTTPS server configuration/,/^}/d' /tmp/nginx.conf > /etc/nginx/conf.d/default.conf
-
-        # Remove SSL redirect logic (no longer needed since we substitute it)
-        # sed -i '/if ($ssl_redirect = "yes")/,/}/d' /etc/nginx/conf.d/default.conf
+        sed '/# HTTPS server configuration/,/^}$/d' /tmp/nginx.conf > /etc/nginx/conf.d/default.conf
         ;;
 
     "letsencrypt"|"acme"|"manual")
         echo "SSL Setup: Configuring HTTPS mode (${SSL_MODE})"
-        # Set variables for HTTPS
-        export ssl_redirect="yes"
 
         # Process template for HTTPS
-        envsubst '${APP_DOMAIN} ${ssl_redirect}' < /etc/nginx/templates/default.conf.template > /etc/nginx/conf.d/default.conf
+        envsubst '${APP_DOMAIN}' < /etc/nginx/templates/default.conf.template > /tmp/nginx.conf
+
+        # Set ssl_redirect to "yes" for SSL modes
+        sed -i 's/default "no";/default "yes";/' /tmp/nginx.conf
 
         # Check if certificates exist
         if [ ! -f "/etc/ssl/certs/fullchain.pem" ] || [ ! -f "/etc/ssl/certs/privkey.pem" ]; then
             echo "SSL Setup: Warning - SSL certificates not found!"
             echo "SSL Setup: HTTPS server will not start until certificates are available"
             # Remove HTTPS server block temporarily
-            sed '/# HTTPS server configuration/,/^}/d' /etc/nginx/conf.d/default.conf > /tmp/nginx-http.conf
-            mv /tmp/nginx-http.conf /etc/nginx/conf.d/default.conf
+            sed '/# HTTPS server configuration/,/^}$/d' /tmp/nginx.conf > /etc/nginx/conf.d/default.conf
             # Remove SSL redirect logic temporarily
-            sed -i '/if ($ssl_redirect = "yes")/,/}/d' /etc/nginx/conf.d/default.conf
+            sed -i 's/default "yes";/default "no";/' /etc/nginx/conf.d/default.conf
         else
             echo "SSL Setup: SSL certificates found - enabling HTTPS"
+            mv /tmp/nginx.conf /etc/nginx/conf.d/default.conf
         fi
         ;;
 

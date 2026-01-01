@@ -2,6 +2,11 @@ upstream webapp {
     server appseed_app:5005;
 }
 
+# Set ssl_redirect variable (will be set by ssl-setup.sh)
+geo $ssl_redirect {
+    default "no";
+}
+
 # HTTP server configuration
 server {
     listen 80;
