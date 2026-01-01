@@ -13,3 +13,6 @@ env
 
 #venv
 .beeware
+
+# Environment variables with secrets
+.env

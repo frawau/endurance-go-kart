@@ -64,8 +64,9 @@ A comprehensive Django-based management system for endurance go-kart races and c
 git clone https://github.com/frawau/endurance-go-kart.git
 cd endurance-go-kart
 
-# 2. Generate secrets and configure .env
-./race-manager.sh generate-secret  # Automatically updates .env with secure secrets
+# 2. Create and configure .env file
+cp .env.example .env               # Create .env from template
+./race-manager.sh generate-secret  # Generate and add secure secrets to .env
 # Edit .env: Set APP_DOMAIN, configure timezone, adjust other settings
 
 # 3. Start the application
@@ -106,6 +107,11 @@ For production deployment, Docker provides easier setup and consistent environme
    ```
 
 2. **Configure environment variables**
+
+   Create your `.env` file from the template:
+   ```bash
+   cp .env.example .env
+   ```
 
    Edit the `.env` file to match your setup:
    ```bash
@@ -168,6 +174,8 @@ For production deployment, Docker provides easier setup and consistent environme
    - `STOPANDGO_HMAC_SECRET`: Used for secure communication with hardware penalty stations. **This same secret must be configured on your Stop & Go station hardware**
    - Change default admin credentials immediately after first login
    - Use strong, unique passwords for production deployments
+   - **`.env` file is NOT tracked by git** - it's in `.gitignore` to protect your secrets
+   - On production servers, `git pull` will never overwrite your `.env` file
 
 3. **Start the application**
 
@@ -296,6 +304,9 @@ source env/bin/activate  # On Windows: env\Scripts\activate
 
 # Install dependencies
 pip install -r requirements.txt
+
+# Create .env file from template
+cp .env.example .env
 
 # Generate secrets (automatically updates .env)
 ./race-manager.sh generate-secret
