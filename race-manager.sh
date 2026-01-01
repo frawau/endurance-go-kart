@@ -294,32 +294,60 @@ generate_secret() {
     log_info "Generating secure random secrets..."
     echo ""
 
-    # Generate SECRET_KEY (64 bytes base64)
-    log_info "SECRET_KEY (Django secret key):"
+    # Generate secrets
     SECRET_KEY=$(openssl rand -base64 64 | tr -d '\n')
-    echo "${GREEN}${SECRET_KEY}${NC}"
-    echo ""
-
-    # Generate STOPANDGO_HMAC_SECRET (64 bytes base64)
-    log_info "STOPANDGO_HMAC_SECRET (Hardware station HMAC):"
     HMAC_SECRET=$(openssl rand -base64 64 | tr -d '\n')
-    echo "${GREEN}${HMAC_SECRET}${NC}"
-    echo ""
-
-    # Generate TIMING_HMAC_SECRET (64 bytes base64)
-    log_info "TIMING_HMAC_SECRET (Timing daemon HMAC, optional - uses STOPANDGO_HMAC_SECRET if not set):"
     TIMING_SECRET=$(openssl rand -base64 64 | tr -d '\n')
-    echo "${GREEN}${TIMING_SECRET}${NC}"
+
+    # Display generated secrets
+    log_info "Generated secrets:"
+    echo "  SECRET_KEY: ${GREEN}${SECRET_KEY}${NC}"
+    echo "  STOPANDGO_HMAC_SECRET: ${GREEN}${HMAC_SECRET}${NC}"
+    echo "  TIMING_HMAC_SECRET: ${GREEN}${TIMING_SECRET}${NC}"
     echo ""
 
-    log_info "Add these to your .env file:"
-    echo ""
-    echo "SECRET_KEY=${SECRET_KEY}"
-    echo "STOPANDGO_HMAC_SECRET=${HMAC_SECRET}"
-    echo "TIMING_HMAC_SECRET=${TIMING_SECRET}"
+    # Update .env file
+    if [ -f "$ENV_FILE" ]; then
+        log_info "Updating $ENV_FILE..."
+
+        # Update or add SECRET_KEY
+        if grep -q "^SECRET_KEY=" "$ENV_FILE"; then
+            sed -i "s|^SECRET_KEY=.*|SECRET_KEY=${SECRET_KEY}|" "$ENV_FILE"
+        elif grep -q "^# SECRET_KEY=" "$ENV_FILE"; then
+            sed -i "s|^# SECRET_KEY=.*|SECRET_KEY=${SECRET_KEY}|" "$ENV_FILE"
+        else
+            echo "SECRET_KEY=${SECRET_KEY}" >> "$ENV_FILE"
+        fi
+
+        # Update or add STOPANDGO_HMAC_SECRET
+        if grep -q "^STOPANDGO_HMAC_SECRET=" "$ENV_FILE"; then
+            sed -i "s|^STOPANDGO_HMAC_SECRET=.*|STOPANDGO_HMAC_SECRET=${HMAC_SECRET}|" "$ENV_FILE"
+        elif grep -q "^# STOPANDGO_HMAC_SECRET=" "$ENV_FILE"; then
+            sed -i "s|^# STOPANDGO_HMAC_SECRET=.*|STOPANDGO_HMAC_SECRET=${HMAC_SECRET}|" "$ENV_FILE"
+        else
+            echo "STOPANDGO_HMAC_SECRET=${HMAC_SECRET}" >> "$ENV_FILE"
+        fi
+
+        # Update or add TIMING_HMAC_SECRET
+        if grep -q "^TIMING_HMAC_SECRET=" "$ENV_FILE"; then
+            sed -i "s|^TIMING_HMAC_SECRET=.*|TIMING_HMAC_SECRET=${TIMING_SECRET}|" "$ENV_FILE"
+        elif grep -q "^# TIMING_HMAC_SECRET=" "$ENV_FILE"; then
+            sed -i "s|^# TIMING_HMAC_SECRET=.*|TIMING_HMAC_SECRET=${TIMING_SECRET}|" "$ENV_FILE"
+        else
+            echo "TIMING_HMAC_SECRET=${TIMING_SECRET}" >> "$ENV_FILE"
+        fi
+
+        log_success "Secrets updated in $ENV_FILE"
+    else
+        log_error ".env file not found at $ENV_FILE"
+        log_info "Please create .env file first or run this from the project directory"
+        exit 1
+    fi
+
     echo ""
     log_warning "IMPORTANT: Keep these secrets secure and never commit them to version control!"
     log_info "For Stop & Go station: Configure the same STOPANDGO_HMAC_SECRET on your Raspberry Pi hardware"
+    log_info "Restart services to apply the new secrets: $0 restart"
 }
 
 # Main command handling

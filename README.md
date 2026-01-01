@@ -65,8 +65,8 @@ git clone https://github.com/frawau/endurance-go-kart.git
 cd endurance-go-kart
 
 # 2. Generate secrets and configure .env
-./race-manager.sh generate-secret  # Copy output to .env file
-# Edit .env: Set APP_DOMAIN, paste secrets, configure timezone
+./race-manager.sh generate-secret  # Automatically updates .env with secure secrets
+# Edit .env: Set APP_DOMAIN, configure timezone, adjust other settings
 
 # 3. Start the application
 ./race-manager.sh start
@@ -144,12 +144,10 @@ For production deployment, Docker provides easier setup and consistent environme
    ./race-manager.sh generate-secret
    ```
 
-   This will generate three secure random secrets:
+   This will generate three secure random secrets and automatically update your `.env` file:
    - `SECRET_KEY` - Django's cryptographic signing key
    - `STOPANDGO_HMAC_SECRET` - Hardware station authentication
    - `TIMING_HMAC_SECRET` - Timing daemon authentication (optional)
-
-   Copy the output into your `.env` file.
 
    **Alternative manual methods:**
 
@@ -283,8 +281,8 @@ source env/bin/activate  # On Windows: env\Scripts\activate
 # Install dependencies
 pip install -r requirements.txt
 
-# Generate secrets
-./race-manager.sh generate-secret  # Copy to .env or export as environment variables
+# Generate secrets (automatically updates .env)
+./race-manager.sh generate-secret
 
 # Set up database
 python manage.py makemigrations
