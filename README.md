@@ -82,6 +82,7 @@ Default login: `admin` / `admin` (change immediately!)
 ./race-manager.sh enable-letsencrypt  # Configure Let's Encrypt
 ./race-manager.sh generate-cert        # Generate certificate
 # Now available at https://your-domain.com
+# Certificates auto-renew - zero maintenance!
 ```
 
 ---
@@ -325,8 +326,13 @@ The application supports four SSL modes controlled by the `SSL_MODE` environment
 
 1. **`none`** (Default) - HTTP only, no SSL
 2. **`letsencrypt`** - Automatic SSL with Let's Encrypt (recommended)
+   - Fully automated certificate generation and renewal
+   - Certificates renew automatically every 60 days (90-day validity)
+   - Zero maintenance required
 3. **`acme`** - Automatic SSL with ZeroSSL (requires email registration)
+   - Same automated renewal as Let's Encrypt
 4. **`manual`** - Manual SSL (provide your own certificates)
+   - You manage renewal yourself
 
 #### Quick Setup with Race Manager (Recommended)
 

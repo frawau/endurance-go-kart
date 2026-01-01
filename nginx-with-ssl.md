@@ -27,6 +27,7 @@ The system supports four SSL modes controlled by the `SSL_MODE` environment vari
 ./race-manager.sh generate-cert
 
 # Your site is now available at https://your-domain.com
+# Renewal is fully automated - certificates renew every 60 days automatically!
 ```
 
 ### Automatic SSL with ZeroSSL (Alternative)
@@ -39,6 +40,7 @@ The system supports four SSL modes controlled by the `SSL_MODE` environment vari
 ./race-manager.sh generate-cert
 
 # Your site is now available at https://your-domain.com
+# Renewal is fully automated - certificates renew every 60 days automatically!
 ```
 
 ### Environment Variables
@@ -71,9 +73,10 @@ The race-manager.sh script automatically configures ports based on SSL_MODE.
 ### Certificate Generation Container (acme.sh)
 - Uses official `neilpang/acme.sh` Docker image
 - Supports both **Let's Encrypt** and **ZeroSSL** certificate authorities
-- Generates certificates using HTTP-01 challenge
+- Generates certificates using HTTP-01 challenge (webroot method)
 - Stores certificates in shared Docker volume
-- Automatic renewal via daemon mode
+- **Automatic renewal via daemon mode** - runs continuously, checks daily, renews at 60 days
+- **Zero maintenance required** - no cron jobs, fully automated renewal
 
 ### Nginx Configuration
 - Reads `SSL_MODE` environment variable at startup
@@ -204,20 +207,36 @@ cp privkey.pem ssl/
 ./race-manager.sh install-cert
 ```
 
-## Certificate Renewal
+## Certificate Renewal (Fully Automated)
 
-Let's Encrypt certificates are valid for 90 days. The acme.sh daemon automatically renews certificates when they have 60 days or less remaining.
+**Yes, renewal is completely automatic!**
 
-**Check renewal status:**
+The acme.sh container runs in **daemon mode** (see `command: daemon` in docker-compose.yml), which means:
+
+1. **Automatic checking**: Runs continuously as a background service
+2. **Daily checks**: Checks certificate expiration every day
+3. **Auto-renewal**: Automatically renews when certificates have ≤60 days remaining
+4. **Zero maintenance**: No cron jobs needed - the daemon handles everything
+
+Let's Encrypt certificates are valid for 90 days, and acme.sh renews them at 60 days, giving you a 30-day safety buffer.
+
+**Check renewal status and next renewal date:**
 ```bash
 docker compose exec acme-sh acme.sh --list
 ```
 
-**Force renewal (for testing):**
+**View daemon logs:**
+```bash
+docker compose logs acme-sh
+```
+
+**Force renewal (for testing only):**
 ```bash
 docker compose exec acme-sh acme.sh --renew -d your-domain.com --force
 docker compose restart nginx
 ```
+
+**Important**: After renewal, nginx needs to reload the new certificates. The acme.sh daemon automatically handles this by updating the certificate files in the shared volume. Nginx picks up the new certificates on the next connection or restart.
 
 ## Updating the Application
 
