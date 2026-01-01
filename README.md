@@ -498,19 +498,44 @@ The system automatically detects internal vs external connections for the `agent
 
 No additional nginx configuration is required - the system uses network interface detection to determine connection source.
 
-### Management Commands
+### Management Commands (For Testing/Development)
+
+Django management commands must be run **inside the Docker container**.
+
+#### On Production/Docker Deployment
+
+Run commands using `docker compose exec`:
 
 ```bash
-# Reset round data
-python manage.py roundreset
+# Generate complete test championship with rounds, teams, and drivers
+docker compose exec appseed-app python manage.py initialisedb
 
-# Generate test data
-python manage.py generate_teams 10
-python manage.py generate_people 50
+# Generate random teams (optional --number argument, default 30)
+docker compose exec appseed-app python manage.py generate_teams --number 30
+
+# Generate random people/drivers (optional --number argument, default 150)
+docker compose exec appseed-app python manage.py generate_people --number 150
+
+# Reset round data (clear sessions, penalties, etc.)
+docker compose exec appseed-app python manage.py roundreset
 
 # Clear cache
-python manage.py clearcache
+docker compose exec appseed-app python manage.py clearcache
 ```
+
+#### On Development (Without Docker)
+
+If running locally without Docker:
+
+```bash
+source env/bin/activate  # Activate virtual environment first
+
+python manage.py initialisedb
+python manage.py generate_teams --number 30
+python manage.py generate_people --number 150
+```
+
+**Important**: Run these on the VM/server where Docker is deployed, not on your local machine.
 
 ## 📊 Features Not Yet Implemented
 
