@@ -24,13 +24,13 @@ case "$SSL_MODE" in
         export ssl_redirect="no"
 
         # Process template for HTTP-only
-        envsubst '${APP_DOMAIN}' < /etc/nginx/templates/default.conf.template > /tmp/nginx.conf
+        envsubst '${APP_DOMAIN} ${ssl_redirect}' < /etc/nginx/templates/default.conf.template > /tmp/nginx.conf
 
         # Remove HTTPS server block for HTTP-only mode
         sed '/# HTTPS server configuration/,/^}/d' /tmp/nginx.conf > /etc/nginx/conf.d/default.conf
 
-        # Remove SSL redirect logic
-        sed -i '/if ($ssl_redirect = "yes")/,/}/d' /etc/nginx/conf.d/default.conf
+        # Remove SSL redirect logic (no longer needed since we substitute it)
+        # sed -i '/if ($ssl_redirect = "yes")/,/}/d' /etc/nginx/conf.d/default.conf
         ;;
 
     "letsencrypt"|"acme"|"manual")
@@ -39,7 +39,7 @@ case "$SSL_MODE" in
         export ssl_redirect="yes"
 
         # Process template for HTTPS
-        envsubst '${APP_DOMAIN}' < /etc/nginx/templates/default.conf.template > /etc/nginx/conf.d/default.conf
+        envsubst '${APP_DOMAIN} ${ssl_redirect}' < /etc/nginx/templates/default.conf.template > /etc/nginx/conf.d/default.conf
 
         # Check if certificates exist
         if [ ! -f "/etc/ssl/certs/fullchain.pem" ] || [ ! -f "/etc/ssl/certs/privkey.pem" ]; then
