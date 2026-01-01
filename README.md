@@ -507,20 +507,21 @@ Django management commands must be run **inside the Docker container**.
 Run commands using `docker compose exec`:
 
 ```bash
-# Generate complete test championship with rounds, teams, and drivers
-docker compose exec appseed-app python manage.py initialisedb
+# Generate complete test data (RECOMMENDED - all-in-one)
+docker compose exec appseed-app python manage.py generate_test_data
+# This creates: 30 teams, 150 drivers, 1 championship, 4 rounds, and team assignments
 
-# Generate random teams (optional --number argument, default 30)
+# Customize the number of teams and drivers (optional)
+docker compose exec appseed-app python manage.py generate_test_data --teams 50 --people 200
+
+# Individual commands (if you need granular control)
 docker compose exec appseed-app python manage.py generate_teams --number 30
-
-# Generate random people/drivers (optional --number argument, default 150)
 docker compose exec appseed-app python manage.py generate_people --number 150
+docker compose exec appseed-app python manage.py initialisedb  # Requires teams and people first!
 
-# Reset round data (clear sessions, penalties, etc.)
-docker compose exec appseed-app python manage.py roundreset
-
-# Clear cache
-docker compose exec appseed-app python manage.py clearcache
+# Other useful commands
+docker compose exec appseed-app python manage.py roundreset     # Reset round data
+docker compose exec appseed-app python manage.py clearcache     # Clear Django cache
 ```
 
 #### On Development (Without Docker)
@@ -530,12 +531,18 @@ If running locally without Docker:
 ```bash
 source env/bin/activate  # Activate virtual environment first
 
-python manage.py initialisedb
+# All-in-one test data generation
+python manage.py generate_test_data
+
+# Or individual commands
 python manage.py generate_teams --number 30
 python manage.py generate_people --number 150
+python manage.py initialisedb
 ```
 
-**Important**: Run these on the VM/server where Docker is deployed, not on your local machine.
+**Important**:
+- Run these on the VM/server where Docker is deployed, not on your local machine
+- **Use `generate_test_data`** for easiest setup - it runs all commands in the correct order
 
 ## 📊 Features Not Yet Implemented
 
