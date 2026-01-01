@@ -219,9 +219,9 @@ Using race-manager (recommended):
 # Check SSL and service status
 ./race-manager.sh status
 
-# Update application
+# Update application after git pull
 git pull
-./race-manager.sh restart
+./race-manager.sh rebuild  # Rebuild container with new code
 ```
 
 Using Docker Compose directly (advanced):
@@ -256,6 +256,21 @@ docker exec postgres pg_dump -U gokart gokart > backup.sql
 # Restore database
 docker exec -i postgres psql -U gokart gokart < backup.sql
 ```
+
+**When to use `rebuild` vs `restart`:**
+
+- **`rebuild`** - Use after `git pull` or when you modify:
+  - Python code (views.py, models.py, etc.)
+  - Templates (HTML files)
+  - Static files
+  - requirements.txt
+  - Any application code
+
+- **`restart`** - Use when you only change:
+  - .env file (environment variables)
+  - Configuration settings (SSL_MODE, APP_DOMAIN, etc.)
+
+The Dockerfile copies code into the image at build time, so code changes require rebuilding the container.
 
 ### 💻 Development Installation (Without Docker)
 

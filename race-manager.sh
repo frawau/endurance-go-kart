@@ -48,6 +48,7 @@ show_help() {
     echo "  start              Start application (HTTP mode)"
     echo "  stop               Stop all services"
     echo "  restart            Restart services with current configuration"
+    echo "  rebuild            Rebuild and restart (use after git pull)"
     echo "  logs               Show service logs"
     echo "  status             Show current configuration and service status"
     echo ""
@@ -68,6 +69,7 @@ show_help() {
     echo "  $0 enable-letsencrypt       # Configure Let's Encrypt SSL"
     echo "  $0 generate-cert            # Generate certificate"
     echo "  $0 generate-secret          # Generate SECRET_KEY and HMAC secrets"
+    echo "  $0 rebuild                  # Rebuild after git pull"
     echo ""
 }
 
@@ -290,6 +292,34 @@ restart_services() {
     log_success "Services restarted!"
 }
 
+rebuild_services() {
+    log_info "Rebuilding and restarting services..."
+    log_warning "This will rebuild the Docker image (use after git pull or code changes)"
+
+    # Set HTTP_PORT based on SSL_MODE
+    if [ "${SSL_MODE}" = "none" ] || [ -z "${SSL_MODE}" ]; then
+        export HTTP_PORT=${APP_PORT:-5085}
+        log_info "Using custom port ${HTTP_PORT}"
+    else
+        export HTTP_PORT=80
+        log_info "Using standard port 80 (required for SSL)"
+    fi
+
+    if [ "${SSL_MODE}" = "acme" ] || [ "${SSL_MODE}" = "letsencrypt" ]; then
+        log_info "Rebuilding with acme.sh profile..."
+        docker compose --profile ssl-acme down
+        docker compose --profile ssl-acme build
+        docker compose --profile ssl-acme up -d
+    else
+        log_info "Rebuilding..."
+        docker compose down
+        docker compose build
+        docker compose up -d
+    fi
+
+    log_success "Services rebuilt and restarted!"
+}
+
 generate_secret() {
     log_info "Generating secure random secrets..."
     echo ""
@@ -360,6 +390,9 @@ case "${1:-help}" in
         ;;
     "restart")
         restart_services
+        ;;
+    "rebuild")
+        rebuild_services
         ;;
     "logs")
         show_logs

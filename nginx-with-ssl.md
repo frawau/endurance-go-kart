@@ -112,6 +112,7 @@ The `race-manager.sh` script simplifies SSL management:
 ./race-manager.sh disable-ssl         # Disable SSL (HTTP only)
 ./race-manager.sh generate-cert       # Generate certificate (auto-detects mode)
 ./race-manager.sh install-cert        # Install manual certificates
+./race-manager.sh generate-secret     # Generate secure secrets for .env
 ```
 
 ## Detailed Setup Guide
@@ -217,6 +218,43 @@ docker compose exec acme-sh acme.sh --list
 docker compose exec acme-sh acme.sh --renew -d your-domain.com --force
 docker compose restart nginx
 ```
+
+## Updating the Application
+
+When you pull code changes from git, you need to rebuild the Docker container because the Dockerfile copies code into the image at build time.
+
+### Using race-manager (Recommended)
+
+```bash
+git pull origin main
+./race-manager.sh rebuild  # Rebuild and restart after code changes
+```
+
+**Note**: Use `rebuild` after `git pull` to rebuild Docker images with new code. Use `restart` for configuration-only changes (.env updates).
+
+### Using Docker Compose Directly (Advanced)
+
+```bash
+# Update code and rebuild
+git pull origin main
+docker compose down
+docker compose up -d --build
+
+# Or rebuild specific container
+docker compose build appseed-app
+docker compose up -d
+```
+
+**When to rebuild:**
+- After `git pull` with code changes
+- After modifying Python files (views, models, etc.)
+- After changing requirements.txt
+- After modifying templates or static files
+
+**When restart is sufficient:**
+- After changing .env file only
+- After changing nginx configuration only
+- For SSL certificate installation
 
 ## Troubleshooting
 
