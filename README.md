@@ -66,11 +66,11 @@ cd endurance-go-kart
 
 # 2. Create and configure .env file
 cp .env.example .env               # Create .env from template
-./race-manager.sh generate-secret  # Generate and add secure secrets to .env
+./race-manager generate-secret  # Generate and add secure secrets to .env
 # Edit .env: Set APP_DOMAIN, configure timezone, adjust other settings
 
 # 3. Start the application
-./race-manager.sh start
+./race-manager start
 ```
 
 **That's it!** Access at `http://your-domain:5085`
@@ -80,8 +80,8 @@ Default login: `admin` / `admin` (change immediately!)
 ### Enable HTTPS (Optional)
 
 ```bash
-./race-manager.sh enable-letsencrypt  # Configure Let's Encrypt
-./race-manager.sh generate-cert        # Generate certificate
+./race-manager enable-letsencrypt  # Configure Let's Encrypt
+./race-manager generate-cert        # Generate certificate
 # Now available at https://your-domain.com
 # Certificates auto-renew - zero maintenance!
 ```
@@ -141,14 +141,14 @@ For production deployment, Docker provides easier setup and consistent environme
    **Port Configuration**:
    - **HTTP-only mode** (`SSL_MODE=none`): Uses `APP_PORT` (default: 5085) - good for development
    - **SSL modes** (`letsencrypt`, `acme`, `manual`): Automatically uses port 80 (required for Let's Encrypt) and 443
-   - The race-manager.sh script handles port assignment automatically
+   - The race-manager script handles port assignment automatically
 
    **Generate Secure Keys:**
 
    Use the race-manager script (recommended):
 
    ```bash
-   ./race-manager.sh generate-secret
+   ./race-manager generate-secret
    ```
 
    This will generate three secure random secrets and automatically update your `.env` file:
@@ -181,7 +181,7 @@ For production deployment, Docker provides easier setup and consistent environme
 
    Using race-manager (recommended):
    ```bash
-   ./race-manager.sh start
+   ./race-manager start
    ```
 
    Or using Docker Compose directly:
@@ -217,20 +217,20 @@ Using race-manager (recommended):
 
 ```bash
 # View logs
-./race-manager.sh logs
+./race-manager logs
 
 # Stop the application
-./race-manager.sh stop
+./race-manager stop
 
 # Restart with current configuration
-./race-manager.sh restart
+./race-manager restart
 
 # Check SSL and service status
-./race-manager.sh status
+./race-manager status
 
 # Update application after git pull
 git pull
-./race-manager.sh rebuild  # Rebuild container with new code
+./race-manager rebuild  # Rebuild container with new code
 ```
 
 Using Docker Compose directly (advanced):
@@ -309,7 +309,7 @@ pip install -r requirements.txt
 cp .env.example .env
 
 # Generate secrets (automatically updates .env)
-./race-manager.sh generate-secret
+./race-manager generate-secret
 
 # Set up database
 python manage.py makemigrations
@@ -351,38 +351,38 @@ Use the included race manager script for easy SSL management:
 
 ```bash
 # Start application (HTTP mode)
-./race-manager.sh start
+./race-manager start
 
 # Check current SSL status
-./race-manager.sh status
+./race-manager status
 
 # Enable automatic SSL with Let's Encrypt (recommended)
-./race-manager.sh enable-letsencrypt  # Updates .env to SSL_MODE=letsencrypt
-./race-manager.sh generate-cert       # Generates and installs certificate
+./race-manager enable-letsencrypt  # Updates .env to SSL_MODE=letsencrypt
+./race-manager generate-cert       # Generates and installs certificate
 # Your site is now available at https://your-domain.com
 
 # Alternative: Enable automatic SSL with ZeroSSL
-./race-manager.sh enable-acme         # Updates .env to SSL_MODE=acme
-./race-manager.sh generate-cert       # Generates and installs certificate
+./race-manager enable-acme         # Updates .env to SSL_MODE=acme
+./race-manager generate-cert       # Generates and installs certificate
 
 # Enable manual SSL (provide your own certificates)
-./race-manager.sh enable-manual       # Updates .env to SSL_MODE=manual
+./race-manager enable-manual       # Updates .env to SSL_MODE=manual
 # Place certificates in ./ssl/fullchain.pem and ./ssl/privkey.pem
-./race-manager.sh install-cert        # Installs certificates
+./race-manager install-cert        # Installs certificates
 
 # Disable SSL (back to HTTP only)
-./race-manager.sh disable-ssl         # Updates .env to SSL_MODE=none
-./race-manager.sh restart             # Applies changes
+./race-manager disable-ssl         # Updates .env to SSL_MODE=none
+./race-manager restart             # Applies changes
 
 # Other useful commands
-./race-manager.sh stop                # Stop all services
-./race-manager.sh restart             # Restart with current configuration
-./race-manager.sh logs                # View logs
+./race-manager stop                # Stop all services
+./race-manager restart             # Restart with current configuration
+./race-manager logs                # View logs
 ```
 
 #### Manual SSL Configuration
 
-If you prefer to configure SSL manually without using `race-manager.sh`:
+If you prefer to configure SSL manually without using `race-manager`:
 
 **For Automatic SSL (Let's Encrypt):**
 
@@ -398,7 +398,7 @@ If you prefer to configure SSL manually without using `race-manager.sh`:
    docker compose --profile ssl-acme up -d
    ```
 
-3. The race-manager.sh script handles certificate generation automatically, but if running manually:
+3. The race-manager script handles certificate generation automatically, but if running manually:
    ```bash
    docker compose exec acme-sh acme.sh --set-default-ca --server letsencrypt
    docker compose exec acme-sh acme.sh --register-account -m admin@your-domain.com
@@ -500,28 +500,43 @@ No additional nginx configuration is required - the system uses network interfac
 
 ### Management Commands (For Testing/Development)
 
-Django management commands must be run **inside the Docker container**.
+#### Using race-manager (Recommended)
 
-#### On Production/Docker Deployment
-
-Run commands using `docker compose exec`:
+The easiest way to run Django management commands:
 
 ```bash
 # Generate complete test data (RECOMMENDED - all-in-one)
-docker compose exec appseed-app python manage.py generate_test_data
+./race-manager manage generate_test_data
 # This creates: 30 teams, 150 drivers, 1 championship, 4 rounds, and team assignments
 
-# Customize the number of teams and drivers (optional)
-docker compose exec appseed-app python manage.py generate_test_data --teams 50 --people 200
+# Customize the number of teams and drivers
+./race-manager manage generate_test_data --teams 50 --people 200
 
 # Individual commands (if you need granular control)
-docker compose exec appseed-app python manage.py generate_teams --number 30
-docker compose exec appseed-app python manage.py generate_people --number 150
-docker compose exec appseed-app python manage.py initialisedb  # Requires teams and people first!
+./race-manager manage generate_teams --number 30
+./race-manager manage generate_people --number 150
+./race-manager manage initialisedb  # Requires teams and people first!
 
 # Other useful commands
-docker compose exec appseed-app python manage.py roundreset     # Reset round data
-docker compose exec appseed-app python manage.py clearcache     # Clear Django cache
+./race-manager manage roundreset     # Reset round data
+./race-manager manage clearcache     # Clear Django cache
+```
+
+#### Using Docker Compose Directly (Advanced)
+
+If you prefer not to use race-manager:
+
+```bash
+# Generate complete test data
+docker compose exec appseed-app python manage.py generate_test_data
+
+# Customize the number of teams and drivers
+docker compose exec appseed-app python manage.py generate_test_data --teams 50 --people 200
+
+# Individual commands
+docker compose exec appseed-app python manage.py generate_teams --number 30
+docker compose exec appseed-app python manage.py generate_people --number 150
+docker compose exec appseed-app python manage.py initialisedb
 ```
 
 #### On Development (Without Docker)
@@ -542,6 +557,7 @@ python manage.py initialisedb
 
 **Important**:
 - Run these on the VM/server where Docker is deployed, not on your local machine
+- **Use `./race-manager manage`** for easiest execution
 - **Use `generate_test_data`** for easiest setup - it runs all commands in the correct order
 
 ## 📊 Features Not Yet Implemented

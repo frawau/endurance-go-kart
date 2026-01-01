@@ -60,6 +60,9 @@ show_help() {
     echo "  generate-cert      Generate SSL certificate (automatic modes only)"
     echo "  install-cert       Install manual SSL certificates"
     echo ""
+    echo "Test Data Management:"
+    echo "  manage <command>   Run Django management command (e.g., generate_test_data)"
+    echo ""
     echo "Utility:"
     echo "  generate-secret    Generate secure random secrets for .env file"
     echo "  help               Show this help message"
@@ -70,6 +73,7 @@ show_help() {
     echo "  $0 generate-cert            # Generate certificate"
     echo "  $0 generate-secret          # Generate SECRET_KEY and HMAC secrets"
     echo "  $0 rebuild                  # Rebuild after git pull"
+    echo "  $0 manage generate_test_data --teams 50  # Generate test data"
     echo ""
 }
 
@@ -393,6 +397,19 @@ case "${1:-help}" in
         ;;
     "rebuild")
         rebuild_services
+        ;;
+    "manage")
+        # Run Django management command
+        # Shift to remove 'manage' from arguments, leaving the actual command
+        shift
+        if [ -z "$1" ]; then
+            log_error "No management command specified"
+            log_info "Usage: $0 manage <command> [args]"
+            log_info "Example: $0 manage generate_test_data --teams 50"
+            exit 1
+        fi
+        log_info "Running Django management command: python manage.py $*"
+        docker compose exec appseed-app python manage.py "$@"
         ;;
     "logs")
         show_logs

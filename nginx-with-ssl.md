@@ -21,10 +21,10 @@ The system supports four SSL modes controlled by the `SSL_MODE` environment vari
 
 ```bash
 # 1. Enable Let's Encrypt mode (updates .env)
-./race-manager.sh enable-letsencrypt
+./race-manager enable-letsencrypt
 
 # 2. Generate certificate
-./race-manager.sh generate-cert
+./race-manager generate-cert
 
 # Your site is now available at https://your-domain.com
 # Renewal is fully automated - certificates renew every 60 days automatically!
@@ -34,10 +34,10 @@ The system supports four SSL modes controlled by the `SSL_MODE` environment vari
 
 ```bash
 # 1. Enable ZeroSSL mode (updates .env)
-./race-manager.sh enable-acme
+./race-manager enable-acme
 
 # 2. Generate certificate
-./race-manager.sh generate-cert
+./race-manager generate-cert
 
 # Your site is now available at https://your-domain.com
 # Renewal is fully automated - certificates renew every 60 days automatically!
@@ -66,7 +66,7 @@ APP_PORT=5085                           # Optional: custom port for HTTP-only mo
   - Port 443 serves HTTPS traffic
   - Access: `https://your-domain.com`
 
-The race-manager.sh script automatically configures ports based on SSL_MODE.
+The race-manager script automatically configures ports based on SSL_MODE.
 
 ## How It Works
 
@@ -87,35 +87,35 @@ The race-manager.sh script automatically configures ports based on SSL_MODE.
 
 ### Startup Orchestration
 1. acme.sh container starts when `--profile ssl-acme` is used
-2. `race-manager.sh generate-cert` configures certificate authority:
+2. `race-manager generate-cert` configures certificate authority:
    - **letsencrypt mode**: Sets Let's Encrypt as CA, registers email
    - **acme mode**: Uses ZeroSSL (default), registers email
 3. Generates certificate via HTTP-01 challenge
 4. Installs certificates to shared volume
 5. nginx automatically picks up certificates and enables HTTPS
 
-## race-manager.sh Commands
+## race-manager Commands
 
-The `race-manager.sh` script simplifies SSL management:
+The `race-manager` script simplifies SSL management:
 
 ### Service Management
 ```bash
-./race-manager.sh start           # Start application (HTTP mode)
-./race-manager.sh stop            # Stop all services
-./race-manager.sh restart         # Restart with current configuration
-./race-manager.sh logs            # Show service logs
-./race-manager.sh status          # Show SSL configuration status
+./race-manager start           # Start application (HTTP mode)
+./race-manager stop            # Stop all services
+./race-manager restart         # Restart with current configuration
+./race-manager logs            # Show service logs
+./race-manager status          # Show SSL configuration status
 ```
 
 ### SSL Management
 ```bash
-./race-manager.sh enable-letsencrypt  # Enable Let's Encrypt SSL (recommended)
-./race-manager.sh enable-acme         # Enable ZeroSSL
-./race-manager.sh enable-manual       # Enable manual SSL mode
-./race-manager.sh disable-ssl         # Disable SSL (HTTP only)
-./race-manager.sh generate-cert       # Generate certificate (auto-detects mode)
-./race-manager.sh install-cert        # Install manual certificates
-./race-manager.sh generate-secret     # Generate secure secrets for .env
+./race-manager enable-letsencrypt  # Enable Let's Encrypt SSL (recommended)
+./race-manager enable-acme         # Enable ZeroSSL
+./race-manager enable-manual       # Enable manual SSL mode
+./race-manager disable-ssl         # Disable SSL (HTTP only)
+./race-manager generate-cert       # Generate certificate (auto-detects mode)
+./race-manager install-cert        # Install manual certificates
+./race-manager generate-secret     # Generate secure secrets for .env
 ```
 
 ## Detailed Setup Guide
@@ -156,14 +156,14 @@ APP_PORT=5085                      # Optional: used only in HTTP-only mode
 
 Or use the helper command:
 ```bash
-./race-manager.sh enable-letsencrypt   # or enable-acme for ZeroSSL
+./race-manager enable-letsencrypt   # or enable-acme for ZeroSSL
 # Then edit .env to set APP_DOMAIN and SSL_EMAIL
 ```
 
 **2. Generate Certificate**
 
 ```bash
-./race-manager.sh generate-cert
+./race-manager generate-cert
 ```
 
 This command will:
@@ -192,7 +192,7 @@ If you have your own certificates:
 
 **1. Enable manual mode**
 ```bash
-./race-manager.sh enable-manual
+./race-manager enable-manual
 ```
 
 **2. Place certificates in `./ssl/` directory**
@@ -204,7 +204,7 @@ cp privkey.pem ssl/
 
 **3. Install certificates**
 ```bash
-./race-manager.sh install-cert
+./race-manager install-cert
 ```
 
 ## Certificate Renewal (Fully Automated)
@@ -246,7 +246,7 @@ When you pull code changes from git, you need to rebuild the Docker container be
 
 ```bash
 git pull origin main
-./race-manager.sh rebuild  # Rebuild and restart after code changes
+./race-manager rebuild  # Rebuild and restart after code changes
 ```
 
 **Note**: Use `rebuild` after `git pull` to rebuild Docker images with new code. Use `restart` for configuration-only changes (.env updates).
