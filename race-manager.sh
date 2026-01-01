@@ -60,12 +60,14 @@ show_help() {
     echo "  install-cert       Install manual SSL certificates"
     echo ""
     echo "Utility:"
+    echo "  generate-secret    Generate secure random secrets for .env file"
     echo "  help               Show this help message"
     echo ""
     echo "Examples:"
     echo "  $0 start                    # Start in HTTP mode"
     echo "  $0 enable-letsencrypt       # Configure Let's Encrypt SSL"
     echo "  $0 generate-cert            # Generate certificate"
+    echo "  $0 generate-secret          # Generate SECRET_KEY and HMAC secrets"
     echo ""
 }
 
@@ -288,6 +290,38 @@ restart_services() {
     log_success "Services restarted!"
 }
 
+generate_secret() {
+    log_info "Generating secure random secrets..."
+    echo ""
+
+    # Generate SECRET_KEY (64 bytes base64)
+    log_info "SECRET_KEY (Django secret key):"
+    SECRET_KEY=$(openssl rand -base64 64 | tr -d '\n')
+    echo "${GREEN}${SECRET_KEY}${NC}"
+    echo ""
+
+    # Generate STOPANDGO_HMAC_SECRET (64 bytes base64)
+    log_info "STOPANDGO_HMAC_SECRET (Hardware station HMAC):"
+    HMAC_SECRET=$(openssl rand -base64 64 | tr -d '\n')
+    echo "${GREEN}${HMAC_SECRET}${NC}"
+    echo ""
+
+    # Generate TIMING_HMAC_SECRET (64 bytes base64)
+    log_info "TIMING_HMAC_SECRET (Timing daemon HMAC, optional - uses STOPANDGO_HMAC_SECRET if not set):"
+    TIMING_SECRET=$(openssl rand -base64 64 | tr -d '\n')
+    echo "${GREEN}${TIMING_SECRET}${NC}"
+    echo ""
+
+    log_info "Add these to your .env file:"
+    echo ""
+    echo "SECRET_KEY=${SECRET_KEY}"
+    echo "STOPANDGO_HMAC_SECRET=${HMAC_SECRET}"
+    echo "TIMING_HMAC_SECRET=${TIMING_SECRET}"
+    echo ""
+    log_warning "IMPORTANT: Keep these secrets secure and never commit them to version control!"
+    log_info "For Stop & Go station: Configure the same STOPANDGO_HMAC_SECRET on your Raspberry Pi hardware"
+}
+
 # Main command handling
 case "${1:-help}" in
     "start")
@@ -322,6 +356,9 @@ case "${1:-help}" in
         ;;
     "install-cert")
         install_cert
+        ;;
+    "generate-secret")
+        generate_secret
         ;;
     "help"|*)
         show_help

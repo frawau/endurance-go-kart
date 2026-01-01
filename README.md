@@ -50,47 +50,47 @@ A comprehensive Django-based management system for endurance go-kart races and c
 - **Data Export**: Comprehensive race results and statistics
 - **Multi-user Support**: Role-based access control (Race Directors, Queue Scanners, etc.)
 
-## 🚀 Quick Start
+## 🚀 Quick Start (TL;DR)
 
 ### Prerequisites
-- Python 3.8+
-- Django 4.2+
-- Redis (for WebSocket support)
-- PostgreSQL or SQLite
+- Docker and Docker Compose
+- Git
+- Domain name (optional, for SSL/HTTPS)
 
-### Installation
+### Installation in 3 Steps
 
 ```bash
-# Clone the repository
+# 1. Clone and navigate
 git clone https://github.com/frawau/endurance-go-kart.git
 cd endurance-go-kart
 
-# Create virtual environment
-python -m venv env
-source env/bin/activate  # On Windows: env\Scripts\activate
+# 2. Generate secrets and configure .env
+./race-manager.sh generate-secret  # Copy output to .env file
+# Edit .env: Set APP_DOMAIN, paste secrets, configure timezone
 
-# Install dependencies
-pip install -r requirements.txt
-
-# Set up database
-python manage.py makemigrations
-python manage.py migrate
-
-# Create superuser
-python manage.py createsuperuser
-
-# Initialize database with sample data (optional)
-python manage.py initialisedb
-
-# Start the development server
-python manage.py runserver
+# 3. Start the application
+./race-manager.sh start
 ```
 
-The application will be available at `http://127.0.0.1:8000`
+**That's it!** Access at `http://your-domain:5085`
 
-### 🐳 Docker Installation (Recommended)
+Default login: `admin` / `admin` (change immediately!)
 
-For production deployment, use Docker for easier setup and consistent environment:
+### Enable HTTPS (Optional)
+
+```bash
+./race-manager.sh enable-letsencrypt  # Configure Let's Encrypt
+./race-manager.sh generate-cert        # Generate certificate
+# Now available at https://your-domain.com
+```
+
+---
+
+## 📖 Detailed Installation Guide
+
+### 🐳 Docker Installation (Recommended for Production)
+
+For production deployment, Docker provides easier setup and consistent environment:
 
 #### Prerequisites
 - Docker and Docker Compose
@@ -138,10 +138,23 @@ For production deployment, use Docker for easier setup and consistent environmen
 
    **Generate Secure Keys:**
 
-   Use one of these methods to generate random secrets:
+   Use the race-manager script (recommended):
 
    ```bash
-   # Using OpenSSL (recommended)
+   ./race-manager.sh generate-secret
+   ```
+
+   This will generate three secure random secrets:
+   - `SECRET_KEY` - Django's cryptographic signing key
+   - `STOPANDGO_HMAC_SECRET` - Hardware station authentication
+   - `TIMING_HMAC_SECRET` - Timing daemon authentication (optional)
+
+   Copy the output into your `.env` file.
+
+   **Alternative manual methods:**
+
+   ```bash
+   # Using OpenSSL
    openssl rand -base64 64
 
    # Using Python
@@ -158,6 +171,13 @@ For production deployment, use Docker for easier setup and consistent environmen
    - Use strong, unique passwords for production deployments
 
 3. **Start the application**
+
+   Using race-manager (recommended):
+   ```bash
+   ./race-manager.sh start
+   ```
+
+   Or using Docker Compose directly:
    ```bash
    docker compose up -d
    ```
@@ -184,7 +204,29 @@ For production deployment, use Docker for easier setup and consistent environmen
       - Login with your new user credentials
       - You can now start configuring championships and races
 
-#### Container Management
+#### Service Management
+
+Using race-manager (recommended):
+
+```bash
+# View logs
+./race-manager.sh logs
+
+# Stop the application
+./race-manager.sh stop
+
+# Restart with current configuration
+./race-manager.sh restart
+
+# Check SSL and service status
+./race-manager.sh status
+
+# Update application
+git pull
+./race-manager.sh restart
+```
+
+Using Docker Compose directly (advanced):
 
 ```bash
 # View logs
@@ -216,6 +258,51 @@ docker exec postgres pg_dump -U gokart gokart > backup.sql
 # Restore database
 docker exec -i postgres psql -U gokart gokart < backup.sql
 ```
+
+### 💻 Development Installation (Without Docker)
+
+For local development or if you prefer not to use Docker:
+
+#### Prerequisites
+- Python 3.8+
+- Django 4.2+
+- Redis (for WebSocket support)
+- PostgreSQL or SQLite
+
+#### Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/frawau/endurance-go-kart.git
+cd endurance-go-kart
+
+# Create virtual environment
+python -m venv env
+source env/bin/activate  # On Windows: env\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Generate secrets
+./race-manager.sh generate-secret  # Copy to .env or export as environment variables
+
+# Set up database
+python manage.py makemigrations
+python manage.py migrate
+
+# Create superuser
+python manage.py createsuperuser
+
+# Initialize database with sample data (optional)
+python manage.py initialisedb
+
+# Start the development server
+python manage.py runserver
+```
+
+The application will be available at `http://127.0.0.1:8000`
+
+---
 
 ### 🔒 SSL/HTTPS Configuration (Optional)
 
