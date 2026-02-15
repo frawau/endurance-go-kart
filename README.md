@@ -23,6 +23,22 @@ A comprehensive Django-based management system for endurance go-kart races and c
 - **Penalty Configuration**: Championship-specific penalty setup with fixed/variable/per-hour options
 - **Penalty Tracking**: Complete audit trail of imposed and served penalties
 
+### Transponder & Timing System
+- **Transponder Management**: Dedicated CRUD interface for registering and managing transponders
+  - Add/edit/delete transponders with descriptions and active status
+  - Live scan detection: click "Scan" to listen for a transponder passing the loop and auto-fill its ID
+  - Delete protection: transponders assigned to active races cannot be removed
+- **Transponder Matching**: Assign transponders to teams for each race
+  - Kart number auto-defaults to team number (user can override)
+  - Scan button for quick transponder detection during assignment
+  - Assignments auto-clone to dependent races (Q1 assignments carry forward to Q2, Q3, MAIN)
+- **Qualifying Race Configuration**: Multi-session qualifying support
+  - Configure 0-3 qualifying sessions (Q1, Q2, Q3) before the main race
+  - Two qualifying ending modes: standard (before time) and F1-style (last lap after time)
+  - Two grid methods: Best Time (combined best lap across sessions) and Elimination (knockout with cutoffs)
+  - Per-session duration and cutoff configuration
+  - Automatic creation of Race objects with correct dependencies (Q2 depends on Q1, MAIN depends on last Q)
+
 ### Hardware Integration
 - **Stop & Go Station**: Raspberry Pi-based penalty station with:
   - Physical button and sensor integration
@@ -30,6 +46,13 @@ A comprehensive Django-based management system for endurance go-kart races and c
   - Real-time display with countdown timers
   - HMAC-secured WebSocket communication
   - Automatic penalty completion detection
+- **Timing Station**: Transponder timing system with:
+  - Plugin-based hardware support (TAG Heuer serial, Chronelec NetTag, simulator)
+  - Multiple timing modes (interval, duration, time of day, decoder own time)
+  - SQLite disk buffer with at-least-once delivery and ACK protocol
+  - Native systemd service deployment
+  - HMAC-secured WebSocket communication
+  - Transponder scan broadcast: raw detections are forwarded to management/matching pages via WebSocket
 
 ### Real-time Features
 - **WebSocket Integration**: Live updates across all interfaces
@@ -67,7 +90,7 @@ cd endurance-go-kart
 # 2. Create and configure .env file
 cp .env.example .env               # Create .env from template
 ./race-manager generate-secret  # Generate and add secure secrets to .env
-# Edit .env: Set APP_DOMAIN, configure timezone, adjust other settings
+# Edit .env: Set APP_HOSTNAME, configure timezone, adjust other settings
 
 # 3. Start the application
 ./race-manager start
@@ -129,7 +152,7 @@ For production deployment, Docker provides easier setup and consistent environme
    STOPANDGO_HMAC_SECRET=your-hmac-secret-for-station-security-also-change-this
 
    # Your domain
-   APP_DOMAIN=your-domain.com
+   APP_HOSTNAME=host.your-domain.com
 
    # HTTP port (optional, default: 5085 for HTTP-only, 80 for SSL modes)
    APP_PORT=5085
@@ -151,10 +174,16 @@ For production deployment, Docker provides easier setup and consistent environme
    ./race-manager generate-secret
    ```
 
-   This will generate three secure random secrets and automatically update your `.env` file:
+   This will generate three secure random secrets, update your `.env` file, and propagate
+   the values into the station TOML config files automatically.
    - `SECRET_KEY` - Django's cryptographic signing key
    - `STOPANDGO_HMAC_SECRET` - Hardware station authentication
    - `TIMING_HMAC_SECRET` - Timing daemon authentication (optional)
+
+   If you later change `.env` values manually (e.g. `APP_HOSTNAME`), re-run:
+   ```bash
+   ./race-manager configure-stations
+   ```
 
    **Alternative manual methods:**
 
@@ -277,7 +306,7 @@ docker exec -i postgres psql -U gokart gokart < backup.sql
 
 - **`restart`** - Use when you only change:
   - .env file (environment variables)
-  - Configuration settings (SSL_MODE, APP_DOMAIN, etc.)
+  - Configuration settings (SSL_MODE, APP_HOSTNAME, etc.)
 
 The Dockerfile copies code into the image at build time, so code changes require rebuilding the container.
 
@@ -389,7 +418,7 @@ If you prefer to configure SSL manually without using `race-manager`:
 1. Edit `.env`:
    ```bash
    SSL_MODE=letsencrypt
-   APP_DOMAIN=your-domain.com
+   APP_HOSTNAME=host.your-domain.com
    SSL_EMAIL=admin@your-domain.com
    ```
 
@@ -415,7 +444,7 @@ If you prefer to configure SSL manually without using `race-manager`:
 1. Edit `.env`:
    ```bash
    SSL_MODE=acme
-   APP_DOMAIN=your-domain.com
+   APP_HOSTNAME=host.your-domain.com
    SSL_EMAIL=admin@your-domain.com
    ```
 
@@ -459,6 +488,8 @@ If you prefer to configure SSL manually without using `race-manager`:
 
 ## 🛠 Hardware Station Setup
 
+### Stop & Go Penalty Station
+
 For the Stop & Go penalty station:
 
 ```bash
@@ -467,12 +498,95 @@ cd stations/
 python stopandgo-station.py --button 18 --fence 36 --server your-domain.com -port 443
 ```
 
-### Hardware Requirements
+#### Hardware Requirements
 - Raspberry Pi with GPIO access (Tested on RPi Zero 2 W)
 - Physical button (normally open)
 - Fence sensor (optional, can be disabled) for area breach detections (e.g. early start)
 - I2C relay board (optional) for, for example, flashing lights control
 - Display (Required for status and countdown)
+
+### Timing Station
+
+The timing station relays transponder crossing events from decoder hardware to the Django app via WebSocket. It runs as a native systemd service on the host (not in Docker) because it needs direct LAN access to the timing decoder hardware.
+
+#### Deployment
+
+```bash
+# Configure timing settings in .env
+TIMING_PLUGIN_TYPE=nettag        # simulator|tag|nettag
+TIMING_MODE=own_time             # interval|duration|time_of_day|own_time
+TIMING_NETTAG_HOST=192.168.0.11  # NetTag: decoder IP address
+TIMING_NETTAG_PORT=2009          # NetTag: decoder port
+TIMING_NETTAG_PROTOCOL=udp       # NetTag: udp or tcp
+TIMING_TAG_DEVICE=/dev/ttyUSB0   # TAG: serial device
+TIMING_TAG_BAUD=9600             # TAG: baud rate
+
+# Deploy as systemd service (creates venv, installs deps, generates config)
+sudo ./race-manager deploy-timing
+
+# Management
+sudo ./race-manager timing-status      # Check service status
+sudo ./race-manager undeploy-timing    # Stop and remove service
+journalctl -u timing-station -f        # View logs
+```
+
+The `deploy-timing` command:
+1. Creates a Python venv at `stations/timing/venv/`
+2. Installs dependencies (websockets, toml, pyserial-asyncio)
+3. Generates `timing-station.toml` from `.env` values via `configure-stations`
+4. Installs and starts the systemd service
+
+See `stations/timing/README.md` for detailed configuration and protocol documentation.
+
+### NetTag UDP Proxy
+
+When using a Chronelec decoder via a Lantronix serial-to-UDP converter, the Lantronix only supports a single remote endpoint. The NetTag proxy sits on the host machine, maintains the single upstream connection to the decoder, and fans out frames to multiple downstream clients (e.g., timing station and a test/logging system).
+
+Each client gets its own buffered queue backed by SQLite (WAL mode). If a client falls behind or disconnects, frames accumulate and are replayed rapidly on reconnect.
+
+**Port layout** when proxy and timing station are co-located:
+- `:2009` — proxy upstream (receives from decoder)
+- `:2010` — proxy downstream (sends frames to clients, receives ACKs)
+- `:2011` — timing station (receives frames from proxy)
+
+#### Setup
+
+1. Edit `proxy/nettag-proxy.toml` with your decoder address and client list:
+   ```toml
+   [upstream]
+   decoder_host = "192.168.0.11"
+   decoder_port = 2009
+
+   [downstream]
+   listen_port = 2010
+   resend_interval = 1.0
+
+   [[client]]
+   host = "127.0.0.1"
+   port = 2011
+   ```
+
+2. Set the timing station to listen on a different port than the decoder:
+   ```bash
+   # In .env
+   TIMING_NETTAG_PORT=2011
+   ```
+
+3. Deploy and start:
+   ```bash
+   sudo ./race-manager deploy-proxy
+   sudo ./race-manager configure-stations
+   sudo systemctl restart timing-station
+   ```
+
+#### Management
+
+```bash
+sudo ./race-manager deploy-proxy      # Install and start systemd service
+./race-manager proxy-status            # Check service status
+sudo ./race-manager undeploy-proxy    # Stop and remove service
+journalctl -u nettag-proxy -f         # View logs
+```
 
 ## 🔧 Configuration
 
@@ -482,7 +596,7 @@ python stopandgo-station.py --button 18 --fence 36 --server your-domain.com -por
 # .env file
 SECRET_KEY=your-django-secret-key
 DEBUG=False
-APP_DOMAIN=your-domain.com
+APP_HOSTNAME=host.your-domain.com
 STOPANDGO_HMAC_SECRET=your-hmac-secret-for-station-security
 
 # Database (if using PostgreSQL)
@@ -562,7 +676,6 @@ python manage.py initialisedb
 
 ## 📊 Features Not Yet Implemented
 
-- **Lap Timing**: Individual lap time measurement and analysis
 - **Live Timing Displays**: Real-time lap time leaderboards
 - **Automatic Position Calculation**: Based on completed laps and timing
 
@@ -609,4 +722,4 @@ This system has been designed and tested for real endurance go-kart championship
 
 ---
 
-**Note**: This system excels at race management, team coordination, and penalty administration. For complete timing solutions, consider integrating with dedicated lap timing hardware and software.
+**Note**: This system handles race management, team coordination, penalty administration, and transponder-based lap timing with support for TAG Heuer and Chronelec hardware.

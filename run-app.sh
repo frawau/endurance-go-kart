@@ -41,14 +41,14 @@ except Exception as e:
 
 if [ "$PENALTY_EXISTS" = "MISSING" ]; then
     echo "First run detected - running initial setup..."
-    python manage.py makemigrations
+    python manage.py makemigrations race
     python manage.py migrate
     python manage.py setup_essential_data
     python manage.py createsuperuser_with_password --username ${DJANGO_SUPERUSER_USERNAME} --password ${DJANGO_SUPERUSER_PASSWORD}
     echo "First run setup complete"
 else
     echo "Database already initialized - checking for new migrations..."
-    python manage.py makemigrations
+    python manage.py makemigrations race
     python manage.py migrate
 fi
 

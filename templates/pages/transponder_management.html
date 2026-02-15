@@ -1,0 +1,293 @@
+{% extends 'layout/content.html' %}
+{% load static %}
+
+{% block main_content %}
+<div class="container mt-5">
+    <div class="card">
+        <div class="card-header bg-primary text-white">
+            <h4>Manage Transponders</h4>
+        </div>
+        <div class="card-body">
+            <!-- Create New Transponder Form -->
+            <div class="mb-4">
+                <h5>Add New Transponder</h5>
+                <form id="create-transponder-form" method="post">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="create_transponder">
+
+                    <div class="row align-items-end">
+                        <div class="col-md-4">
+                            <div class="form-group mb-3">
+                                <label for="create-transponder-id">Transponder ID:</label>
+                                <div class="input-group">
+                                    <input type="text" class="form-control" id="create-transponder-id"
+                                           name="transponder_id" required maxlength="32">
+                                    <button type="button" class="btn btn-outline-info" id="scan-btn-create"
+                                            onclick="startScan('create-transponder-id', 'scan-btn-create')">
+                                        <i class="fas fa-broadcast-tower"></i> Scan
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="form-group mb-3">
+                                <label for="create-description">Description (optional):</label>
+                                <input type="text" class="form-control" id="create-description"
+                                       name="description" maxlength="128">
+                            </div>
+                        </div>
+                        <div class="col-md-2">
+                            <div class="form-group mb-3">
+                                <div class="form-check mt-4">
+                                    <input type="checkbox" class="form-check-input" id="create-active"
+                                           name="active" checked>
+                                    <label class="form-check-label" for="create-active">Active</label>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-2">
+                            <div class="form-group mb-3">
+                                <button type="submit" class="btn btn-success w-100">
+                                    <i class="fas fa-plus"></i> Add
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </form>
+            </div>
+
+            <hr>
+
+            <!-- Existing Transponders List -->
+            <div class="mb-4">
+                <h5>Existing Transponders</h5>
+                {% if transponders %}
+                    <div class="table-responsive">
+                        <table class="table table-striped">
+                            <thead>
+                                <tr>
+                                    <th>Transponder ID</th>
+                                    <th>Description</th>
+                                    <th>Active</th>
+                                    <th>Last Seen</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for t in transponders %}
+                                <tr id="transponder-row-{{ t.pk }}"
+                                    data-pk="{{ t.pk }}"
+                                    data-transponder-id="{{ t.transponder_id }}"
+                                    data-description="{{ t.description }}"
+                                    data-active="{{ t.active }}">
+                                    <td><code>{{ t.transponder_id }}</code></td>
+                                    <td>{{ t.description|default:"-" }}</td>
+                                    <td>
+                                        {% if t.active %}
+                                            <span class="badge bg-success">Active</span>
+                                        {% else %}
+                                            <span class="badge bg-secondary">Inactive</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>{{ t.last_seen|default:"Never" }}</td>
+                                    <td>
+                                        <button type="button" class="btn btn-sm btn-primary"
+                                                onclick="editTransponder({{ t.pk }})">Edit</button>
+                                        <button type="button" class="btn btn-sm btn-danger"
+                                                onclick="deleteTransponder({{ t.pk }})">Delete</button>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% else %}
+                    <p class="text-muted">No transponders registered yet.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Transponder Modal -->
+<div class="modal fade" id="editTransponderModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Edit Transponder</h5>
+                <button type="button" class="close" data-bs-dismiss="modal" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+            <form id="edit-transponder-form" method="post">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="edit_transponder">
+                <input type="hidden" name="transponder_pk" id="edit-transponder-pk">
+                <div class="modal-body">
+                    <div class="form-group mb-3">
+                        <label for="edit-transponder-id">Transponder ID:</label>
+                        <div class="input-group">
+                            <input type="text" class="form-control" id="edit-transponder-id"
+                                   name="transponder_id" required maxlength="32">
+                            <button type="button" class="btn btn-outline-info" id="scan-btn-edit"
+                                    onclick="startScan('edit-transponder-id', 'scan-btn-edit')">
+                                <i class="fas fa-broadcast-tower"></i> Scan
+                            </button>
+                        </div>
+                    </div>
+                    <div class="form-group mb-3">
+                        <label for="edit-description">Description:</label>
+                        <input type="text" class="form-control" id="edit-description"
+                               name="description" maxlength="128">
+                    </div>
+                    <div class="form-group mb-3">
+                        <div class="form-check">
+                            <input type="checkbox" class="form-check-input" id="edit-active" name="active">
+                            <label class="form-check-label" for="edit-active">Active</label>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const csrfToken = '{{ csrf_token }}';
+let scanSocket = null;
+let scanTimeout = null;
+
+function startScan(targetFieldId, buttonId) {
+    const btn = document.getElementById(buttonId);
+    const field = document.getElementById(targetFieldId);
+
+    // If already scanning, cancel
+    if (scanSocket) {
+        stopScan(buttonId);
+        return;
+    }
+
+    // Open WebSocket
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    scanSocket = new WebSocket(`${wsProtocol}://${window.location.host}/ws/transponder-scan/`);
+
+    btn.innerHTML = '<i class="fas fa-spinner fa-pulse"></i> Listening...';
+    btn.classList.remove('btn-outline-info');
+    btn.classList.add('btn-warning');
+
+    scanSocket.onmessage = function(e) {
+        const data = JSON.parse(e.data);
+        if (data.type === 'transponder_detected') {
+            field.value = data.transponder_id;
+            stopScan(buttonId);
+        }
+    };
+
+    scanSocket.onerror = function() {
+        stopScan(buttonId);
+    };
+
+    // 60 second timeout
+    scanTimeout = setTimeout(function() {
+        stopScan(buttonId);
+    }, 60000);
+}
+
+function stopScan(buttonId) {
+    const btn = document.getElementById(buttonId);
+    if (scanSocket) {
+        scanSocket.close();
+        scanSocket = null;
+    }
+    if (scanTimeout) {
+        clearTimeout(scanTimeout);
+        scanTimeout = null;
+    }
+    btn.innerHTML = '<i class="fas fa-broadcast-tower"></i> Scan';
+    btn.classList.remove('btn-warning');
+    btn.classList.add('btn-outline-info');
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    // Create form
+    document.getElementById('create-transponder-form').addEventListener('submit', function(e) {
+        e.preventDefault();
+        const formData = new FormData(this);
+
+        fetch('{% url "transponder_management" %}', {
+            method: 'POST',
+            body: formData,
+            headers: { 'X-CSRFToken': csrfToken }
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                location.reload();
+            } else {
+                alert('Error: ' + data.error);
+            }
+        })
+        .catch(() => alert('An error occurred.'));
+    });
+
+    // Edit form
+    document.getElementById('edit-transponder-form').addEventListener('submit', function(e) {
+        e.preventDefault();
+        const formData = new FormData(this);
+
+        fetch('{% url "transponder_management" %}', {
+            method: 'POST',
+            body: formData,
+            headers: { 'X-CSRFToken': csrfToken }
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                location.reload();
+            } else {
+                alert('Error: ' + data.error);
+            }
+        })
+        .catch(() => alert('An error occurred.'));
+    });
+});
+
+function editTransponder(pk) {
+    const row = document.getElementById('transponder-row-' + pk);
+    document.getElementById('edit-transponder-pk').value = pk;
+    document.getElementById('edit-transponder-id').value = row.dataset.transponderId;
+    document.getElementById('edit-description').value = row.dataset.description;
+    document.getElementById('edit-active').checked = row.dataset.active === 'True';
+    $('#editTransponderModal').modal('show');
+}
+
+function deleteTransponder(pk) {
+    if (!confirm('Are you sure you want to delete this transponder?')) return;
+
+    const formData = new FormData();
+    formData.append('action', 'delete_transponder');
+    formData.append('transponder_pk', pk);
+    formData.append('csrfmiddlewaretoken', csrfToken);
+
+    fetch('{% url "transponder_management" %}', {
+        method: 'POST',
+        body: formData
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            location.reload();
+        } else {
+            alert('Error: ' + data.error);
+        }
+    })
+    .catch(() => alert('An error occurred.'));
+}
+</script>
+{% endblock %}

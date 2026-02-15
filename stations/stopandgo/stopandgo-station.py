@@ -684,7 +684,7 @@ def parse_arguments():
     parser.add_argument(
         "-s",
         "--server",
-        help="Server hostname (default: gokart.wautier.eu)",
+        help="Server hostname",
     )
     parser.add_argument("-p", "--port", type=int, help="Server port (default: 8000)")
     parser.add_argument(
@@ -714,7 +714,7 @@ def parse_arguments():
     parser.add_argument(
         "-H",
         "--hmac-secret",
-        help="HMAC secret key for message authentication (default: race_control_hmac_key_2024)",
+        help="HMAC secret key for message authentication",
     )
 
     args = parser.parse_args()
@@ -726,14 +726,14 @@ def parse_arguments():
 
     # Set defaults - command line args override config file values
     defaults = {
-        "server": "gokart.wautier.eu",
+        "server": "__APP_HOSTNAME__",
         "port": 8000,
         "secure": False,
         "button": DEFAULT_BUTTON_PIN,
         "fence": DEFAULT_SENSOR_PIN,
         "debug": False,
         "info": False,
-        "hmac_secret": "race_control_hmac_key_2024",
+        "hmac_secret": "__STOPANDGO_HMAC_SECRET__",
     }
 
     # Apply config file values, then command line overrides
@@ -747,18 +747,24 @@ def parse_arguments():
         else:
             setattr(args, key, config_value)
 
+    # Read [logging] section (new format) — CLI flags still override
+    log_section = config.get("logging", {})
+    args._config_log_level = log_section.get("level", None)
+
     return args
 
 
 async def main():
     args = parse_arguments()
 
-    # Set log level based on arguments
+    # Set log level: CLI flags > config [logging].level > WARNING default
     log_level = logging.WARNING  # Default
     if args.debug:
         log_level = logging.DEBUG
     elif args.info:
         log_level = logging.INFO
+    elif args._config_log_level:
+        log_level = getattr(logging, args._config_log_level.upper(), logging.WARNING)
 
     logging.basicConfig(
         level=log_level, format="%(asctime)s - %(levelname)s - %(message)s"

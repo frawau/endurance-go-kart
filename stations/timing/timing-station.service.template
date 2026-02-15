@@ -1,0 +1,32 @@
+[Unit]
+Description=Go-Kart Timing Station Daemon
+After=network.target
+Requires=network.target
+
+[Service]
+Type=exec
+User=__USER__
+Group=__GROUP__
+WorkingDirectory=__WORKDIR__/stations/timing
+ExecStart=__WORKDIR__/stations/timing/venv/bin/python __WORKDIR__/stations/timing/timing-station.py -c __WORKDIR__/stations/timing/timing-station.toml
+ExecReload=/bin/kill -s HUP $MAINPID
+KillMode=mixed
+TimeoutStopSec=5
+PrivateTmp=true
+Restart=on-failure
+RestartSec=10
+
+# State directory for crossing buffer
+StateDirectory=timing-station
+
+# Security settings
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=false
+ReadWritePaths=__WORKDIR__/stations/timing /var/lib/timing-station
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+
+[Install]
+WantedBy=multi-user.target

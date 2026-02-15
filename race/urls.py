@@ -62,8 +62,16 @@ urlpatterns = [
     path("rounds/form/", views.round_form, name="round_form"),
     path("rounds/update/<int:round_id>/", views.update_round, name="update_round"),
     path("rounds/team/", TeamMembersView.as_view(), name="team_members"),
-    path("rounds/team/select/", TeamManagementSelectionView.as_view(), name="team_management_selection"),
-    path("rounds/team/<int:round_id>/", TeamMembersView.as_view(), name="team_members_by_id"),
+    path(
+        "rounds/team/select/",
+        TeamManagementSelectionView.as_view(),
+        name="team_management_selection",
+    ),
+    path(
+        "rounds/team/<int:round_id>/",
+        TeamMembersView.as_view(),
+        name="team_members_by_id",
+    ),
     path("driver/add/", views.create_driver, name="add_driver"),
     path("team/add/", views.create_team, name="add_team"),
     path("get_round_status/", views.get_round_status, name="get_round_status"),
@@ -87,6 +95,11 @@ urlpatterns = [
         "api/championship/<int:championship_id>/rounds/",
         views.get_championship_rounds,
         name="get_championship_rounds",
+    ),
+    path(
+        "transponder/manage/",
+        views.transponder_management_view,
+        name="transponder_management",
     ),
     path("penalty/manage/", views.penalty_management_view, name="penalty_management"),
     path("sponsor/manage/", views.sponsor_management_view, name="sponsor_management"),
@@ -145,5 +158,115 @@ urlpatterns = [
         "api/delay-penalty/",
         views.delay_penalty,
         name="delay_penalty",
+    ),
+    # Grid Management (Phase 4 - Qualifying & Grid System)
+    path(
+        "race/<int:race_id>/grid/",
+        views.race_grid_management,
+        name="race_grid_management",
+    ),
+    path(
+        "api/race/<int:race_id>/grid/update/",
+        views.update_grid_position,
+        name="update_grid_position",
+    ),
+    path(
+        "api/race/<int:race_id>/grid/reorder/",
+        views.reorder_grid_positions,
+        name="reorder_grid_positions",
+    ),
+    path(
+        "race/<int:race_id>/grid/lock/",
+        views.lock_grid,
+        name="lock_grid",
+    ),
+    path(
+        "race/<int:race_id>/grid/unlock/",
+        views.unlock_grid,
+        name="unlock_grid",
+    ),
+    path(
+        "race/<int:race_id>/grid/reset/",
+        views.reset_grid_to_auto,
+        name="reset_grid_to_auto",
+    ),
+    path(
+        "race/<int:race_id>/grid/auto-assign-qualifying/",
+        views.auto_assign_from_qualifying,
+        name="auto_assign_from_qualifying",
+    ),
+    path(
+        "race/<int:race_id>/grid/auto-assign-championship/",
+        views.auto_assign_from_championship,
+        name="auto_assign_from_championship",
+    ),
+    # Leaderboard (Phase 5 - Leaderboard & Displays)
+    path(
+        "leaderboard/<int:race_id>/",
+        views.public_leaderboard,
+        name="public_leaderboard",
+    ),
+    # Lap Management (Phase 6 - Lap Splitting & Suspicious Lap Detection)
+    path(
+        "race/<int:race_id>/laps/",
+        views.race_lap_management,
+        name="race_lap_management",
+    ),
+    path(
+        "api/race/<int:race_id>/laps/",
+        views.get_race_laps,
+        name="get_race_laps",
+    ),
+    path(
+        "api/lap/<int:crossing_id>/split/",
+        views.split_lap,
+        name="split_lap",
+    ),
+    path(
+        "api/lap/<int:crossing_id>/invalidate/",
+        views.invalidate_lap,
+        name="invalidate_lap",
+    ),
+    path(
+        "api/lap/<int:crossing_id>/validate/",
+        views.validate_lap,
+        name="validate_lap",
+    ),
+    # Transponder Matching (Phase 7 - Race Director Workflow)
+    path(
+        "race/<int:race_id>/transponders/",
+        views.transponder_matching,
+        name="transponder_matching",
+    ),
+    path(
+        "api/race/<int:race_id>/transponder-assignments/",
+        views.get_transponder_assignments,
+        name="get_transponder_assignments",
+    ),
+    path(
+        "api/race/<int:race_id>/assign-transponder/",
+        views.assign_transponder,
+        name="assign_transponder",
+    ),
+    path(
+        "api/transponder-assignment/<int:assignment_id>/remove/",
+        views.remove_transponder_assignment,
+        name="remove_transponder_assignment",
+    ),
+    path(
+        "api/race/<int:race_id>/lock-transponder-assignments/",
+        views.lock_transponder_assignments,
+        name="lock_transponder_assignments",
+    ),
+    path(
+        "api/race/<int:race_id>/available-transponders/",
+        views.get_available_transponders,
+        name="get_available_transponders",
+    ),
+    # Team Retirement
+    path(
+        "api/retire-team/",
+        views.retire_team,
+        name="retire_team",
     ),
 ]

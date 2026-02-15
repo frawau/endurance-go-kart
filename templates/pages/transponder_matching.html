@@ -1,0 +1,406 @@
+{% extends 'layout/content.html' %}
+{% load static %}
+
+{% block main_content %}
+<div class="container mt-5">
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h3>Transponder Matching - {{ race.get_race_type_display }}</h3>
+                </div>
+                <div class="card-body">
+                    <!-- Race Info -->
+                    <div class="alert alert-info">
+                        <strong>Round:</strong> {{ race.round.name }}<br>
+                        <strong>Race Type:</strong> {{ race.get_race_type_display }}<br>
+                        <p class="mt-2 mb-0">
+                            <strong>Instructions:</strong> Select a team, optionally set a kart number (defaults to team number),
+                            choose or scan a transponder, then click "Assign".
+                        </p>
+                    </div>
+
+                    <!-- Assignment Form -->
+                    <div class="card mb-4">
+                        <div class="card-header bg-primary text-white">
+                            <h5 class="mb-0">Assign Transponder</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-3">
+                                    <label for="teamSelect" class="form-label">Select Team:</label>
+                                    <select id="teamSelect" class="form-select">
+                                        <option value="">-- Select Team --</option>
+                                        {% for team in race.get_all_teams %}
+                                        <option value="{{ team.id }}" data-number="{{ team.number }}">Team #{{ team.number }} - {{ team.name }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <div class="col-md-2">
+                                    <label for="kartNumberInput" class="form-label">Kart Number:</label>
+                                    <input type="number" id="kartNumberInput" class="form-control" min="1" placeholder="Auto">
+                                </div>
+                                <div class="col-md-4">
+                                    <label for="transponderSelect" class="form-label">Transponder:</label>
+                                    <div class="input-group">
+                                        <select id="transponderSelect" class="form-select">
+                                            <option value="">-- Select Transponder --</option>
+                                            {% for transponder in transponders %}
+                                            <option value="{{ transponder.transponder_id }}">
+                                                {{ transponder.transponder_id }}
+                                                {% if transponder.description %} - {{ transponder.description }}{% endif %}
+                                            </option>
+                                            {% endfor %}
+                                        </select>
+                                        <button type="button" class="btn btn-outline-info" id="scan-btn-matching"
+                                                onclick="startScan()">
+                                            <i class="fas fa-broadcast-tower"></i> Scan
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label">&nbsp;</label>
+                                    <button id="assignBtn" class="btn btn-success w-100">
+                                        <i class="fas fa-plus"></i> Assign
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Current Assignments -->
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h4>Current Assignments</h4>
+                        <div>
+                            <button id="refreshBtn" class="btn btn-outline-primary me-2">
+                                <i class="fas fa-sync-alt"></i> Refresh
+                            </button>
+                            <button id="lockAllBtn" class="btn btn-danger">
+                                <i class="fas fa-lock"></i> Lock All Assignments
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="table-responsive">
+                        <table class="table table-striped table-hover">
+                            <thead>
+                                <tr>
+                                    <th>Team #</th>
+                                    <th>Team Name</th>
+                                    <th>Kart #</th>
+                                    <th>Transponder ID</th>
+                                    <th>Status</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="assignmentsTable">
+                                <tr>
+                                    <td colspan="6" class="text-center">
+                                        <div class="spinner-border" role="status">
+                                            <span class="visually-hidden">Loading...</span>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- Progress Indicator -->
+                    <div class="mt-3">
+                        <div class="progress" style="height: 30px;">
+                            <div id="progressBar" class="progress-bar bg-success" role="progressbar" style="width: 0%;"
+                                 aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+                                <span id="progressText">0 / 0 teams assigned</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+const raceId = {{ race.id }};
+const totalTeams = {{ race.get_all_teams.count }};
+const csrfToken = '{{ csrf_token }}';
+let assignments = [];
+let scanSocket = null;
+let scanTimeout = null;
+
+document.addEventListener('DOMContentLoaded', function() {
+    loadAssignments();
+
+    document.getElementById('assignBtn').addEventListener('click', assignTransponder);
+    document.getElementById('refreshBtn').addEventListener('click', loadAssignments);
+    document.getElementById('lockAllBtn').addEventListener('click', lockAllAssignments);
+
+    // Auto-fill kart number when team is selected
+    document.getElementById('teamSelect').addEventListener('change', function() {
+        const selected = this.options[this.selectedIndex];
+        const kartInput = document.getElementById('kartNumberInput');
+        if (selected.value && selected.dataset.number) {
+            kartInput.value = selected.dataset.number;
+        } else {
+            kartInput.value = '';
+        }
+    });
+});
+
+// --- Transponder Scan ---
+function startScan() {
+    const btn = document.getElementById('scan-btn-matching');
+    const select = document.getElementById('transponderSelect');
+
+    if (scanSocket) {
+        stopScan();
+        return;
+    }
+
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    scanSocket = new WebSocket(`${wsProtocol}://${window.location.host}/ws/transponder-scan/`);
+
+    btn.innerHTML = '<i class="fas fa-spinner fa-pulse"></i> Listening...';
+    btn.classList.remove('btn-outline-info');
+    btn.classList.add('btn-warning');
+
+    scanSocket.onmessage = function(e) {
+        const data = JSON.parse(e.data);
+        if (data.type === 'transponder_detected') {
+            // Try to select the transponder in the dropdown
+            let found = false;
+            for (const opt of select.options) {
+                if (opt.value === data.transponder_id) {
+                    select.value = data.transponder_id;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                // Add as a new option if not in list
+                const opt = document.createElement('option');
+                opt.value = data.transponder_id;
+                opt.text = data.transponder_id + ' (scanned)';
+                select.appendChild(opt);
+                select.value = data.transponder_id;
+            }
+            stopScan();
+        }
+    };
+
+    scanSocket.onerror = function() { stopScan(); };
+
+    scanTimeout = setTimeout(function() { stopScan(); }, 60000);
+}
+
+function stopScan() {
+    const btn = document.getElementById('scan-btn-matching');
+    if (scanSocket) { scanSocket.close(); scanSocket = null; }
+    if (scanTimeout) { clearTimeout(scanTimeout); scanTimeout = null; }
+    btn.innerHTML = '<i class="fas fa-broadcast-tower"></i> Scan';
+    btn.classList.remove('btn-warning');
+    btn.classList.add('btn-outline-info');
+}
+
+// --- Assignments CRUD ---
+function loadAssignments() {
+    const tbody = document.getElementById('assignmentsTable');
+    tbody.innerHTML = '<tr><td colspan="6" class="text-center"><div class="spinner-border" role="status"></div></td></tr>';
+
+    fetch(`/api/race/${raceId}/transponder-assignments/`)
+        .then(response => response.json())
+        .then(data => {
+            assignments = data.assignments;
+            renderAssignments();
+            updateProgress();
+            updateAvailableTransponders();
+        })
+        .catch(error => {
+            console.error('Error loading assignments:', error);
+            tbody.innerHTML = '<tr><td colspan="6" class="text-center text-danger">Error loading assignments</td></tr>';
+        });
+}
+
+function renderAssignments() {
+    const tbody = document.getElementById('assignmentsTable');
+
+    if (assignments.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center">No transponders assigned yet</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = '';
+
+    assignments.forEach(assignment => {
+        const row = document.createElement('tr');
+
+        const statusBadge = assignment.confirmed
+            ? '<span class="badge bg-success">Confirmed</span>'
+            : '<span class="badge bg-warning">Pending</span>';
+
+        const kartDisplay = assignment.kart_number || '-';
+
+        row.innerHTML = `
+            <td><strong>${assignment.team_number}</strong></td>
+            <td>${assignment.team_name}</td>
+            <td><strong>${kartDisplay}</strong></td>
+            <td><code>${assignment.transponder_id}</code></td>
+            <td>${statusBadge}</td>
+            <td>
+                <button class="btn btn-sm btn-danger" onclick="removeAssignment(${assignment.id})">
+                    <i class="fas fa-trash"></i> Remove
+                </button>
+            </td>
+        `;
+
+        tbody.appendChild(row);
+    });
+}
+
+function updateProgress() {
+    const assignedCount = assignments.length;
+    const percentage = totalTeams > 0 ? (assignedCount / totalTeams) * 100 : 0;
+
+    const progressBar = document.getElementById('progressBar');
+    const progressText = document.getElementById('progressText');
+
+    progressBar.style.width = percentage + '%';
+    progressBar.setAttribute('aria-valuenow', percentage);
+    progressText.textContent = `${assignedCount} / ${totalTeams} teams assigned`;
+
+    if (percentage === 100) {
+        progressBar.classList.remove('bg-warning', 'bg-danger');
+        progressBar.classList.add('bg-success');
+    } else if (percentage >= 50) {
+        progressBar.classList.remove('bg-success', 'bg-danger');
+        progressBar.classList.add('bg-warning');
+    } else {
+        progressBar.classList.remove('bg-success', 'bg-warning');
+        progressBar.classList.add('bg-danger');
+    }
+}
+
+function updateAvailableTransponders() {
+    const transponderSelect = document.getElementById('transponderSelect');
+    const assignedTransponderIds = assignments.map(a => a.transponder_id);
+
+    Array.from(transponderSelect.options).forEach(option => {
+        if (option.value && assignedTransponderIds.includes(option.value)) {
+            option.disabled = true;
+            if (!option.text.includes('(Assigned)')) option.text = option.text + ' (Assigned)';
+        } else if (option.value) {
+            option.disabled = false;
+            option.text = option.text.replace(' (Assigned)', '');
+        }
+    });
+}
+
+function assignTransponder() {
+    const teamId = document.getElementById('teamSelect').value;
+    const kartNumber = document.getElementById('kartNumberInput').value;
+    const transponderId = document.getElementById('transponderSelect').value;
+
+    if (!teamId) { alert('Please select a team'); return; }
+    if (!transponderId) { alert('Please select a transponder'); return; }
+
+    const assignBtn = document.getElementById('assignBtn');
+    assignBtn.disabled = true;
+    assignBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Assigning...';
+
+    const payload = {
+        team_id: teamId,
+        transponder_id: transponderId,
+    };
+    // Only send kart_number if explicitly set
+    if (kartNumber) payload.kart_number = kartNumber;
+
+    fetch(`/api/race/${raceId}/assign-transponder/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': csrfToken
+        },
+        body: JSON.stringify(payload)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert(data.message);
+            document.getElementById('teamSelect').value = '';
+            document.getElementById('kartNumberInput').value = '';
+            document.getElementById('transponderSelect').value = '';
+            loadAssignments();
+        } else {
+            alert('Error: ' + data.error);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Failed to assign transponder');
+    })
+    .finally(() => {
+        assignBtn.disabled = false;
+        assignBtn.innerHTML = '<i class="fas fa-plus"></i> Assign';
+    });
+}
+
+function removeAssignment(assignmentId) {
+    if (!confirm('Are you sure you want to remove this assignment?')) return;
+
+    fetch(`/api/transponder-assignment/${assignmentId}/remove/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': csrfToken }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert(data.message);
+            loadAssignments();
+        } else {
+            alert('Error: ' + data.error);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Failed to remove assignment');
+    });
+}
+
+function lockAllAssignments() {
+    const assignedCount = assignments.length;
+
+    if (assignedCount < totalTeams) {
+        if (!confirm(`Only ${assignedCount} of ${totalTeams} teams have transponders assigned. Lock anyway?`)) return;
+    } else {
+        if (!confirm('Lock all transponder assignments? This will finalize the configuration.')) return;
+    }
+
+    const lockBtn = document.getElementById('lockAllBtn');
+    lockBtn.disabled = true;
+    lockBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Locking...';
+
+    fetch(`/api/race/${raceId}/lock-transponder-assignments/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': csrfToken }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert(data.message);
+            loadAssignments();
+        } else {
+            alert('Error: ' + data.error);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Failed to lock assignments');
+    })
+    .finally(() => {
+        lockBtn.disabled = false;
+        lockBtn.innerHTML = '<i class="fas fa-lock"></i> Lock All Assignments';
+    });
+}
+</script>
+
+{% endblock main_content %}

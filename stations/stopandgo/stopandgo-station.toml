@@ -2,7 +2,7 @@
 # Command line arguments will override these values
 
 # Server connection settings
-server = "gokart.wautier.eu"
+server = "__APP_HOSTNAME__"
 port = 8000
 secure = false
 
@@ -10,9 +10,8 @@ secure = false
 button = 18  # Physical pin 18 (GPIO24)
 fence = 24   # Physical pin 24 (GPIO8)
 
-# Logging level
-debug = false
-info = true
-
 # HMAC secret for message authentication
-hmac_secret = "race_control_hmac_key_2024"
+hmac_secret = "__STOPANDGO_HMAC_SECRET__"
+
+[logging]
+level = "INFO"  # DEBUG, INFO, WARNING, ERROR

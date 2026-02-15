@@ -1,0 +1,32 @@
+[Unit]
+Description=NetTag UDP Proxy (decoder fan-out)
+After=network.target
+Requires=network.target
+
+[Service]
+Type=exec
+User=__USER__
+Group=__GROUP__
+WorkingDirectory=__WORKDIR__/proxy
+ExecStart=__WORKDIR__/proxy/nettag-proxy -c __WORKDIR__/proxy/nettag-proxy.toml
+ExecReload=/bin/kill -s HUP $MAINPID
+KillMode=mixed
+TimeoutStopSec=5
+PrivateTmp=true
+Restart=on-failure
+RestartSec=10
+
+# State directory for SQLite buffer
+StateDirectory=nettag-proxy
+
+# Security settings
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=false
+ReadWritePaths=__WORKDIR__/proxy /var/lib/nettag-proxy
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+
+[Install]
+WantedBy=multi-user.target

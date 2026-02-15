@@ -1,0 +1,49 @@
+# Timing Station Configuration
+# Example configuration for NetTag plugin (Chronelec decoder over network)
+
+[daemon]
+# WebSocket connection to Django app
+websocket_url = "ws://__APP_HOSTNAME__:8000/ws/timing/"
+hmac_secret = "__TIMING_HMAC_SECRET__"
+reconnect_interval = 5.0  # seconds
+
+# Timing mode: "interval" | "duration" | "time_of_day" | "own_time"
+timing_mode = "duration"
+
+# Rollover value in seconds (only used with own_time mode)
+# TAG Heuer wraps at 99:59:59.999 = 359999.999
+rollover_seconds = 360000.0
+
+# SQLite buffer for at-least-once delivery
+buffer_db = "/var/lib/timing-station/crossing_buffer.db"
+buffer_cleanup_interval = 300    # seconds between cleanup runs
+buffer_max_acked_age = 3600      # delete acked entries older than this
+
+[plugin]
+# Plugin type: "nettag", "tag", "simulator"
+type = "nettag"
+
+# NetTag plugin configuration (Chronelec decoder over UDP/TCP)
+[plugin.nettag]
+host = "192.168.0.11"    # Decoder IP address
+port = 2009              # Decoder port
+protocol = "udp"         # "udp" or "tcp"
+
+# TAG Heuer serial plugin configuration (alternative)
+[plugin.tag]
+device = "/dev/ttyUSB0"
+baud = 9600
+parity = "N"
+stopbits = 1
+endian = "normal"  # or "bitrev" for bit-reversed serial
+
+# Simulator plugin configuration (for testing without hardware)
+[plugin.simulator]
+num_transponders = 10
+lap_time_min = 45.0       # seconds
+lap_time_max = 75.0       # seconds
+lap_time_variance = 5.0   # seconds random variation
+
+[logging]
+level = "INFO"  # DEBUG, INFO, WARNING, ERROR
+file = "/var/lib/timing-station/timing-station.log"

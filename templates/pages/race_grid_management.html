@@ -1,0 +1,223 @@
+{% extends 'layout/content.html' %}
+{% load static %}
+
+{% block main_content %}
+<div class="container mt-5">
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h3>Grid Management - {{ race.get_race_type_display }}</h3>
+                </div>
+                <div class="card-body">
+                    <!-- Race Info -->
+                    <div class="alert alert-info">
+                        <strong>Round:</strong> {{ race.round.name }}<br>
+                        <strong>Race Type:</strong> {{ race.get_race_type_display }}<br>
+                        <strong>Ending Mode:</strong> {{ race.get_ending_mode_display }}<br>
+                        <strong>Grid Status:</strong>
+                        {% if is_locked %}
+                            <span class="badge bg-danger">LOCKED</span>
+                        {% else %}
+                            <span class="badge bg-success">UNLOCKED</span>
+                        {% endif %}
+                    </div>
+
+                    <!-- Action Buttons -->
+                    <div class="mb-4">
+                        <form method="post" action="{% url 'auto_assign_from_qualifying' race.id %}" style="display:inline;">
+                            {% csrf_token %}
+                            <button type="submit" class="btn btn-primary" {% if is_locked or not race.depends_on_race %}disabled{% endif %}>
+                                <i class="fas fa-trophy"></i> Auto-Assign from Qualifying
+                            </button>
+                        </form>
+
+                        <form method="post" action="{% url 'auto_assign_from_championship' race.id %}" style="display:inline;">
+                            {% csrf_token %}
+                            <button type="submit" class="btn btn-primary" {% if is_locked %}disabled{% endif %}>
+                                <i class="fas fa-star"></i> Auto-Assign from Championship
+                            </button>
+                        </form>
+
+                        <form method="post" action="{% url 'reset_grid_to_auto' race.id %}" style="display:inline;">
+                            {% csrf_token %}
+                            <button type="submit" class="btn btn-warning" {% if is_locked %}disabled{% endif %}>
+                                <i class="fas fa-undo"></i> Reset to Auto
+                            </button>
+                        </form>
+
+                        {% if is_locked %}
+                        <form method="post" action="{% url 'unlock_grid' race.id %}" style="display:inline;">
+                            {% csrf_token %}
+                            <button type="submit" class="btn btn-success">
+                                <i class="fas fa-unlock"></i> Unlock Grid
+                            </button>
+                        </form>
+                        {% else %}
+                        <form method="post" action="{% url 'lock_grid' race.id %}" style="display:inline;">
+                            {% csrf_token %}
+                            <button type="submit" class="btn btn-danger">
+                                <i class="fas fa-lock"></i> Lock Grid
+                            </button>
+                        </form>
+                        {% endif %}
+                    </div>
+
+                    <!-- Grid Positions Table -->
+                    <h4>Current Grid Positions</h4>
+                    <div class="table-responsive">
+                        <table class="table table-striped table-hover">
+                            <thead>
+                                <tr>
+                                    <th>Position</th>
+                                    <th>Team Number</th>
+                                    <th>Team Name</th>
+                                    <th>Source</th>
+                                    <th>Status</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="gridPositionsTable">
+                                {% for grid_pos in grid_positions %}
+                                <tr data-team-id="{{ grid_pos.team.id }}" data-position="{{ grid_pos.position }}">
+                                    <td><strong>{{ grid_pos.position }}</strong></td>
+                                    <td>{{ grid_pos.team.number }}</td>
+                                    <td>{{ grid_pos.team.name }}</td>
+                                    <td>
+                                        <span class="badge bg-info">{{ grid_pos.get_source_display }}</span>
+                                        {% if grid_pos.source_race %}
+                                        <br><small>From: {{ grid_pos.source_race.get_race_type_display }}</small>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if grid_pos.manually_overridden %}
+                                        <span class="badge bg-warning">MANUAL</span>
+                                        {% if grid_pos.override_reason %}
+                                        <br><small>{{ grid_pos.override_reason }}</small>
+                                        {% endif %}
+                                        {% else %}
+                                        <span class="badge bg-success">AUTO</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if not is_locked %}
+                                        <button class="btn btn-sm btn-outline-secondary move-up" {% if forloop.first %}disabled{% endif %}>
+                                            <i class="fas fa-arrow-up"></i>
+                                        </button>
+                                        <button class="btn btn-sm btn-outline-secondary move-down" {% if forloop.last %}disabled{% endif %}>
+                                            <i class="fas fa-arrow-down"></i>
+                                        </button>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% empty %}
+                                <tr>
+                                    <td colspan="6" class="text-center">No grid positions assigned yet</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- Unassigned Teams -->
+                    {% if unassigned_teams %}
+                    <h4 class="mt-4">Unassigned Teams</h4>
+                    <div class="alert alert-warning">
+                        <ul class="mb-0">
+                            {% for team in unassigned_teams %}
+                            <li>Team #{{ team.number }} - {{ team.name }}</li>
+                            {% endfor %}
+                        </ul>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const isLocked = {{ is_locked|yesno:"true,false" }};
+
+    if (!isLocked) {
+        // Handle move up/down buttons
+        document.querySelectorAll('.move-up').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const row = this.closest('tr');
+                const prevRow = row.previousElementSibling;
+                if (prevRow) {
+                    swapRows(row, prevRow);
+                }
+            });
+        });
+
+        document.querySelectorAll('.move-down').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const row = this.closest('tr');
+                const nextRow = row.nextElementSibling;
+                if (nextRow) {
+                    swapRows(row, nextRow);
+                }
+            });
+        });
+    }
+
+    function swapRows(row1, row2) {
+        const positions = [];
+        const tbody = row1.closest('tbody');
+        const allRows = Array.from(tbody.querySelectorAll('tr'));
+
+        // Swap in DOM
+        const parent = row1.parentNode;
+        const row1Next = row1.nextSibling;
+        const row2Next = row2.nextSibling;
+
+        if (row1Next === row2) {
+            parent.insertBefore(row2, row1);
+        } else if (row2Next === row1) {
+            parent.insertBefore(row1, row2);
+        } else {
+            parent.insertBefore(row1, row2Next);
+            parent.insertBefore(row2, row1Next);
+        }
+
+        // Collect all positions after swap
+        allRows.forEach((row, index) => {
+            const teamId = row.dataset.teamId;
+            if (teamId) {
+                positions.push({
+                    team_id: parseInt(teamId),
+                    position: index + 1
+                });
+                // Update displayed position number
+                row.querySelector('td:first-child strong').textContent = index + 1;
+            }
+        });
+
+        // Send update to server
+        fetch('{% url "reorder_grid_positions" race.id %}', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': '{{ csrf_token }}'
+            },
+            body: JSON.stringify({ positions: positions })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (!data.success) {
+                alert('Error: ' + data.error);
+                location.reload();
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Failed to update grid positions');
+            location.reload();
+        });
+    }
+});
+</script>
+
+{% endblock main_content %}

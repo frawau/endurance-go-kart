@@ -98,6 +98,68 @@
                 <div class="row">
                     <div class="col-md-6">
                         <div class="form-group mb-3">
+                            <div class="form-check">
+                                <input type="checkbox" class="form-check-input" id="lap_based" name="lap_based">
+                                <label class="form-check-label" for="lap_based">Use Transponders (Lap-Based Timing)</label>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6" id="ending-mode-container" style="display: none;">
+                        <div class="form-group mb-3">
+                            <label for="ending_mode">Race Ending Mode:</label>
+                            <select class="form-control" id="ending_mode" name="ending_mode">
+                                <option value="CROSS_AFTER_TIME">Cross Start/Finish Line after time</option>
+                                <option value="CROSS_AFTER_LAPS">Cross Start/Finish line after Nb laps</option>
+                                <option value="QUALIFYING">Qualifying - Best lap time before time elapses</option>
+                                <option value="QUALIFYING_PLUS">Qualifying+ - Best time crossing line, last lap starts after time</option>
+                                <option value="FULL_LAPS">Full laps - Race ends when you complete set number of laps</option>
+                                <option value="TIME_ONLY">Time Only - Positions frozen at last crossing before time expired</option>
+                                <option value="AUTO_TRANSFORM">Auto-transform to CROSS_AFTER_TIME when max time expires</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Qualifying Configuration -->
+                <div id="qualifying-config-container" style="display: none;">
+                    <div class="row">
+                        <div class="col-md-4">
+                            <div class="form-group mb-3">
+                                <label for="qualifying_count">Number of Qualifying Sessions:</label>
+                                <select class="form-control" id="qualifying_count" name="qualifying_count">
+                                    <option value="0">0 (No Qualifying)</option>
+                                    <option value="1">1</option>
+                                    <option value="2">2</option>
+                                    <option value="3">3</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="col-md-4" id="er-qualifying-details" style="display: none;">
+                            <div class="form-group mb-3">
+                                <label for="qualifying_ending_mode">Qualifying Ending Mode:</label>
+                                <select class="form-control" id="qualifying_ending_mode" name="qualifying_ending_mode">
+                                    <option value="QUALIFYING">Qualifying - Best lap before time</option>
+                                    <option value="QUALIFYING_PLUS">Qualifying+ - Last lap starts after time</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="col-md-4" id="er-grid-method-container" style="display: none;">
+                            <div class="form-group mb-3">
+                                <label for="qualifying_grid_method">Qualifying Grid Method:</label>
+                                <select class="form-control" id="qualifying_grid_method" name="qualifying_grid_method">
+                                    <option value="best_time">Best Time</option>
+                                    <option value="elimination">Elimination</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="er-qualifying-sessions-container"></div>
+                    <div id="er-qualifying-cutoffs-container" style="display: none;"></div>
+                </div>
+
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="form-group mb-3">
                             <label for="limit_time">Maximum Driving Time:</label>
                             <select class="form-control" id="limit_time" name="limit_time" required>
                                 <option value="none">No Time Limit</option>
@@ -217,7 +279,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     const rounds = data.rounds;
                     roundSelect.empty().append('<option value="">Search for a round...</option>');
                     rounds.forEach(round => {
-                        roundSelect.append(`<option value="${round.id}" 
+                        roundSelect.append(`<option value="${round.id}"
                             data-name="${round.name}"
                             data-start="${round.start}"
                             data-duration="${round.duration}"
@@ -229,7 +291,14 @@ document.addEventListener('DOMContentLoaded', function() {
                             data-limit-value="${round.limit_value}"
                             data-limit-time-min="${round.limit_time_min}"
                             data-required-changes="${round.required_changes}"
-                            data-weight-penalty='${JSON.stringify(round.weight_penalty || [">=", [0, 0]])}'>
+                            data-weight-penalty='${JSON.stringify(round.weight_penalty || [">=", [0, 0]])}'
+                            data-uses-legacy="${round.uses_legacy_session_model}"
+                            data-ending-mode="${round.ending_mode || ''}"
+                            data-qualifying-count="${round.qualifying_count || 0}"
+                            data-qualifying-ending-mode="${round.qualifying_ending_mode || 'QUALIFYING'}"
+                            data-qualifying-grid-method="${round.qualifying_grid_method || 'best_time'}"
+                            data-qualifying-durations='${JSON.stringify(round.qualifying_durations || {})}'
+                            data-qualifying-cutoffs='${JSON.stringify(round.qualifying_cutoffs || {})}'>
                             ${round.name}
                         </option>`);
                     });
@@ -267,6 +336,42 @@ document.addEventListener('DOMContentLoaded', function() {
             $('#limit_time_min').val(selectedOption.data('limit-time-min'));
             $('#required_changes').val(selectedOption.data('required-changes'));
             
+            // Set lap-based checkbox and ending mode
+            const usesLegacy = selectedOption.data('uses-legacy');
+            const lapBased = usesLegacy === false || usesLegacy === 'false';
+            $('#lap_based').prop('checked', lapBased);
+            if (lapBased) {
+                $('#ending-mode-container').show();
+                $('#qualifying-config-container').show();
+                $('#ending_mode').val(selectedOption.data('ending-mode') || 'CROSS_AFTER_TIME');
+            } else {
+                $('#ending-mode-container').hide();
+                $('#qualifying-config-container').hide();
+            }
+
+            // Qualifying config
+            const qualCount = parseInt(selectedOption.data('qualifying-count') || 0);
+            $('#qualifying_count').val(qualCount);
+            if (qualCount > 0) {
+                $('#er-qualifying-details').show();
+                $('#er-grid-method-container').show();
+                $('#qualifying_ending_mode').val(selectedOption.data('qualifying-ending-mode') || 'QUALIFYING');
+                $('#qualifying_grid_method').val(selectedOption.data('qualifying-grid-method') || 'best_time');
+                erRenderQualSessions(qualCount, selectedOption.data('qualifying-durations') || {});
+                const gm = selectedOption.data('qualifying-grid-method') || 'best_time';
+                if (gm === 'elimination') {
+                    $('#er-qualifying-cutoffs-container').show();
+                    erRenderCutoffs(qualCount, selectedOption.data('qualifying-cutoffs') || {});
+                } else {
+                    $('#er-qualifying-cutoffs-container').hide();
+                }
+            } else {
+                $('#er-qualifying-details').hide();
+                $('#er-grid-method-container').hide();
+                $('#er-qualifying-sessions-container').empty();
+                $('#er-qualifying-cutoffs-container').hide().empty();
+            }
+
             // Initialize weight penalty widget with the round's data
             const weightPenaltyData = selectedOption.data('weight-penalty');
             $('#id_weight_penalty').val(JSON.stringify(weightPenaltyData));
@@ -306,10 +411,80 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
 
+    // Toggle ending mode and qualifying config visibility when checkbox changes
+    $('#lap_based').on('change', function() {
+        if ($(this).is(':checked')) {
+            $('#ending-mode-container').show();
+            $('#qualifying-config-container').show();
+        } else {
+            $('#ending-mode-container').hide();
+            $('#qualifying-config-container').hide();
+        }
+    });
+
+    // Qualifying count change
+    $('#qualifying_count').on('change', function() {
+        const count = parseInt(this.value);
+        if (count > 0) {
+            $('#er-qualifying-details').show();
+            $('#er-grid-method-container').show();
+            erRenderQualSessions(count, {});
+            if ($('#qualifying_grid_method').val() === 'elimination') {
+                $('#er-qualifying-cutoffs-container').show();
+                erRenderCutoffs(count, {});
+            }
+        } else {
+            $('#er-qualifying-details').hide();
+            $('#er-grid-method-container').hide();
+            $('#er-qualifying-sessions-container').empty();
+            $('#er-qualifying-cutoffs-container').hide().empty();
+        }
+    });
+
+    // Grid method change
+    $('#qualifying_grid_method').on('change', function() {
+        if (this.value === 'elimination') {
+            $('#er-qualifying-cutoffs-container').show();
+            erRenderCutoffs(parseInt($('#qualifying_count').val()), {});
+        } else {
+            $('#er-qualifying-cutoffs-container').hide();
+        }
+    });
+
     // Handle cancel button
     $('#cancel-btn').on('click', function() {
         $('#round-select').val('').trigger('change');
     });
 });
+
+function erRenderQualSessions(count, durations) {
+    const container = document.getElementById('er-qualifying-sessions-container');
+    container.innerHTML = '';
+    for (let i = 1; i <= count; i++) {
+        const val = durations['q' + i] || '00:15:00';
+        container.innerHTML += `
+            <div class="form-group mb-3">
+                <label>Q${i} Duration (HH:MM:SS):</label>
+                <input type="text" class="form-control" name="q${i}_duration"
+                       pattern="^([0-9]{1,2}):([0-9]{2}):([0-9]{2})$"
+                       placeholder="00:15:00" value="${val}">
+            </div>`;
+    }
+}
+
+function erRenderCutoffs(count, cutoffs) {
+    const container = document.getElementById('er-qualifying-cutoffs-container');
+    container.innerHTML = '';
+    if (count <= 1) return;
+    for (let i = 1; i < count; i++) {
+        const val = cutoffs['q' + i] || '';
+        container.innerHTML += `
+            <div class="form-group mb-3">
+                <label>Q${i} Cutoff (advance top N to Q${i+1}):</label>
+                <input type="number" class="form-control" name="q${i}_cutoff"
+                       min="1" placeholder="e.g. 15" value="${val}">
+            </div>`;
+    }
+}
 </script>
 {% endblock %} 

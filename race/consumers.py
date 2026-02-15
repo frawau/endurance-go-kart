@@ -1,11 +1,23 @@
 import asyncio
 import json
+import time
+import uuid
 import datetime as dt
 import hmac
 import hashlib
 from django.conf import settings
 from channels.generic.websocket import AsyncWebsocketConsumer
-from .models import ChangeLane, round_team, team_member, championship_team, Round
+from .models import (
+    ChangeLane,
+    round_team,
+    team_member,
+    championship_team,
+    Round,
+    Race,
+    Transponder,
+    RaceTransponderAssignment,
+    LapCrossing,
+)
 from django.template.loader import render_to_string
 from channels.db import database_sync_to_async
 from django.db.models import Count, Q
@@ -498,6 +510,32 @@ class StopAndGoConsumer(AsyncWebsocketConsumer):
             )
         )
 
+    async def race_lap_update(self, event):
+        """Broadcast lap crossing updates to race control"""
+        await self.send(
+            text_data=json.dumps(
+                {
+                    "type": "race_lap_update",
+                    "race_id": event["race_id"],
+                    "team_number": event["team_number"],
+                    "lap_number": event["lap_number"],
+                    "is_suspicious": event.get("is_suspicious", False),
+                }
+            )
+        )
+
+    async def race_finished(self, event):
+        """Broadcast race finished notification to race control"""
+        await self.send(
+            text_data=json.dumps(
+                {
+                    "type": "race_finished",
+                    "race_id": event["race_id"],
+                    "race_type": event["race_type"],
+                }
+            )
+        )
+
     async def handle_penalty_served_from_station(self, team_number):
         """Handle when station reports a penalty as served"""
         from channels.db import database_sync_to_async
@@ -659,3 +697,457 @@ async def handle_race_end_request(sender, round_id, **kwargs):
 
     except Exception as e:
         print(f"❌ Error ending race {round_id}: {e}")
+
+
+class TimingConsumer(AsyncWebsocketConsumer):
+    """
+    WebSocket consumer for timing daemon communication.
+
+    Handles lap crossing events from timing hardware via daemon.
+    Calculates lap times from raw_time based on configured timing mode.
+    Sends ACK per message_id for at-least-once delivery.
+    """
+
+    VALID_TIMING_MODES = {"interval", "duration", "time_of_day", "own_time"}
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.hmac_secret = getattr(
+            settings, "TIMING_HMAC_SECRET", "timing_hmac_secret_change_me_2025"
+        ).encode("utf-8")
+        self._station_connected = False
+        self._timing_mode = None
+        self._rollover_seconds = 360000.0
+
+    def sign_message(self, message_data):
+        """Sign outgoing message with HMAC"""
+        message_str = json.dumps(message_data, sort_keys=False, separators=(",", ":"))
+        signature = hmac.new(
+            self.hmac_secret,
+            message_str.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+        message_data["hmac_signature"] = signature
+        return message_data
+
+    def verify_hmac(self, message_data, provided_signature):
+        """Verify HMAC signature for incoming message"""
+        message_str = json.dumps(message_data, sort_keys=False, separators=(",", ":"))
+        expected_signature = hmac.new(
+            self.hmac_secret,
+            message_str.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+        return hmac.compare_digest(expected_signature, provided_signature)
+
+    async def connect(self):
+        self.timing_group_name = "timing"
+
+        await self.channel_layer.group_add(self.timing_group_name, self.channel_name)
+        await self.accept()
+        print("Timing daemon connected")
+
+    async def disconnect(self, close_code):
+        self._station_connected = False
+        await self.channel_layer.group_discard(
+            self.timing_group_name, self.channel_name
+        )
+        print("Timing daemon disconnected")
+
+    async def receive(self, text_data):
+        try:
+            data = json.loads(text_data)
+
+            provided_signature = data.pop("hmac_signature", None)
+            if not provided_signature:
+                print("Timing: Received message without HMAC signature")
+                return
+
+            if not self.verify_hmac(data, provided_signature):
+                print("Timing: HMAC verification failed - rejecting message")
+                return
+
+            message_type = data.get("type")
+
+            if message_type == "connected":
+                timing_mode = data.get("timing_mode", "duration")
+                if timing_mode not in self.VALID_TIMING_MODES:
+                    print(f"Timing: Invalid timing_mode '{timing_mode}', rejecting")
+                    return
+                self._timing_mode = timing_mode
+                self._rollover_seconds = float(data.get("rollover_seconds", 360000.0))
+                self._station_connected = True
+                print(
+                    f"Timing station connected: plugin={data.get('plugin_type')} "
+                    f"mode={self._timing_mode} rollover={self._rollover_seconds}"
+                )
+
+            elif message_type == "lap_crossing":
+                if not self._station_connected:
+                    print("Timing: lap_crossing before connected message, ignoring")
+                    return
+                # Broadcast raw transponder detection for scan listeners
+                await self.channel_layer.group_send(
+                    "transponder_scan",
+                    {
+                        "type": "transponder_detected",
+                        "transponder_id": data.get("transponder_id"),
+                        "timestamp": data.get("timestamp"),
+                    },
+                )
+                result = await self.handle_lap_crossing(data)
+                # Send ACK and broadcasts from async context (not from thread pool)
+                message_id = data.get("message_id")
+                if message_id:
+                    await self.send_ack(message_id)
+                if result:
+                    await self._broadcast_crossing(result)
+
+            elif message_type == "warning":
+                print(f"Timing warning: {data.get('message')}")
+
+            elif message_type == "response":
+                print(f"Timing response: {data.get('response')}")
+
+        except json.JSONDecodeError:
+            print("Timing: Invalid JSON received")
+        except Exception as e:
+            print(f"Timing: Error processing message: {e}")
+
+    async def send_ack(self, message_id):
+        """Send ACK for a processed crossing back to the station."""
+        message = {"type": "ack", "message_id": message_id}
+        signed = self.sign_message(message)
+        await self.send(text_data=json.dumps(signed))
+
+    async def _broadcast_crossing(self, result):
+        """Broadcast crossing data to leaderboard and race control groups."""
+        race_id = result["race_id"]
+        round_id = result["round_id"]
+        team_number = result["team_number"]
+        lap_number = result["lap_number"]
+        lap_time = result["lap_time"]
+        is_suspicious = result["is_suspicious"]
+
+        await self.channel_layer.group_send(
+            f"leaderboard_{race_id}",
+            {
+                "type": "lap_crossing_update",
+                "crossing_data": {
+                    "team_number": team_number,
+                    "lap_number": lap_number,
+                    "lap_time": str(lap_time) if lap_time else None,
+                },
+            },
+        )
+
+        await self.channel_layer.group_send(
+            f"round_{round_id}",
+            {
+                "type": "race_lap_update",
+                "race_id": race_id,
+                "team_number": team_number,
+                "lap_number": lap_number,
+                "is_suspicious": is_suspicious,
+            },
+        )
+
+        if result.get("race_finished"):
+            print(f"Race {race_id} finished!")
+            await self.channel_layer.group_send(
+                f"round_{round_id}",
+                {
+                    "type": "race_finished",
+                    "race_id": race_id,
+                    "race_type": result["race_type"],
+                },
+            )
+
+    def _calculate_lap_time(self, raw_time, previous_raw_time):
+        """
+        Calculate lap time from raw decoder values based on timing mode.
+
+        Returns dt.timedelta or None.
+        """
+        if previous_raw_time is None:
+            if self._timing_mode == "interval":
+                # First passage in interval mode: raw_time should be 0
+                return None
+            # For other modes, first passage has no previous -> no lap time
+            return None
+
+        if self._timing_mode == "interval":
+            # raw_time IS the lap time
+            return dt.timedelta(seconds=raw_time)
+
+        # duration / time_of_day / own_time: delta between consecutive raw values
+        delta = raw_time - previous_raw_time
+
+        if delta < 0:
+            if self._timing_mode == "time_of_day":
+                delta += 86400.0
+            elif self._timing_mode == "own_time":
+                delta += self._rollover_seconds
+            # duration mode: negative delta is genuinely invalid (shouldn't happen)
+
+        if delta <= 0:
+            return None
+
+        return dt.timedelta(seconds=delta)
+
+    @database_sync_to_async
+    def handle_lap_crossing(self, data):
+        """
+        Process lap crossing event and create LapCrossing record.
+
+        Returns a result dict for broadcasting, or None if the crossing
+        was skipped (unknown transponder, no assignment, duplicate).
+        """
+        try:
+            transponder_id = data.get("transponder_id")
+            timestamp_str = data.get("timestamp")
+            raw_time = data.get("raw_time")
+            message_id = data.get("message_id")
+
+            # Parse timestamp
+            crossing_time = dt.datetime.fromisoformat(timestamp_str)
+
+            # Deduplicate by message_id
+            if message_id:
+                try:
+                    msg_uuid = uuid.UUID(message_id)
+                except ValueError:
+                    msg_uuid = None
+                if (
+                    msg_uuid
+                    and LapCrossing.objects.filter(message_id=msg_uuid).exists()
+                ):
+                    print(f"Timing: Duplicate message_id {message_id[:8]}, skipping")
+                    return None
+            else:
+                msg_uuid = None
+
+            # Get transponder
+            transponder = Transponder.objects.filter(
+                transponder_id=transponder_id
+            ).first()
+
+            if not transponder:
+                print(f"Timing: Unknown transponder {transponder_id}")
+                return None
+
+            # Update transponder last_seen
+            transponder.last_seen = crossing_time
+            transponder.save(update_fields=["last_seen"])
+
+            # Find active race assignment
+            assignment = (
+                RaceTransponderAssignment.objects.filter(
+                    transponder=transponder,
+                    race__round__started__isnull=False,
+                    race__round__ended__isnull=True,
+                )
+                .select_related("race", "race__round", "team", "team__team")
+                .first()
+            )
+
+            if not assignment:
+                print(
+                    f"Timing: No active race assignment for transponder {transponder_id}"
+                )
+                return None
+
+            race = assignment.race
+            team = assignment.team
+
+            # Get last crossing for this team (for lap number and raw_time reference)
+            last_crossing = (
+                LapCrossing.objects.filter(race=race, team=team, is_valid=True)
+                .order_by("-lap_number")
+                .first()
+            )
+
+            lap_number = (last_crossing.lap_number + 1) if last_crossing else 1
+
+            # Calculate lap time from raw_time using timing mode
+            previous_raw = last_crossing.raw_time if last_crossing else None
+            lap_time = self._calculate_lap_time(raw_time, previous_raw)
+
+            # Check if race is suspended
+            is_suspended = race.round.is_paused
+            should_count = True
+            if is_suspended and not race.count_crossings_during_suspension:
+                should_count = False
+
+            # Create lap crossing
+            crossing = LapCrossing.objects.create(
+                race=race,
+                team=team,
+                transponder=transponder,
+                lap_number=lap_number,
+                crossing_time=crossing_time,
+                lap_time=lap_time,
+                raw_time=raw_time,
+                message_id=msg_uuid,
+                is_valid=should_count,
+                counted_during_suspension=is_suspended,
+            )
+
+            team_number = team.team.number
+
+            # Check for suspicious lap time
+            if lap_time and should_count:
+                if self.is_lap_suspicious(race, lap_time, team):
+                    crossing.is_suspicious = True
+                    crossing.save(update_fields=["is_suspicious"])
+                    print(
+                        f"Suspicious lap: Team {team_number}, "
+                        f"Lap {lap_number}, Time {lap_time}"
+                    )
+
+            print(
+                f"Lap recorded: Team {team_number}, Lap {lap_number}, "
+                f"Time: {lap_time}, raw={raw_time}"
+            )
+
+            race_finished = race.is_race_finished()
+
+            return {
+                "race_id": race.id,
+                "round_id": race.round.id,
+                "team_number": team_number,
+                "lap_number": lap_number,
+                "lap_time": lap_time,
+                "is_suspicious": crossing.is_suspicious,
+                "race_finished": race_finished,
+                "race_type": race.race_type if race_finished else None,
+            }
+
+        except Exception as e:
+            print(f"Timing: Error handling lap crossing: {e}")
+            return None
+
+    def is_lap_suspicious(self, race, lap_time, team=None):
+        """
+        Check if lap time is suspicious (>2x median).
+        """
+        try:
+            filters = {"race": race, "is_valid": True, "lap_time__isnull": False}
+            if team:
+                filters["team"] = team
+
+            valid_laps = LapCrossing.objects.filter(**filters)
+
+            if valid_laps.count() < 3:
+                return False
+
+            lap_times = [lap.lap_time.total_seconds() for lap in valid_laps]
+            lap_times.sort()
+            median_time = lap_times[len(lap_times) // 2]
+
+            return lap_time.total_seconds() > (median_time * 2)
+
+        except Exception:
+            return False
+
+    async def send_command(self, command_type, **kwargs):
+        """Send command to timing daemon"""
+        message = {"type": "command", "command": command_type, **kwargs}
+        signed = self.sign_message(message)
+        await self.send(text_data=json.dumps(signed))
+
+
+class LeaderboardConsumer(AsyncWebsocketConsumer):
+    """
+    WebSocket consumer for real-time leaderboard updates.
+    Broadcasts standings updates when lap crossings occur.
+    """
+
+    async def connect(self):
+        self.race_id = self.scope["url_route"]["kwargs"]["race_id"]
+        self.race_group_name = f"leaderboard_{self.race_id}"
+
+        # Join race leaderboard group
+        await self.channel_layer.group_add(self.race_group_name, self.channel_name)
+
+        await self.accept()
+
+        # Send initial standings
+        standings = await self.get_current_standings()
+        await self.send(
+            text_data=json.dumps({"type": "standings_update", "standings": standings})
+        )
+
+    async def disconnect(self, close_code):
+        # Leave race leaderboard group
+        await self.channel_layer.group_discard(self.race_group_name, self.channel_name)
+
+    async def receive(self, text_data):
+        """Handle incoming messages — supports reload requests"""
+        try:
+            data = json.loads(text_data)
+            if data.get("type") == "reload":
+                standings = await self.get_current_standings()
+                await self.send(
+                    text_data=json.dumps(
+                        {"type": "standings_update", "standings": standings}
+                    )
+                )
+        except json.JSONDecodeError:
+            pass
+
+    async def lap_crossing_update(self, event):
+        """
+        Called when a lap crossing occurs.
+        Recalculate and broadcast standings.
+        """
+        # Debounce: only send updates at most once per second
+        current_time = time.time()
+        if not hasattr(self, "_last_update"):
+            self._last_update = 0
+
+        if current_time - self._last_update < 1.0:
+            return  # Skip this update
+
+        self._last_update = current_time
+
+        standings = await self.get_current_standings()
+        await self.send(
+            text_data=json.dumps({"type": "standings_update", "standings": standings})
+        )
+
+    @database_sync_to_async
+    def get_current_standings(self):
+        """Get current race standings"""
+        try:
+            race = Race.objects.get(id=self.race_id)
+            return race.calculate_race_standings()
+        except Race.DoesNotExist:
+            return []
+
+
+class TransponderScanConsumer(AsyncWebsocketConsumer):
+    """
+    Read-only WebSocket consumer for transponder scan detection.
+    UI pages connect here to auto-detect transponder IDs when a transponder
+    passes the timing loop.
+    """
+
+    async def connect(self):
+        await self.channel_layer.group_add("transponder_scan", self.channel_name)
+        await self.accept()
+
+    async def disconnect(self, close_code):
+        await self.channel_layer.group_discard("transponder_scan", self.channel_name)
+
+    async def transponder_detected(self, event):
+        """Forward transponder detection to WebSocket client."""
+        await self.send(
+            text_data=json.dumps(
+                {
+                    "type": "transponder_detected",
+                    "transponder_id": event["transponder_id"],
+                    "timestamp": event["timestamp"],
+                }
+            )
+        )

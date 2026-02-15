@@ -9,7 +9,7 @@ echo "SSL Setup: Configuring nginx for SSL_MODE=${SSL_MODE:-none}"
 
 # Set default values
 SSL_MODE=${SSL_MODE:-none}
-APP_DOMAIN=${APP_DOMAIN:-localhost}
+APP_HOSTNAME=${APP_HOSTNAME:-localhost}
 
 # Create nginx config directory
 mkdir -p /etc/nginx/conf.d
@@ -22,7 +22,7 @@ case "$SSL_MODE" in
         echo "SSL Setup: Configuring HTTP-only mode"
 
         # Process template for HTTP-only
-        envsubst '${APP_DOMAIN}' < /etc/nginx/templates/default.conf.template > /tmp/nginx.conf
+        envsubst '${APP_HOSTNAME}' < /etc/nginx/templates/default.conf.template > /tmp/nginx.conf
 
         # Keep ssl_redirect as "no" (already default in template)
 
@@ -34,7 +34,7 @@ case "$SSL_MODE" in
         echo "SSL Setup: Configuring HTTPS mode (${SSL_MODE})"
 
         # Process template for HTTPS
-        envsubst '${APP_DOMAIN}' < /etc/nginx/templates/default.conf.template > /tmp/nginx.conf
+        envsubst '${APP_HOSTNAME}' < /etc/nginx/templates/default.conf.template > /tmp/nginx.conf
 
         # Set ssl_redirect to "yes" for SSL modes
         sed -i 's/default "no";/default "yes";/' /tmp/nginx.conf

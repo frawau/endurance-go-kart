@@ -12,7 +12,7 @@ services:
       - POSTGRES_PORT=5432
       - DJANGO_SUPERUSER_USERNAME=${DJANGO_SUPERUSER_USERNAME}
       - DJANGO_SUPERUSER_PASSWORD=${DJANGO_SUPERUSER_PASSWORD}
-      - APP_DOMAIN=${APP_DOMAIN:-localhost}
+      - APP_HOSTNAME=${APP_HOSTNAME:-localhost}
       - SECRET_KEY=${SECRET_KEY}
       - STOPANDGO_HMAC_SECRET=${STOPANDGO_HMAC_SECRET}
       - TIMING_HMAC_SECRET=${TIMING_HMAC_SECRET:-${STOPANDGO_HMAC_SECRET}}
@@ -76,7 +76,7 @@ services:
     environment:
       - TZ=${TZ}
       - SSL_MODE=${SSL_MODE:-none}
-      - APP_DOMAIN=${APP_DOMAIN:-localhost}
+      - APP_HOSTNAME=${APP_HOSTNAME:-localhost}
       - APP_PORT=${APP_PORT:-5085}
     volumes:
       - ./nginx/templates:/etc/nginx/templates:ro
@@ -100,4 +100,4 @@ volumes:
   ssl_certs:
   acme_data:
   acme_webroot:
- 
+

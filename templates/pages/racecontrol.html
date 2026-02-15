@@ -175,7 +175,7 @@
                     <div class="w-100 p-2" style="height: 60%;">
                         <div class="row h-100">
                             <!-- System Messages Card -->
-                            <div class="col-md-6 h-100">
+                            <div class="col-md-4 h-100">
                                 <div class="card h-100">
                                     <div class="card-header">
                                         <h5 class="mb-0">System Messages</h5>
@@ -191,8 +191,46 @@
                                     </div>
                                 </div>
                             </div>
+                            <!-- Teams Card -->
+                            <div class="col-md-4 h-100">
+                                <div class="card h-100">
+                                    <div class="card-header">
+                                        <h5 class="mb-0">Teams</h5>
+                                    </div>
+                                    <div class="card-body overflow-auto p-2">
+                                        <table class="table table-sm mb-0" id="teams-retire-table">
+                                            <thead>
+                                                <tr>
+                                                    <th>#</th>
+                                                    <th>Team</th>
+                                                    <th></th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {% if round %}
+                                                    {% for team in round.round_team_set.all %}
+                                                        <tr id="retire-row-{{ team.id }}" class="{% if team.retired %}text-decoration-line-through text-muted{% endif %}">
+                                                            <td>{{ team.team.number }}</td>
+                                                            <td>{{ team.team.team.name }}</td>
+                                                            <td>
+                                                                <button class="btn btn-sm retire-toggle-btn {% if team.retired %}btn-success{% else %}btn-outline-danger{% endif %}"
+                                                                    data-team-id="{{ team.id }}"
+                                                                    data-retired="{{ team.retired|yesno:'true,false' }}">
+                                                                    {% if team.retired %}Unretire{% else %}Retire{% endif %}
+                                                                </button>
+                                                            </td>
+                                                        </tr>
+                                                    {% empty %}
+                                                        <tr><td colspan="3">No teams</td></tr>
+                                                    {% endfor %}
+                                                {% endif %}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
                             <!-- Pending Drivers Card -->
-                            <div class="col-md-6 h-100">
+                            <div class="col-md-4 h-100">
                                 <div class="card h-100">
                                     <div class="card-header">
                                         <h5 class="mb-0">Pending Drivers</h5>
@@ -746,6 +784,53 @@ document.addEventListener('DOMContentLoaded', function() {
             lapsFormAlert.classList.add('d-none');
         }
     }
+
+    // Retire/Unretire team toggle
+    document.querySelectorAll('.retire-toggle-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            const teamId = this.dataset.teamId;
+            const button = this;
+            button.disabled = true;
+
+            fetch('/api/retire-team/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCookie('csrftoken')
+                },
+                body: JSON.stringify({ team_id: parseInt(teamId) })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    const row = document.getElementById(`retire-row-${teamId}`);
+                    if (data.retired) {
+                        row.classList.add('text-decoration-line-through', 'text-muted');
+                        button.textContent = 'Unretire';
+                        button.classList.remove('btn-outline-danger');
+                        button.classList.add('btn-success');
+                        button.dataset.retired = 'true';
+                    } else {
+                        row.classList.remove('text-decoration-line-through', 'text-muted');
+                        button.textContent = 'Retire';
+                        button.classList.remove('btn-success');
+                        button.classList.add('btn-outline-danger');
+                        button.dataset.retired = 'false';
+                    }
+                    const action = data.retired ? 'Retired' : 'Unretired';
+                    addSystemMessage(`${action} team #${data.team_number} ${data.team_name}`, 'info');
+                } else {
+                    throw new Error(data.error || 'Failed');
+                }
+            })
+            .catch(error => {
+                addSystemMessage('Error: ' + error.message, 'danger');
+            })
+            .finally(() => {
+                button.disabled = false;
+            });
+        });
+    });
 
 });
 </script>

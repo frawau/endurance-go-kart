@@ -48,6 +48,66 @@
 
         <!-- Right column fields (unchanged) -->
         <div class="col-md-6">
+            <div class="form-group mb-3">
+                <div class="form-check">
+                    <input type="checkbox" class="form-check-input" id="id_lap_based" name="lap_based"
+                           {% if not round.uses_legacy_session_model %}checked{% endif %}>
+                    <label class="form-check-label" for="id_lap_based">Use Transponders (Lap-Based Timing)</label>
+                </div>
+            </div>
+
+            <div class="form-group mb-3" id="ending-mode-container"
+                 {% if round.uses_legacy_session_model %}style="display: none;"{% endif %}>
+                <label for="id_ending_mode">Race Ending Mode</label>
+                <select class="form-control" id="id_ending_mode" name="ending_mode">
+                    {% for value, display in ending_mode_choices %}
+                        <option value="{{ value }}" {% if current_ending_mode == value %}selected{% endif %}>{{ display }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- Qualifying Configuration -->
+            <div id="qualifying-config-container"
+                 {% if round.uses_legacy_session_model %}style="display: none;"{% endif %}>
+                <div class="form-group mb-3">
+                    <label for="id_qualifying_count">Number of Qualifying Sessions</label>
+                    <select class="form-control" id="id_qualifying_count" name="qualifying_count">
+                        <option value="0" {% if qualifying_count == 0 %}selected{% endif %}>0 (No Qualifying)</option>
+                        <option value="1" {% if qualifying_count == 1 %}selected{% endif %}>1</option>
+                        <option value="2" {% if qualifying_count == 2 %}selected{% endif %}>2</option>
+                        <option value="3" {% if qualifying_count == 3 %}selected{% endif %}>3</option>
+                    </select>
+                </div>
+
+                <div id="qualifying-details" {% if not qualifying_count or qualifying_count == 0 %}style="display: none;"{% endif %}>
+                    <div class="form-group mb-3">
+                        <label for="id_qualifying_ending_mode">Qualifying Ending Mode</label>
+                        <select class="form-control" id="id_qualifying_ending_mode" name="qualifying_ending_mode">
+                            <option value="QUALIFYING" {% if qualifying_ending_mode == "QUALIFYING" %}selected{% endif %}>
+                                Qualifying - Best lap time before time elapses</option>
+                            <option value="QUALIFYING_PLUS" {% if qualifying_ending_mode == "QUALIFYING_PLUS" %}selected{% endif %}>
+                                Qualifying+ - Last lap starts after time</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group mb-3">
+                        <label for="id_qualifying_grid_method">Qualifying Grid Method</label>
+                        <select class="form-control" id="id_qualifying_grid_method" name="qualifying_grid_method">
+                            <option value="best_time" {% if qualifying_grid_method == "best_time" %}selected{% endif %}>Best Time</option>
+                            <option value="elimination" {% if qualifying_grid_method == "elimination" %}selected{% endif %}>Elimination</option>
+                        </select>
+                    </div>
+
+                    <div id="qualifying-sessions-container">
+                        <!-- Dynamically generated per-session fields -->
+                    </div>
+
+                    <div id="qualifying-cutoffs-container" {% if qualifying_grid_method != "elimination" %}style="display: none;"{% endif %}>
+                        <!-- Dynamically generated cutoff fields for elimination mode -->
+                    </div>
+                </div>
+            </div>
+
             <div class="form-group">
                 <label for="id_limit_time">Maximum Driving Time</label>
                 <select class="form-control" id="id_limit_time" name="limit_time">
@@ -127,6 +187,86 @@
 document.addEventListener('DOMContentLoaded', function() {
     // Initialize the weight penalty widget using the library
     initWeightPenaltyWidget();
+
+    // Toggle ending mode and qualifying config visibility
+    const lapBasedCheckbox = document.getElementById('id_lap_based');
+    const endingModeContainer = document.getElementById('ending-mode-container');
+    const qualifyingConfigContainer = document.getElementById('qualifying-config-container');
+    if (lapBasedCheckbox) {
+        lapBasedCheckbox.addEventListener('change', function() {
+            const show = this.checked;
+            if (endingModeContainer) endingModeContainer.style.display = show ? '' : 'none';
+            if (qualifyingConfigContainer) qualifyingConfigContainer.style.display = show ? '' : 'none';
+        });
+    }
+
+    // Qualifying count change
+    const qualCountSelect = document.getElementById('id_qualifying_count');
+    const qualDetails = document.getElementById('qualifying-details');
+    if (qualCountSelect) {
+        qualCountSelect.addEventListener('change', function() {
+            const count = parseInt(this.value);
+            qualDetails.style.display = count > 0 ? '' : 'none';
+            if (count > 0) renderQualifyingSessions(count);
+        });
+        // Initial render
+        const initCount = parseInt(qualCountSelect.value);
+        if (initCount > 0) renderQualifyingSessions(initCount);
+    }
+
+    // Grid method change
+    const gridMethodSelect = document.getElementById('id_qualifying_grid_method');
+    const cutoffsContainer = document.getElementById('qualifying-cutoffs-container');
+    if (gridMethodSelect) {
+        gridMethodSelect.addEventListener('change', function() {
+            cutoffsContainer.style.display = this.value === 'elimination' ? '' : 'none';
+            if (this.value === 'elimination') {
+                const count = parseInt(qualCountSelect.value);
+                renderCutoffs(count);
+            }
+        });
+    }
 });
+
+function renderQualifyingSessions(count) {
+    const container = document.getElementById('qualifying-sessions-container');
+    container.innerHTML = '';
+    for (let i = 1; i <= count; i++) {
+        const existingVal = '{{ qualifying_durations_json|default:"{}"|safe }}'
+        let durations = {};
+        try { durations = JSON.parse(existingVal); } catch(e) {}
+        const val = durations['q' + i] || '00:15:00';
+        container.innerHTML += `
+            <div class="form-group mb-3">
+                <label>Q${i} Duration (HH:MM:SS)</label>
+                <input type="text" class="form-control" name="q${i}_duration"
+                       pattern="^([0-9]{1,2}):([0-9]{2}):([0-9]{2})$"
+                       placeholder="00:15:00" value="${val}">
+            </div>`;
+    }
+    // Also render cutoffs if elimination
+    const gridMethod = document.getElementById('id_qualifying_grid_method');
+    if (gridMethod && gridMethod.value === 'elimination') {
+        renderCutoffs(count);
+    }
+}
+
+function renderCutoffs(count) {
+    const container = document.getElementById('qualifying-cutoffs-container');
+    container.innerHTML = '';
+    if (count <= 1) return;
+    const existingVal = '{{ qualifying_cutoffs_json|default:"{}"|safe }}';
+    let cutoffs = {};
+    try { cutoffs = JSON.parse(existingVal); } catch(e) {}
+    for (let i = 1; i < count; i++) {
+        const val = cutoffs['q' + i] || '';
+        container.innerHTML += `
+            <div class="form-group mb-3">
+                <label>Q${i} Cutoff (advance top N to Q${i+1})</label>
+                <input type="number" class="form-control" name="q${i}_cutoff"
+                       min="1" placeholder="e.g. 15" value="${val}">
+            </div>`;
+    }
+}
 </script>
 

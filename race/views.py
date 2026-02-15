@@ -48,6 +48,12 @@ from .models import (
     RoundPenalty,
     PenaltyQueue,
     Logo,
+    Race,
+    GridPosition,
+    Transponder,
+    RaceTransponderAssignment,
+    LapCrossing,
+    QualifyingKnockoutRule,
 )
 from .signals import race_end_requested
 from .serializers import ChangeLaneSerializer
@@ -107,6 +113,7 @@ def index(request):
             "sponsors_logos": get_sponsor_logos(cround),
         },
     )
+
 
 @xframe_options_exempt
 def team_carousel(request):
@@ -262,6 +269,7 @@ def changedriver_info(request):
             },
         )
 
+
 @xframe_options_exempt
 def all_pitlanes(request):
     try:
@@ -351,6 +359,21 @@ def preracecheck(request):
 def race_start(request):
     cround = current_round()
     cround.start_race()
+
+    # For lap-based timing: auto-clone transponder assignments for races
+    # that depend on another race with existing assignments
+    if not cround.uses_legacy_session_model:
+        for race in cround.races.filter(depends_on_race__isnull=False).order_by(
+            "sequence_number"
+        ):
+            source = race.depends_on_race
+            if (
+                source
+                and RaceTransponderAssignment.objects.filter(race=source).exists()
+                and not RaceTransponderAssignment.objects.filter(race=race).exists()
+            ):
+                race.clone_transponder_assignments_from(source)
+
     return JsonResponse({"result": True})
 
 
@@ -410,7 +433,7 @@ def agent_login(request):
         )
     # Use external domain from settings instead of internal server details
     # This fixes the issue when Django is behind Nginx proxy
-    if hasattr(settings, "APP_DOMAIN") and settings.APP_DOMAIN:
+    if hasattr(settings, "APP_HOSTNAME") and settings.APP_HOSTNAME:
         # Check if request is secure (HTTPS) by looking at headers set by reverse proxy
         is_secure = (
             request.META.get("HTTP_X_FORWARDED_PROTO") == "https"
@@ -460,18 +483,18 @@ def agent_login(request):
 
         is_external = is_external_connection()
 
-        if ":" in settings.APP_DOMAIN:
-            # APP_DOMAIN already includes port
-            servurl = f"{schema}://{settings.APP_DOMAIN}"
+        if ":" in settings.APP_HOSTNAME:
+            # APP_HOSTNAME already includes port
+            servurl = f"{schema}://{settings.APP_HOSTNAME}"
         elif is_external:
             # External connection - get external port from X-Forwarded-Port or use default 8000
             external_port = request.META.get("HTTP_X_FORWARDED_PORT", "8000")
-            servurl = f"{schema}://{settings.APP_DOMAIN}:{external_port}"
+            servurl = f"{schema}://{settings.APP_HOSTNAME}:{external_port}"
         else:
             # Internal connection - no port needed (uses standard 443/80)
-            servurl = f"{schema}://{settings.APP_DOMAIN}"
+            servurl = f"{schema}://{settings.APP_HOSTNAME}"
     else:
-        # Fallback to original logic if APP_DOMAIN is not configured
+        # Fallback to original logic if APP_HOSTNAME is not configured
         schema = request.scheme
         server = request.META.get("HTTP_HOST") or request.META.get("SERVER_NAME")
         port = request.META.get("SERVER_PORT")
@@ -615,6 +638,11 @@ def round_list_update(request):
             context["selected_round"] = selected_round
             # Update organiser logo to selected round
             context["organiser_logo"] = get_organiser_logo(selected_round)
+            existing_race = selected_round.races.first()
+            context["ending_mode_choices"] = Championship.ENDING_MODES
+            context["current_ending_mode"] = getattr(
+                existing_race, "ending_mode", "CROSS_AFTER_TIME"
+            )
         except Round.DoesNotExist:
             messages.error(request, "Round not found")
 
@@ -646,12 +674,148 @@ def round_form(request):
                 cround.weight_penalty = [">=", [0, 0]]
 
         # Convert to JSON string for template
+        existing_race = cround.races.first()
+        qual_info = _get_qualifying_info(cround)
         context = {
             "round": cround,
+            "ending_mode_choices": Championship.ENDING_MODES,
+            "current_ending_mode": getattr(
+                existing_race, "ending_mode", "CROSS_AFTER_TIME"
+            ),
+            "qualifying_count": qual_info["qualifying_count"],
+            "qualifying_ending_mode": qual_info["qualifying_ending_mode"],
+            "qualifying_grid_method": qual_info["qualifying_grid_method"],
+            "qualifying_durations_json": json.dumps(qual_info["qualifying_durations"]),
+            "qualifying_cutoffs_json": json.dumps(qual_info["qualifying_cutoffs"]),
         }
         return render(request, "layout/roundedit.html", context)
     except Round.DoesNotExist:
         return HttpResponse("Round not found")
+
+
+def _get_qualifying_info(round_obj):
+    """Extract qualifying configuration from existing races for a round."""
+    races = round_obj.races.all().order_by("sequence_number")
+    q_races = [r for r in races if r.race_type in ("Q1", "Q2", "Q3")]
+    qualifying_count = len(q_races)
+
+    def fmt_dur(td):
+        if not td:
+            return "00:15:00"
+        total = int(td.total_seconds())
+        h, rem = divmod(total, 3600)
+        m, s = divmod(rem, 60)
+        return f"{h:02d}:{m:02d}:{s:02d}"
+
+    durations = {}
+    for r in q_races:
+        idx = int(r.race_type[1])  # Q1->1, Q2->2, Q3->3
+        durations[f"q{idx}"] = fmt_dur(r.time_limit_override)
+
+    # Determine grid method from knockout rules
+    qualifying_grid_method = "best_time"
+    cutoffs = {}
+    if q_races:
+        rules = QualifyingKnockoutRule.objects.filter(
+            qualifying_race__in=q_races
+        ).order_by("qualifying_race__sequence_number")
+        if rules.exists():
+            qualifying_grid_method = "elimination"
+            for rule in rules:
+                idx = int(rule.qualifying_race.race_type[1])
+                cutoffs[f"q{idx}"] = rule.eliminates_to_position_range_start
+
+    return {
+        "qualifying_count": qualifying_count,
+        "qualifying_ending_mode": q_races[0].ending_mode if q_races else "QUALIFYING",
+        "qualifying_grid_method": qualifying_grid_method,
+        "qualifying_durations": durations,
+        "qualifying_cutoffs": cutoffs,
+    }
+
+
+def _parse_duration(duration_str):
+    """Parse a duration string (HH:MM:SS or MM:SS) into a timedelta."""
+    if not duration_str:
+        return dt.timedelta(0)
+    if ":" in duration_str:
+        parts = duration_str.split(":")
+        if len(parts) == 3:
+            hours, minutes, seconds = map(int, parts)
+            return dt.timedelta(hours=hours, minutes=minutes, seconds=seconds)
+        elif len(parts) == 2:
+            minutes, seconds = map(int, parts)
+            return dt.timedelta(minutes=minutes, seconds=seconds)
+    try:
+        minutes = float(duration_str)
+        return dt.timedelta(minutes=minutes)
+    except ValueError:
+        pass
+    return dt.timedelta(0)
+
+
+def _create_qualifying_races(cround, post_data, ending_mode):
+    """
+    Create qualifying and main race objects from form data.
+    Deletes existing races (if none started) and recreates.
+    """
+    # Guard: don't delete if a race has started
+    if Race.objects.filter(round=cround, started__isnull=False).exists():
+        return False, "Cannot reconfigure: a race has already started."
+
+    # Clean up existing races and knockout rules
+    QualifyingKnockoutRule.objects.filter(qualifying_race__round=cround).delete()
+    Race.objects.filter(round=cround).delete()
+
+    qualifying_count = int(post_data.get("qualifying_count", 0))
+    qualifying_ending_mode = post_data.get("qualifying_ending_mode", "QUALIFYING")
+    qualifying_grid_method = post_data.get("qualifying_grid_method", "best_time")
+
+    seq = 1
+    q_races = []
+    prev_race = None
+
+    for i in range(1, qualifying_count + 1):
+        q_duration = _parse_duration(post_data.get(f"q{i}_duration", "00:15:00"))
+        race_type = f"Q{i}"
+        q_race = Race.objects.create(
+            round=cround,
+            race_type=race_type,
+            sequence_number=seq,
+            ending_mode=qualifying_ending_mode,
+            time_limit_override=q_duration,
+            depends_on_race=prev_race,
+        )
+        q_races.append(q_race)
+        prev_race = q_race
+        seq += 1
+
+    # Create MAIN race
+    main_race = Race.objects.create(
+        round=cround,
+        race_type="MAIN",
+        sequence_number=seq,
+        ending_mode=ending_mode,
+        time_limit_override=cround.duration,
+        depends_on_race=prev_race,
+    )
+
+    # Create knockout rules for elimination mode
+    if qualifying_grid_method == "elimination" and qualifying_count > 1:
+        for i in range(qualifying_count - 1):
+            cutoff = post_data.get(f"q{i+1}_cutoff")
+            if cutoff:
+                cutoff = int(cutoff)
+                # Teams from position cutoff+1 to end are eliminated
+                QualifyingKnockoutRule.objects.create(
+                    qualifying_race=q_races[i],
+                    eliminates_to_position_range_start=cutoff,
+                    eliminates_to_position_range_end=-1,
+                    sets_grid_positions_for=main_race,
+                    grid_position_offset=cutoff,
+                )
+
+    return True, None
 
 
 @login_required
@@ -713,7 +877,35 @@ def update_round(request, round_id):
                 messages.error(request, "Invalid weight penalty format")
                 return redirect("rounds_list")
 
-            cround.save()
+            # Handle lap-based timing toggle
+            lap_based = request.POST.get("lap_based") == "on"
+            was_legacy = cround.uses_legacy_session_model
+
+            if lap_based:
+                cround.uses_legacy_session_model = False
+                cround.save()
+                ending_mode = request.POST.get("ending_mode", "CROSS_AFTER_TIME")
+                ok, err = _create_qualifying_races(cround, request.POST, ending_mode)
+                if not ok:
+                    messages.error(request, err)
+                    return redirect("rounds_list")
+            elif not lap_based and not was_legacy:
+                # Disabling lap-based: clean up Race objects
+                if Race.objects.filter(round=cround, started__isnull=False).exists():
+                    messages.error(
+                        request,
+                        "Cannot disable transponder timing: a race has already started.",
+                    )
+                    return redirect("rounds_list")
+                QualifyingKnockoutRule.objects.filter(
+                    qualifying_race__round=cround
+                ).delete()
+                Race.objects.filter(round=cround).delete()
+                cround.uses_legacy_session_model = True
+                cround.save()
+            else:
+                cround.save()
+
             messages.success(request, f"Round '{cround.name}' updated successfully")
 
         except Exception as e:
@@ -887,6 +1079,7 @@ def singleteam_view(request):
             },
         )
 
+
 @xframe_options_exempt
 def pending_drivers(request):
     """View to display all pending sessions for the current round"""
@@ -1000,7 +1193,7 @@ def driver_info_api(request, driver_id):
         {
             "driver_id": driver.id,
             "team_id": driver.team.id,
-            "team_number": driver.team.team.number,
+            "team_number": driver.team.number,
             "nickname": driver.member.nickname,
         }
     )
@@ -1241,8 +1434,8 @@ def all_drivers_view(request):
                     person.teams.append(
                         {
                             "round_id": round_obj.id,
-                            "number": tm.team.team.number,
-                            "name": tm.team.team.team.name,
+                            "number": tm.team.number,
+                            "name": tm.team.name,
                         }
                     )
 
@@ -1749,6 +1942,8 @@ def edit_round_view(request):
             round_obj.limit_value = int(request.POST.get("limit_value"))
             round_obj.required_changes = int(request.POST.get("required_changes"))
 
+            round_obj.limit_method = request.POST.get("limit_method")
+
             # Handle weight penalty JSON field
             weight_penalty_json = request.POST.get("weight_penalty", '[">=", [0, 0]]')
             try:
@@ -1759,7 +1954,34 @@ def edit_round_view(request):
                     {"success": False, "error": "Invalid weight penalty format"}
                 )
 
-            round_obj.save()
+            # Handle lap-based timing toggle
+            lap_based = request.POST.get("lap_based") == "on"
+            was_legacy = round_obj.uses_legacy_session_model
+
+            if lap_based:
+                round_obj.uses_legacy_session_model = False
+                round_obj.save()
+                ending_mode = request.POST.get("ending_mode", "CROSS_AFTER_TIME")
+                ok, err = _create_qualifying_races(round_obj, request.POST, ending_mode)
+                if not ok:
+                    return JsonResponse({"success": False, "error": err})
+            elif not lap_based and not was_legacy:
+                # Disabling lap-based: clean up Race objects
+                if Race.objects.filter(round=round_obj, started__isnull=False).exists():
+                    return JsonResponse(
+                        {
+                            "success": False,
+                            "error": "Cannot disable transponder timing: a race has already started.",
+                        }
+                    )
+                QualifyingKnockoutRule.objects.filter(
+                    qualifying_race__round=round_obj
+                ).delete()
+                Race.objects.filter(round=round_obj).delete()
+                round_obj.uses_legacy_session_model = True
+                round_obj.save()
+            else:
+                round_obj.save()
             return JsonResponse({"success": True})
         except Exception as e:
             return JsonResponse({"success": False, "error": str(e)})
@@ -1826,6 +2048,9 @@ def get_championship_rounds(request, championship_id):
                     "required_changes": round_obj.required_changes,
                     "weight_penalty": round_obj.weight_penalty or [">=", [0, 0]],
                     "ready": round_obj.ready,
+                    "uses_legacy_session_model": round_obj.uses_legacy_session_model,
+                    "ending_mode": getattr(round_obj.races.first(), "ending_mode", ""),
+                    **_get_qualifying_info(round_obj),
                 }
             )
 
@@ -1834,6 +2059,92 @@ def get_championship_rounds(request, championship_id):
         )
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=400)
+
+
+@login_required
+@user_passes_test(is_admin_user)
+def transponder_management_view(request):
+    """CRUD management for transponders."""
+    if request.method == "POST":
+        try:
+            action = request.POST.get("action")
+
+            if action == "create_transponder":
+                transponder_id = request.POST.get("transponder_id", "").strip()
+                description = request.POST.get("description", "").strip()
+                active = request.POST.get("active") == "on"
+                if not transponder_id:
+                    return JsonResponse(
+                        {"success": False, "error": "Transponder ID is required"}
+                    )
+                if Transponder.objects.filter(transponder_id=transponder_id).exists():
+                    return JsonResponse(
+                        {"success": False, "error": "Transponder ID already exists"}
+                    )
+                Transponder.objects.create(
+                    transponder_id=transponder_id,
+                    description=description,
+                    active=active,
+                )
+                return JsonResponse(
+                    {"success": True, "message": "Transponder created successfully"}
+                )
+
+            elif action == "edit_transponder":
+                pk = request.POST.get("transponder_pk")
+                transponder = get_object_or_404(Transponder, pk=pk)
+                new_id = request.POST.get("transponder_id", "").strip()
+                if new_id and new_id != transponder.transponder_id:
+                    if Transponder.objects.filter(transponder_id=new_id).exists():
+                        return JsonResponse(
+                            {
+                                "success": False,
+                                "error": "Transponder ID already exists",
+                            }
+                        )
+                    transponder.transponder_id = new_id
+                transponder.description = request.POST.get("description", "").strip()
+                transponder.active = request.POST.get("active") == "on"
+                transponder.save()
+                return JsonResponse(
+                    {"success": True, "message": "Transponder updated successfully"}
+                )
+
+            elif action == "delete_transponder":
+                pk = request.POST.get("transponder_pk")
+                transponder = get_object_or_404(Transponder, pk=pk)
+                # Block deletion if assigned to a non-ended race
+                active_assignments = RaceTransponderAssignment.objects.filter(
+                    transponder=transponder,
+                    race__ended__isnull=True,
+                )
+                if active_assignments.exists():
+                    return JsonResponse(
+                        {
+                            "success": False,
+                            "error": "Cannot delete: transponder is assigned to an active race",
+                        }
+                    )
+                transponder.delete()
+                return JsonResponse(
+                    {"success": True, "message": "Transponder deleted successfully"}
+                )
+
+            else:
+                return JsonResponse(
+                    {"success": False, "error": "Unknown action"}, status=400
+                )
+        except Exception as e:
+            return JsonResponse({"success": False, "error": str(e)}, status=400)
+
+    # GET: list all transponders
+    transponders = Transponder.objects.all().order_by("transponder_id")
+    context = {
+        "transponders": transponders,
+        "organiser_logo": get_organiser_logo(current_round()),
+        "sponsors_logos": get_sponsor_logos(current_round()),
+    }
+    return render(request, "pages/transponder_management.html", context)
 
 
 @login_required
@@ -2700,3 +3011,620 @@ def get_sponsor_logos(round_obj):
     return [
         {"name": "GoKartRace", "image": {"url": "/static/logos/gokartrace-logo.svg"}}
     ]
+
+
+# ============================================================
+# Grid Management Views (Phase 4 - Qualifying & Grid System)
+# ============================================================
+
+
+@login_required
+@user_passes_test(is_admin_user)
+def race_grid_management(request, race_id):
+    """Grid management view for race directors"""
+    race = get_object_or_404(Race, id=race_id)
+
+    # Get current grid positions (ordered by position)
+    grid_positions = GridPosition.objects.filter(race=race).order_by("position")
+
+    # Get teams not yet assigned to grid
+    assigned_team_ids = grid_positions.values_list("team_id", flat=True)
+    unassigned_teams = race.get_all_teams().exclude(id__in=assigned_team_ids)
+
+    context = {
+        "race": race,
+        "grid_positions": grid_positions,
+        "unassigned_teams": unassigned_teams,
+        "is_locked": race.grid_locked,
+    }
+
+    return render(request, "pages/race_grid_management.html", context)
+
+
+@login_required
+@user_passes_test(is_admin_user)
+@csrf_exempt
+def update_grid_position(request, race_id):
+    """API endpoint to update a single grid position"""
+    if request.method != "POST":
+        return JsonResponse({"error": "Only POST method allowed"}, status=405)
+
+    try:
+        data = json.loads(request.body)
+        race = get_object_or_404(Race, id=race_id)
+
+        if race.grid_locked:
+            return JsonResponse(
+                {"success": False, "error": "Grid is locked"}, status=400
+            )
+
+        team_id = data.get("team_id")
+        new_position = data.get("position")
+
+        team = get_object_or_404(round_team, id=team_id)
+
+        GridPosition.objects.update_or_create(
+            race=race,
+            team=team,
+            defaults={
+                "position": new_position,
+                "source": "MANUAL",
+                "manually_overridden": True,
+                "override_reason": data.get("reason", "Manual adjustment"),
+            },
+        )
+
+        return JsonResponse({"success": True})
+
+    except Exception as e:
+        return JsonResponse({"success": False, "error": str(e)}, status=400)
+
+
+@login_required
+@user_passes_test(is_admin_user)
+@csrf_exempt
+def reorder_grid_positions(request, race_id):
+    """API endpoint to reorder multiple grid positions (drag & drop)"""
+    if request.method != "POST":
+        return JsonResponse({"error": "Only POST method allowed"}, status=405)
+
+    try:
+        data = json.loads(request.body)
+        race = get_object_or_404(Race, id=race_id)
+
+        if race.grid_locked:
+            return JsonResponse(
+                {"success": False, "error": "Grid is locked"}, status=400
+            )
+
+        # data should be list of {team_id, position}
+        positions_data = data.get("positions", [])
+
+        for item in positions_data:
+            team_id = item.get("team_id")
+            position = item.get("position")
+
+            team = get_object_or_404(round_team, id=team_id)
+
+            GridPosition.objects.update_or_create(
+                race=race,
+                team=team,
+                defaults={
+                    "position": position,
+                    "source": "MANUAL",
+                    "manually_overridden": True,
+                    "override_reason": "Drag and drop reorder",
+                },
+            )
+
+        return JsonResponse({"success": True})
+
+    except Exception as e:
+        return JsonResponse({"success": False, "error": str(e)}, status=400)
+
+
+@login_required
+@user_passes_test(is_admin_user)
+@require_POST
+def lock_grid(request, race_id):
+    """Lock grid positions"""
+    race = get_object_or_404(Race, id=race_id)
+    race.lock_grid()
+    messages.success(request, "Grid positions locked successfully")
+    return redirect("race_grid_management", race_id=race_id)
+
+
+@login_required
+@user_passes_test(is_admin_user)
+@require_POST
+def unlock_grid(request, race_id):
+    """Unlock grid positions"""
+    race = get_object_or_404(Race, id=race_id)
+    race.unlock_grid()
+    messages.success(request, "Grid positions unlocked successfully")
+    return redirect("race_grid_management", race_id=race_id)
+
+
+@login_required
+@user_passes_test(is_admin_user)
+@require_POST
+def reset_grid_to_auto(request, race_id):
+    """Reset grid to auto-assigned positions"""
+    race = get_object_or_404(Race, id=race_id)
+
+    if race.grid_locked:
+        messages.error(request, "Cannot reset - grid is locked")
+        return redirect("race_grid_management", race_id=race_id)
+
+    race.reset_grid_to_auto()
+    messages.success(request, "Grid positions reset to auto-assigned")
+    return redirect("race_grid_management", race_id=race_id)
+
+
+@login_required
+@user_passes_test(is_admin_user)
+@require_POST
+def auto_assign_from_qualifying(request, race_id):
+    """Auto-assign grid from qualifying results"""
+    race = get_object_or_404(Race, id=race_id)
+
+    if race.grid_locked:
+        messages.error(request, "Cannot auto-assign - grid is locked")
+        return redirect("race_grid_management", race_id=race_id)
+
+    if not race.depends_on_race:
+        messages.error(request, "No qualifying race configured")
+        return redirect("race_grid_management", race_id=race_id)
+
+    race.auto_assign_grid_positions(source_type="QUALIFYING")
+    messages.success(request, "Grid assigned from qualifying results")
+    return redirect("race_grid_management", race_id=race_id)
+
+
+@login_required
+@user_passes_test(is_admin_user)
+@require_POST
+def auto_assign_from_championship(request, race_id):
+    """Auto-assign grid from championship standings"""
+    race = get_object_or_404(Race, id=race_id)
+
+    if race.grid_locked:
+        messages.error(request, "Cannot auto-assign - grid is locked")
+        return redirect("race_grid_management", race_id=race_id)
+
+    race.auto_assign_grid_positions(source_type="CHAMPIONSHIP")
+    messages.success(request, "Grid assigned from championship standings")
+    return redirect("race_grid_management", race_id=race_id)
+
+
+# ============================================================
+# Leaderboard Views (Phase 5 - Leaderboard & Displays)
+# ============================================================
+
+
+def public_leaderboard(request, race_id):
+    """Public full-screen leaderboard display"""
+    race = get_object_or_404(Race, id=race_id)
+
+    # Get initial standings or pre-race team list
+    standings = race.calculate_race_standings() if race.started else []
+    teams = race.get_all_teams().order_by("team__number") if not race.started else []
+
+    context = {
+        "race": race,
+        "standings": standings,
+        "teams": teams,
+        "round_duration": race.round.duration,
+        "effective_lap_count": race.get_effective_lap_count(),
+    }
+
+    return render(request, "pages/public_leaderboard.html", context)
+
+
+# ============================================================
+# Lap Management Views (Phase 6 - Lap Splitting & Suspicious Lap Detection)
+# ============================================================
+
+
+@login_required
+@user_passes_test(is_admin_user)
+def race_lap_management(request, race_id):
+    """Lap management view for race directors"""
+    race = get_object_or_404(Race, id=race_id)
+
+    context = {
+        "race": race,
+    }
+
+    return render(request, "pages/race_lap_management.html", context)
+
+
+@login_required
+@user_passes_test(is_admin_user)
+def get_race_laps(request, race_id):
+    """API endpoint to get all laps for a race"""
+    race = get_object_or_404(Race, id=race_id)
+
+    laps = []
+    for team in race.get_all_teams():
+        team_laps = (
+            LapCrossing.objects.filter(race=race, team=team)
+            .order_by("lap_number")
+            .values(
+                "id",
+                "lap_number",
+                "crossing_time",
+                "lap_time",
+                "is_valid",
+                "is_suspicious",
+                "was_split",
+                "counted_during_suspension",
+            )
+        )
+
+        for lap in team_laps:
+            laps.append(
+                {
+                    "id": lap["id"],
+                    "team_id": team.id,
+                    "team_number": team.number,
+                    "team_name": team.name,
+                    "lap_number": lap["lap_number"],
+                    "crossing_time": lap["crossing_time"].isoformat(),
+                    "lap_time": str(lap["lap_time"]).split(".")[0]
+                    if lap["lap_time"]
+                    else "—",
+                    "lap_time_seconds": lap["lap_time"].total_seconds()
+                    if lap["lap_time"]
+                    else None,
+                    "is_valid": lap["is_valid"],
+                    "is_suspicious": lap["is_suspicious"],
+                    "was_split": lap["was_split"],
+                    "counted_during_suspension": lap["counted_during_suspension"],
+                }
+            )
+
+    return JsonResponse({"laps": laps})
+
+
+@login_required
+@user_passes_test(is_admin_user)
+@csrf_exempt
+@require_POST
+def split_lap(request, crossing_id):
+    """Split a suspicious lap into two laps"""
+    try:
+        crossing = get_object_or_404(LapCrossing, id=crossing_id)
+
+        # Find previous crossing
+        prev_crossing = (
+            LapCrossing.objects.filter(
+                race=crossing.race,
+                team=crossing.team,
+                lap_number__lt=crossing.lap_number,
+            )
+            .order_by("-lap_number")
+            .first()
+        )
+
+        if not prev_crossing:
+            return JsonResponse(
+                {"success": False, "error": "No previous crossing found"}, status=400
+            )
+
+        # Calculate mid-point time
+        time_delta = crossing.crossing_time - prev_crossing.crossing_time
+        mid_time = prev_crossing.crossing_time + (time_delta / 2)
+        half_lap_time = time_delta / 2
+
+        # Create first split lap (replace current lap number)
+        first_lap = LapCrossing.objects.create(
+            race=crossing.race,
+            team=crossing.team,
+            transponder=crossing.transponder,
+            lap_number=crossing.lap_number,
+            crossing_time=mid_time,
+            lap_time=half_lap_time,
+            is_valid=True,
+            is_suspicious=False,
+            was_split=True,
+            split_from=crossing,
+            counted_during_suspension=crossing.counted_during_suspension,
+            session=crossing.session,
+        )
+
+        # Increment all subsequent lap numbers first
+        LapCrossing.objects.filter(
+            race=crossing.race,
+            team=crossing.team,
+            lap_number__gt=crossing.lap_number,
+        ).update(lap_number=models.F("lap_number") + 1)
+
+        # Create second split lap (at incremented position)
+        second_lap = LapCrossing.objects.create(
+            race=crossing.race,
+            team=crossing.team,
+            transponder=crossing.transponder,
+            lap_number=crossing.lap_number + 1,
+            crossing_time=crossing.crossing_time,
+            lap_time=half_lap_time,
+            is_valid=True,
+            is_suspicious=False,
+            was_split=True,
+            split_from=crossing,
+            counted_during_suspension=crossing.counted_during_suspension,
+            session=crossing.session,
+        )
+
+        # Mark original as invalid
+        crossing.is_valid = False
+        crossing.save()
+
+        return JsonResponse(
+            {
+                "success": True,
+                "message": f"Lap {crossing.lap_number} split successfully",
+                "first_lap_id": first_lap.id,
+                "second_lap_id": second_lap.id,
+            }
+        )
+
+    except Exception as e:
+        return JsonResponse({"success": False, "error": str(e)}, status=400)
+
+
+@login_required
+@user_passes_test(is_admin_user)
+@csrf_exempt
+@require_POST
+def invalidate_lap(request, crossing_id):
+    """Mark a lap as invalid"""
+    try:
+        crossing = get_object_or_404(LapCrossing, id=crossing_id)
+        crossing.is_valid = False
+        crossing.save()
+
+        return JsonResponse(
+            {"success": True, "message": f"Lap {crossing.lap_number} marked as invalid"}
+        )
+
+    except Exception as e:
+        return JsonResponse({"success": False, "error": str(e)}, status=400)
+
+
+@login_required
+@user_passes_test(is_admin_user)
+@csrf_exempt
+@require_POST
+def validate_lap(request, crossing_id):
+    """Mark a lap as valid"""
+    try:
+        crossing = get_object_or_404(LapCrossing, id=crossing_id)
+        crossing.is_valid = True
+        crossing.save()
+
+        return JsonResponse(
+            {"success": True, "message": f"Lap {crossing.lap_number} marked as valid"}
+        )
+
+    except Exception as e:
+        return JsonResponse({"success": False, "error": str(e)}, status=400)
+
+
+# ============================================================
+# Race Director Workflow (Phase 7 - Transponder Matching & UI Updates)
+# ============================================================
+
+
+@login_required
+@user_passes_test(is_admin_user)
+def transponder_matching(request, race_id):
+    """Transponder matching interface for race setup"""
+    race = get_object_or_404(Race, id=race_id)
+
+    # Get all transponders
+    transponders = Transponder.objects.filter(active=True).order_by("transponder_id")
+
+    # Get current assignments
+    assignments = RaceTransponderAssignment.objects.filter(race=race).select_related(
+        "team", "transponder"
+    )
+
+    context = {
+        "race": race,
+        "transponders": transponders,
+        "assignments": assignments,
+    }
+
+    return render(request, "pages/transponder_matching.html", context)
+
+
+@login_required
+@user_passes_test(is_admin_user)
+def get_transponder_assignments(request, race_id):
+    """API endpoint to get current transponder assignments"""
+    race = get_object_or_404(Race, id=race_id)
+
+    assignments = RaceTransponderAssignment.objects.filter(race=race).select_related(
+        "team__team", "transponder"
+    )
+
+    data = []
+    for assignment in assignments:
+        data.append(
+            {
+                "id": assignment.id,
+                "team_id": assignment.team.id,
+                "team_number": assignment.team.number,
+                "team_name": assignment.team.name,
+                "kart_number": assignment.kart_number,
+                "transponder_id": assignment.transponder.transponder_id,
+                "confirmed": assignment.confirmed,
+            }
+        )
+
+    return JsonResponse({"assignments": data})
+
+
+@login_required
+@user_passes_test(is_admin_user)
+@csrf_exempt
+@require_POST
+def assign_transponder(request, race_id):
+    """Manually assign a transponder to a team"""
+    try:
+        data = json.loads(request.body)
+        race = get_object_or_404(Race, id=race_id)
+
+        team_id = data.get("team_id")
+        transponder_id = data.get("transponder_id")
+        kart_number = data.get("kart_number")
+
+        team = get_object_or_404(round_team, id=team_id)
+        transponder = get_object_or_404(Transponder, transponder_id=transponder_id)
+
+        # Default kart_number to team number if not provided
+        if not kart_number:
+            kart_number = team.number
+
+        # Create or update assignment
+        assignment, created = RaceTransponderAssignment.objects.update_or_create(
+            race=race,
+            team=team,
+            defaults={
+                "transponder": transponder,
+                "kart_number": kart_number,
+                "confirmed": True,
+            },
+        )
+
+        return JsonResponse(
+            {
+                "success": True,
+                "message": f"Transponder {transponder_id} assigned to Team #{team.team.number}",
+                "assignment_id": assignment.id,
+            }
+        )
+
+    except Exception as e:
+        return JsonResponse({"success": False, "error": str(e)}, status=400)
+
+
+@login_required
+@user_passes_test(is_admin_user)
+@csrf_exempt
+@require_POST
+def remove_transponder_assignment(request, assignment_id):
+    """Remove a transponder assignment"""
+    try:
+        assignment = get_object_or_404(RaceTransponderAssignment, id=assignment_id)
+        team_number = assignment.team.number
+        assignment.delete()
+
+        return JsonResponse(
+            {
+                "success": True,
+                "message": f"Transponder assignment removed from Team #{team_number}",
+            }
+        )
+
+    except Exception as e:
+        return JsonResponse({"success": False, "error": str(e)}, status=400)
+
+
+@login_required
+@user_passes_test(is_admin_user)
+@csrf_exempt
+@require_POST
+def lock_transponder_assignments(request, race_id):
+    """Lock all transponder assignments for the race"""
+    try:
+        race = get_object_or_404(Race, id=race_id)
+
+        # Check if all teams have assignments
+        participating_teams = race.get_all_teams().count()
+        assigned_teams = RaceTransponderAssignment.objects.filter(race=race).count()
+
+        if assigned_teams < participating_teams:
+            return JsonResponse(
+                {
+                    "success": False,
+                    "error": f"Not all teams have transponders assigned ({assigned_teams}/{participating_teams})",
+                },
+                status=400,
+            )
+
+        # Mark all as confirmed
+        RaceTransponderAssignment.objects.filter(race=race).update(confirmed=True)
+
+        return JsonResponse(
+            {
+                "success": True,
+                "message": f"All {assigned_teams} transponder assignments locked",
+            }
+        )
+
+    except Exception as e:
+        return JsonResponse({"success": False, "error": str(e)}, status=400)
+
+
+@login_required
+@user_passes_test(is_admin_user)
+def get_available_transponders(request, race_id):
+    """API endpoint to get transponders not yet assigned to this race"""
+    race = get_object_or_404(Race, id=race_id)
+
+    # Get assigned transponder IDs
+    assigned_transponder_ids = RaceTransponderAssignment.objects.filter(
+        race=race
+    ).values_list("transponder__transponder_id", flat=True)
+
+    # Get unassigned active transponders
+    available = Transponder.objects.filter(active=True).exclude(
+        transponder_id__in=assigned_transponder_ids
+    )
+
+    data = []
+    for transponder in available:
+        data.append(
+            {
+                "transponder_id": transponder.transponder_id,
+                "description": transponder.description,
+                "last_seen": transponder.last_seen.isoformat()
+                if transponder.last_seen
+                else None,
+            }
+        )
+
+    return JsonResponse({"transponders": data})
+
+
+@login_required
+@user_passes_test(is_admin_user)
+@csrf_exempt
+@require_POST
+def retire_team(request):
+    """Toggle retired status of a round_team"""
+    try:
+        data = json.loads(request.body)
+        team_id = data.get("team_id")
+        if not team_id:
+            return JsonResponse(
+                {"success": False, "error": "team_id required"}, status=400
+            )
+
+        team = get_object_or_404(round_team, id=team_id)
+        team.retired = not team.retired
+        team.save(update_fields=["retired"])
+
+        return JsonResponse(
+            {
+                "success": True,
+                "team_id": team.id,
+                "retired": team.retired,
+                "team_name": team.name,
+                "team_number": team.number,
+            }
+        )
+    except json.JSONDecodeError:
+        return JsonResponse({"success": False, "error": "Invalid JSON"}, status=400)

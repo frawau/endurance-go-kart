@@ -1,60 +1,30 @@
-# Stop and Go Station
+# Stations
 
-## Configuration
+This directory contains the various physical stations that can be deployed around the go-kart track. Each station has its own subdirectory with its implementation, configuration, and documentation.
 
-The stop and go station supports configuration via TOML files. Command line arguments will override configuration file values.
+## Available Stations
 
-### Usage
+### [Stop and Go](stopandgo/)
+Handles stop-and-go penalties during races. Monitors a physical button and fence sensor to detect when a driver has completed their penalty.
 
-```bash
-# Use config file
-python stopandgo-station.py -c stopandgo-station.toml
+### [Timing](timing/)
+Transponder timing station that connects to timing hardware (TAG Heuer/Chronelec decoders) and relays crossing events to the Django application. Supports multiple decoder types via a plugin system.
 
-# Override specific values from command line
-python stopandgo-station.py -c stopandgo-station.toml -s different-server.com -p 9000
+## Station Structure
 
-# Use without config file (all defaults/command line)
-python stopandgo-station.py -s gokart.wautier.eu -p 8000
+Each station follows a consistent structure:
+```
+<station-name>/
+├── README.md                  # Station-specific documentation
+├── <station-name>-station.py  # Main station script
+├── <station-name>-station.toml # Configuration file
+└── test-*.py                  # Test utilities (optional)
 ```
 
-### Configuration File Format
+## Adding a New Station
 
-Create a TOML file with the following structure:
-
-```toml
-# Server connection settings
-server = "gokart.wautier.eu"
-port = 8000
-secure = false
-
-# GPIO pin configuration
-button = 18  # Physical pin 18 (GPIO24)
-fence = 24   # Physical pin 24 (GPIO8)
-
-# Logging level
-debug = false
-info = true
-
-# HMAC secret for message authentication
-hmac_secret = "race_control_hmac_key_2024"
-```
-
-### Command Line Arguments
-
-- `-c, --config`: Path to TOML configuration file
-- `-s, --server`: Server hostname
-- `-p, --port`: Server port
-- `-S, --secure`: Use secure WebSocket (wss://)
-- `-b, --button`: Physical button pin number
-- `-f, --fence`: Physical fence sensor pin number
-- `-d, --debug`: Set log level to DEBUG
-- `-i, --info`: Set log level to INFO
-- `-H, --hmac-secret`: HMAC secret key
-
-### Priority Order
-
-1. Command line arguments (highest priority)
-2. Configuration file values
-3. Built-in defaults (lowest priority)
-
-This allows you to set common values in a config file and override specific ones as needed from the command line.
+1. Create a new directory under `stations/` with your station name
+2. Add a `<station-name>-station.py` as the main entry point
+3. Add a `<station-name>-station.toml` for configuration
+4. Add a `README.md` documenting usage and configuration
+5. Update this README to list the new station

@@ -39,6 +39,20 @@ else
     exit 1
 fi
 
+# Build docker compose profile flags based on current config
+get_compose_profiles() {
+    local profiles=""
+    if [ "${SSL_MODE}" = "acme" ] || [ "${SSL_MODE}" = "letsencrypt" ]; then
+        profiles="$profiles --profile ssl-acme"
+    fi
+    echo "$profiles"
+}
+
+# For stop/down we include all profiles so profiled containers are stopped too
+get_all_profiles() {
+    echo "--profile ssl-acme"
+}
+
 show_help() {
     echo "GoKartRace Manager - One Script to Rule Them All"
     echo ""
@@ -60,11 +74,22 @@ show_help() {
     echo "  generate-cert      Generate SSL certificate (automatic modes only)"
     echo "  install-cert       Install manual SSL certificates"
     echo ""
+    echo "Timing Station:"
+    echo "  deploy-timing      Install timing station as a systemd service"
+    echo "  undeploy-timing    Stop and remove timing station systemd service"
+    echo "  timing-status      Show timing station service status"
+    echo ""
+    echo "NetTag Proxy:"
+    echo "  deploy-proxy       Install nettag-proxy as a systemd service"
+    echo "  undeploy-proxy     Stop and remove nettag-proxy systemd service"
+    echo "  proxy-status       Show nettag-proxy service status"
+    echo ""
     echo "Test Data Management:"
     echo "  manage <command>   Run Django management command (e.g., generate_test_data)"
     echo ""
     echo "Utility:"
     echo "  generate-secret    Generate secure random secrets for .env file"
+    echo "  configure-stations Write .env values (hostname, HMAC secrets) into station TOML files"
     echo "  help               Show this help message"
     echo ""
     echo "Examples:"
@@ -73,6 +98,8 @@ show_help() {
     echo "  $0 generate-cert            # Generate certificate"
     echo "  $0 generate-secret          # Generate SECRET_KEY and HMAC secrets"
     echo "  $0 rebuild                  # Rebuild after git pull"
+    echo "  $0 deploy-timing            # Install timing station as native service"
+    echo "  $0 deploy-proxy             # Install nettag-proxy systemd service"
     echo "  $0 manage generate_test_data --teams 50  # Generate test data"
     echo ""
 }
@@ -80,7 +107,7 @@ show_help() {
 show_status() {
     log_info "Current SSL Configuration:"
     echo "  SSL_MODE: ${SSL_MODE:-none (commented out)}"
-    echo "  APP_DOMAIN: ${APP_DOMAIN:-not set}"
+    echo "  APP_HOSTNAME: ${APP_HOSTNAME:-not set}"
     echo "  SSL_EMAIL: ${SSL_EMAIL:-not set}"
 
     if [ -f "ssl/fullchain.pem" ] && [ -f "ssl/privkey.pem" ]; then
@@ -95,6 +122,17 @@ show_status() {
     else
         log_info "acme.sh service is not running"
     fi
+
+    echo ""
+    log_info "Timing Station:"
+    if systemctl is-active --quiet timing-station 2>/dev/null; then
+        log_success "Timing station service is running"
+        echo "  TIMING_PLUGIN_TYPE: ${TIMING_PLUGIN_TYPE:-simulator}"
+        echo "  TIMING_MODE: ${TIMING_MODE:-duration}"
+    else
+        log_info "Timing station service is not running"
+        log_info "Deploy with: $0 deploy-timing"
+    fi
 }
 
 enable_letsencrypt() {
@@ -103,7 +141,7 @@ enable_letsencrypt() {
     # Update .env file
     sed -i 's/^# SSL_MODE=.*/SSL_MODE=letsencrypt/' "$ENV_FILE"
     sed -i 's/^SSL_MODE=.*/SSL_MODE=letsencrypt/' "$ENV_FILE"
-    sed -i 's/^# SSL_EMAIL=.*/SSL_EMAIL='"${SSL_EMAIL:-admin@$APP_DOMAIN}"'/' "$ENV_FILE"
+    sed -i 's/^# SSL_EMAIL=.*/SSL_EMAIL='"${SSL_EMAIL:-admin@$APP_HOSTNAME}"'/' "$ENV_FILE"
 
     log_success "SSL mode set to 'letsencrypt'"
     log_info "To apply changes, run: $0 restart"
@@ -118,7 +156,7 @@ enable_acme() {
     # Update .env file
     sed -i 's/^# SSL_MODE=.*/SSL_MODE=acme/' "$ENV_FILE"
     sed -i 's/^SSL_MODE=.*/SSL_MODE=acme/' "$ENV_FILE"
-    sed -i 's/^# SSL_EMAIL=.*/SSL_EMAIL='"${SSL_EMAIL:-admin@$APP_DOMAIN}"'/' "$ENV_FILE"
+    sed -i 's/^# SSL_EMAIL=.*/SSL_EMAIL='"${SSL_EMAIL:-admin@$APP_HOSTNAME}"'/' "$ENV_FILE"
 
     log_success "SSL mode set to 'acme' (ZeroSSL)"
     log_info "To apply changes, run: $0 restart"
@@ -130,7 +168,7 @@ enable_manual() {
 
     # Update .env file
     sed -i 's/^# SSL_MODE=.*/SSL_MODE=manual/' "$ENV_FILE"
-    sed -i 's/^# SSL_EMAIL=.*/SSL_EMAIL='"${SSL_EMAIL:-admin@$APP_DOMAIN}"'/' "$ENV_FILE"
+    sed -i 's/^# SSL_EMAIL=.*/SSL_EMAIL='"${SSL_EMAIL:-admin@$APP_HOSTNAME}"'/' "$ENV_FILE"
 
     log_success "SSL mode set to 'manual'"
     log_warning "You need to provide SSL certificates in ./ssl/ directory"
@@ -164,19 +202,22 @@ start_services() {
         log_info "Starting with SSL support (requires port 80)"
     fi
 
-    docker compose up -d
+    local profiles
+    profiles=$(get_compose_profiles)
+    docker compose $profiles up -d
     log_success "Services started!"
 
     if [ "${HTTP_PORT}" = "80" ]; then
-        log_info "Application available at: http://${APP_DOMAIN}"
+        log_info "Application available at: http://${APP_HOSTNAME}"
     else
-        log_info "Application available at: http://${APP_DOMAIN}:${HTTP_PORT}"
+        log_info "Application available at: http://${APP_HOSTNAME}:${HTTP_PORT}"
     fi
+
 }
 
 stop_services() {
     log_info "Stopping all services..."
-    docker compose --profile ssl-acme down
+    docker compose $(get_all_profiles) down
     log_success "All services stopped!"
 }
 
@@ -222,12 +263,12 @@ generate_cert() {
         docker compose exec acme-sh acme.sh --register-account -m "${SSL_EMAIL}"
     fi
 
-    log_info "Generating SSL certificate for ${APP_DOMAIN}..."
-    docker compose exec acme-sh acme.sh --issue -d "${APP_DOMAIN}" --webroot /var/www/certbot
+    log_info "Generating SSL certificate for ${APP_HOSTNAME}..."
+    docker compose exec acme-sh acme.sh --issue -d "${APP_HOSTNAME}" --webroot /var/www/certbot
 
     if [ $? -eq 0 ]; then
         log_info "Installing certificate..."
-        docker compose exec acme-sh acme.sh --install-cert -d "${APP_DOMAIN}" \
+        docker compose exec acme-sh acme.sh --install-cert -d "${APP_HOSTNAME}" \
             --cert-file /etc/ssl/certs/cert.pem \
             --key-file /etc/ssl/certs/privkey.pem \
             --fullchain-file /etc/ssl/certs/fullchain.pem
@@ -237,17 +278,17 @@ generate_cert() {
         docker compose restart nginx
 
         if [ "${SSL_MODE}" = "letsencrypt" ]; then
-            log_success "HTTPS is now enabled at https://${APP_DOMAIN} (Let's Encrypt)"
+            log_success "HTTPS is now enabled at https://${APP_HOSTNAME} (Let's Encrypt)"
         else
-            log_success "HTTPS is now enabled at https://${APP_DOMAIN} (ZeroSSL)"
+            log_success "HTTPS is now enabled at https://${APP_HOSTNAME} (ZeroSSL)"
         fi
     else
         log_error "Certificate generation failed!"
         log_info "Check that:"
-        log_info "  - ${APP_DOMAIN} points to this server"
+        log_info "  - ${APP_HOSTNAME} points to this server"
         log_info "  - Port 80 is accessible from the internet"
         log_info "  - No firewall is blocking the connection"
-        log_info "  - DNS propagation is complete (try: nslookup ${APP_DOMAIN})"
+        log_info "  - DNS propagation is complete (try: nslookup ${APP_HOSTNAME})"
         exit 1
     fi
 }
@@ -284,14 +325,10 @@ restart_services() {
         log_info "Using standard port 80 (required for SSL)"
     fi
 
-    if [ "${SSL_MODE}" = "acme" ] || [ "${SSL_MODE}" = "letsencrypt" ]; then
-        log_info "Starting with acme.sh profile..."
-        docker compose --profile ssl-acme down
-        docker compose --profile ssl-acme up -d
-    else
-        docker compose down
-        docker compose up -d
-    fi
+    local profiles
+    profiles=$(get_compose_profiles)
+    docker compose $(get_all_profiles) down
+    docker compose $profiles up -d
 
     log_success "Services restarted!"
 }
@@ -309,17 +346,12 @@ rebuild_services() {
         log_info "Using standard port 80 (required for SSL)"
     fi
 
-    if [ "${SSL_MODE}" = "acme" ] || [ "${SSL_MODE}" = "letsencrypt" ]; then
-        log_info "Rebuilding with acme.sh profile..."
-        docker compose --profile ssl-acme down
-        docker compose --profile ssl-acme build
-        docker compose --profile ssl-acme up -d
-    else
-        log_info "Rebuilding..."
-        docker compose down
-        docker compose build
-        docker compose up -d
-    fi
+    local profiles
+    profiles=$(get_compose_profiles)
+    docker compose $(get_all_profiles) down
+    docker compose $profiles build
+    docker image prune -f
+    docker compose $profiles up -d
 
     log_success "Services rebuilt and restarted!"
 }
@@ -382,6 +414,271 @@ generate_secret() {
     log_warning "IMPORTANT: Keep these secrets secure and never commit them to version control!"
     log_info "For Stop & Go station: Configure the same STOPANDGO_HMAC_SECRET on your Raspberry Pi hardware"
     log_info "Restart services to apply the new secrets: $0 restart"
+
+    # Propagate secrets to station TOML files
+    # Re-source .env so the newly written values are available
+    source "$ENV_FILE"
+    configure_stations
+}
+
+configure_stations() {
+    log_info "Configuring station TOML files from .env values..."
+
+    local stopandgo_toml="$SCRIPT_DIR/stations/stopandgo/stopandgo-station.toml"
+    local timing_toml="$SCRIPT_DIR/stations/timing/timing-station.toml"
+    local missing=0
+
+    if [ -z "${APP_HOSTNAME:-}" ]; then
+        log_warning "APP_HOSTNAME is not set in .env — skipping hostname substitution"
+        missing=1
+    fi
+    if [ -z "${STOPANDGO_HMAC_SECRET:-}" ]; then
+        log_warning "STOPANDGO_HMAC_SECRET is not set in .env — skipping stop-and-go HMAC substitution"
+        missing=1
+    fi
+    if [ -z "${TIMING_HMAC_SECRET:-}" ]; then
+        log_warning "TIMING_HMAC_SECRET is not set in .env — skipping timing HMAC substitution"
+        missing=1
+    fi
+
+    # Stop-and-go station
+    if [ -f "$stopandgo_toml" ]; then
+        if [ -n "${APP_HOSTNAME:-}" ]; then
+            sed -i "s|^server = .*|server = \"${APP_HOSTNAME}\"|" "$stopandgo_toml"
+        fi
+        if [ -n "${STOPANDGO_HMAC_SECRET:-}" ]; then
+            sed -i "s|^hmac_secret = .*|hmac_secret = \"${STOPANDGO_HMAC_SECRET}\"|" "$stopandgo_toml"
+        fi
+        if [ -n "${STOPANDGO_PORT:-}" ]; then
+            sed -i "s|^port = .*|port = ${STOPANDGO_PORT}|" "$stopandgo_toml"
+        fi
+        if [ -n "${STOPANDGO_SECURE:-}" ]; then
+            sed -i "s|^secure = .*|secure = ${STOPANDGO_SECURE}|" "$stopandgo_toml"
+        fi
+        if [ -n "${STOPANDGO_LOG_LEVEL:-}" ]; then
+            sed -i "s|^level = .*|level = \"${STOPANDGO_LOG_LEVEL}\"|" "$stopandgo_toml"
+        fi
+        log_success "Updated $stopandgo_toml"
+    else
+        log_warning "Stop-and-go config not found at $stopandgo_toml"
+    fi
+
+    # Timing station
+    if [ -f "$timing_toml" ]; then
+        # [daemon] section — keys are unique, safe to match globally
+        if [ -n "${APP_HOSTNAME:-}" ]; then
+            local ws_port="${APP_PORT:-5085}"
+            if [ "${SSL_MODE}" != "none" ] && [ -n "${SSL_MODE:-}" ]; then
+                ws_port=80
+            fi
+            sed -i "s|^websocket_url = .*|websocket_url = \"ws://127.0.0.1:${ws_port}/ws/timing/\"|" "$timing_toml"
+        fi
+        if [ -n "${TIMING_HMAC_SECRET:-}" ]; then
+            sed -i "s|^hmac_secret = .*|hmac_secret = \"${TIMING_HMAC_SECRET}\"|" "$timing_toml"
+        fi
+        if [ -n "${TIMING_MODE:-}" ]; then
+            sed -i "s|^timing_mode = .*|timing_mode = \"${TIMING_MODE}\"|" "$timing_toml"
+        fi
+        if [ -n "${TIMING_ROLLOVER_SECONDS:-}" ]; then
+            sed -i "s|^rollover_seconds = .*|rollover_seconds = ${TIMING_ROLLOVER_SECONDS}|" "$timing_toml"
+        fi
+
+        # [plugin] section — "type" is unique to this section
+        if [ -n "${TIMING_PLUGIN_TYPE:-}" ]; then
+            sed -i "s|^type = .*|type = \"${TIMING_PLUGIN_TYPE}\"|" "$timing_toml"
+        fi
+
+        # [plugin.nettag] — "host", "port", "protocol" need section-aware replacement
+        if [ -n "${TIMING_NETTAG_HOST:-}" ]; then
+            sed -i "/^\[plugin\.nettag\]/,/^\[/ s|^host = .*|host = \"${TIMING_NETTAG_HOST}\"|" "$timing_toml"
+        fi
+        if [ -n "${TIMING_NETTAG_PORT:-}" ]; then
+            sed -i "/^\[plugin\.nettag\]/,/^\[/ s|^port = .*|port = ${TIMING_NETTAG_PORT}|" "$timing_toml"
+        fi
+        if [ -n "${TIMING_NETTAG_PROTOCOL:-}" ]; then
+            sed -i "/^\[plugin\.nettag\]/,/^\[/ s|^protocol = .*|protocol = \"${TIMING_NETTAG_PROTOCOL}\"|" "$timing_toml"
+        fi
+
+        # [plugin.tag]
+        if [ -n "${TIMING_TAG_DEVICE:-}" ]; then
+            sed -i "/^\[plugin\.tag\]/,/^\[/ s|^device = .*|device = \"${TIMING_TAG_DEVICE}\"|" "$timing_toml"
+        fi
+        if [ -n "${TIMING_TAG_BAUD:-}" ]; then
+            sed -i "/^\[plugin\.tag\]/,/^\[/ s|^baud = .*|baud = ${TIMING_TAG_BAUD}|" "$timing_toml"
+        fi
+
+        # [plugin.simulator]
+        if [ -n "${TIMING_SIM_TRANSPONDERS:-}" ]; then
+            sed -i "s|^num_transponders = .*|num_transponders = ${TIMING_SIM_TRANSPONDERS}|" "$timing_toml"
+        fi
+        if [ -n "${TIMING_SIM_LAP_MIN:-}" ]; then
+            sed -i "s|^lap_time_min = .*|lap_time_min = ${TIMING_SIM_LAP_MIN}|" "$timing_toml"
+        fi
+        if [ -n "${TIMING_SIM_LAP_MAX:-}" ]; then
+            sed -i "s|^lap_time_max = .*|lap_time_max = ${TIMING_SIM_LAP_MAX}|" "$timing_toml"
+        fi
+
+        log_success "Updated $timing_toml"
+    else
+        log_warning "Timing config not found at $timing_toml"
+    fi
+
+    if [ "$missing" -eq 0 ]; then
+        log_success "All station configs updated successfully"
+    else
+        log_warning "Some values were missing — re-run after populating .env"
+    fi
+}
+
+deploy_proxy() {
+    log_info "Deploying nettag-proxy as a systemd service..."
+
+    PROXY_DIR="$SCRIPT_DIR/proxy"
+    SERVICE_TEMPLATE="$PROXY_DIR/nettag-proxy.service.template"
+    SERVICE_FILE="/etc/systemd/system/nettag-proxy.service"
+    STATE_DIR="/var/lib/nettag-proxy"
+
+    if [ ! -f "$SERVICE_TEMPLATE" ]; then
+        log_error "Service template not found at $SERVICE_TEMPLATE"
+        exit 1
+    fi
+
+    if [ ! -f "$PROXY_DIR/nettag-proxy.toml" ]; then
+        log_error "Config file not found at $PROXY_DIR/nettag-proxy.toml"
+        log_info "Copy and edit the example: cp proxy/nettag-proxy.toml proxy/nettag-proxy.toml"
+        exit 1
+    fi
+
+    # Detect current user/group
+    PROXY_USER="${SUDO_USER:-$(whoami)}"
+    PROXY_GROUP="$(id -gn "$PROXY_USER")"
+
+    log_info "Installing service as user=$PROXY_USER group=$PROXY_GROUP"
+    log_info "Working directory: $PROXY_DIR"
+
+    # Create state directory for SQLite buffer
+    sudo mkdir -p "$STATE_DIR"
+    sudo chown "$PROXY_USER:$PROXY_GROUP" "$STATE_DIR"
+
+    # Generate service file from template
+    sed \
+        -e "s|__USER__|$PROXY_USER|g" \
+        -e "s|__GROUP__|$PROXY_GROUP|g" \
+        -e "s|__WORKDIR__|$SCRIPT_DIR|g" \
+        "$SERVICE_TEMPLATE" | sudo tee "$SERVICE_FILE" > /dev/null
+
+    # Ensure the proxy script is executable
+    chmod +x "$PROXY_DIR/nettag-proxy"
+
+    sudo systemctl daemon-reload
+    sudo systemctl enable nettag-proxy
+    sudo systemctl start nettag-proxy
+
+    log_success "nettag-proxy service deployed and started!"
+    log_info "Config: $PROXY_DIR/nettag-proxy.toml"
+    log_info "Buffer: $STATE_DIR/nettag_buffer.db"
+    log_info "Check status: $0 proxy-status"
+    log_info "View logs: journalctl -u nettag-proxy -f"
+}
+
+undeploy_proxy() {
+    log_info "Removing nettag-proxy systemd service..."
+
+    sudo systemctl stop nettag-proxy 2>/dev/null || true
+    sudo systemctl disable nettag-proxy 2>/dev/null || true
+    sudo rm -f /etc/systemd/system/nettag-proxy.service
+    sudo systemctl daemon-reload
+
+    log_success "nettag-proxy service removed"
+    log_info "Buffer data preserved in /var/lib/nettag-proxy/"
+    log_info "To remove buffer: sudo rm -rf /var/lib/nettag-proxy"
+}
+
+deploy_timing() {
+    log_info "Deploying timing station as a systemd service..."
+
+    TIMING_DIR="$SCRIPT_DIR/stations/timing"
+    SERVICE_TEMPLATE="$TIMING_DIR/timing-station.service.template"
+    SERVICE_FILE="/etc/systemd/system/timing-station.service"
+    STATE_DIR="/var/lib/timing-station"
+    VENV_DIR="$TIMING_DIR/venv"
+
+    if [ ! -f "$SERVICE_TEMPLATE" ]; then
+        log_error "Service template not found at $SERVICE_TEMPLATE"
+        exit 1
+    fi
+
+    # Detect current user/group
+    TIMING_USER="${SUDO_USER:-$(whoami)}"
+    TIMING_GROUP="$(id -gn "$TIMING_USER")"
+
+    log_info "Installing service as user=$TIMING_USER group=$TIMING_GROUP"
+
+    # Create venv if it doesn't exist
+    if [ ! -d "$VENV_DIR" ]; then
+        log_info "Creating Python virtual environment at $VENV_DIR..."
+        python3 -m venv "$VENV_DIR"
+        chown -R "$TIMING_USER:$TIMING_GROUP" "$VENV_DIR"
+    fi
+
+    # Install dependencies
+    log_info "Installing dependencies..."
+    "$VENV_DIR/bin/pip" install --quiet -r "$TIMING_DIR/requirements.txt"
+
+    # Generate timing-station.toml from .env values
+    log_info "Generating timing-station.toml from .env..."
+    configure_stations
+
+    # Create state directory
+    sudo mkdir -p "$STATE_DIR"
+    sudo chown "$TIMING_USER:$TIMING_GROUP" "$STATE_DIR"
+
+    # Generate service file from template
+    sed \
+        -e "s|__USER__|$TIMING_USER|g" \
+        -e "s|__GROUP__|$TIMING_GROUP|g" \
+        -e "s|__WORKDIR__|$SCRIPT_DIR|g" \
+        "$SERVICE_TEMPLATE" | sudo tee "$SERVICE_FILE" > /dev/null
+
+    sudo systemctl daemon-reload
+    sudo systemctl enable timing-station
+    sudo systemctl start timing-station
+
+    log_success "Timing station service deployed and started!"
+    log_info "Config: $TIMING_DIR/timing-station.toml"
+    log_info "Check status: $0 timing-status"
+    log_info "View logs: journalctl -u timing-station -f"
+}
+
+undeploy_timing() {
+    log_info "Removing timing station systemd service..."
+
+    sudo systemctl stop timing-station 2>/dev/null || true
+    sudo systemctl disable timing-station 2>/dev/null || true
+    sudo rm -f /etc/systemd/system/timing-station.service
+    sudo systemctl daemon-reload
+
+    log_success "Timing station service removed"
+    log_info "Venv preserved at $SCRIPT_DIR/stations/timing/venv"
+    log_info "Buffer data preserved in /var/lib/timing-station/"
+}
+
+timing_status() {
+    if systemctl is-active --quiet timing-station 2>/dev/null; then
+        log_success "timing-station is running"
+    else
+        log_warning "timing-station is not running"
+    fi
+    systemctl status timing-station --no-pager 2>/dev/null || true
+}
+
+proxy_status() {
+    if systemctl is-active --quiet nettag-proxy 2>/dev/null; then
+        log_success "nettag-proxy is running"
+    else
+        log_warning "nettag-proxy is not running"
+    fi
+    systemctl status nettag-proxy --no-pager 2>/dev/null || true
 }
 
 # Main command handling
@@ -437,6 +734,27 @@ case "${1:-help}" in
         ;;
     "generate-secret")
         generate_secret
+        ;;
+    "configure-stations")
+        configure_stations
+        ;;
+    "deploy-timing")
+        deploy_timing
+        ;;
+    "undeploy-timing")
+        undeploy_timing
+        ;;
+    "timing-status")
+        timing_status
+        ;;
+    "deploy-proxy")
+        deploy_proxy
+        ;;
+    "undeploy-proxy")
+        undeploy_proxy
+        ;;
+    "proxy-status")
+        proxy_status
         ;;
     "help"|*)
         show_help

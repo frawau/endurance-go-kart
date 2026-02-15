@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ race.get_race_type_display }} - Leaderboard</title>
+    {% load static duration_filters %}
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body {
+            background: #0a0e1a;
+            color: #f0f0f0;
+            font-family: 'Arial', sans-serif;
+            overflow: hidden;
+        }
+
+        .leaderboard-header {
+            background: #111827;
+            padding: 15px 20px;
+            margin-bottom: 10px;
+            border-bottom: 3px solid #ffd700;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .leaderboard-title {
+            font-size: 2rem;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            color: #ffffff;
+        }
+
+        .race-info {
+            font-size: 1rem;
+            color: #d0d0d0;
+        }
+
+        .standings-table {
+            width: 100%;
+            font-size: 1.3rem;
+        }
+
+        .standings-table thead {
+            background: #1a2236;
+        }
+
+        .standings-table th {
+            padding: 12px 15px;
+            border-bottom: 2px solid #ffd700;
+            color: #ffffff;
+            font-weight: bold;
+        }
+
+        .standings-table tbody tr {
+            background: #161d2e;
+            border-bottom: 1px solid #2a3550;
+            transition: all 0.3s ease;
+        }
+
+        .standings-table tbody tr:nth-child(even) {
+            background: #1c2540;
+        }
+
+        .standings-table td {
+            padding: 10px 15px;
+            color: #e8e8e8;
+        }
+
+        .position-1 {
+            background: linear-gradient(135deg, #6b5900 0%, #8a7200 100%) !important;
+        }
+        .position-1 td {
+            color: #ffd700 !important;
+            font-weight: bold;
+        }
+
+        .position-2 {
+            background: linear-gradient(135deg, #4a4a4a 0%, #5c5c5c 100%) !important;
+        }
+        .position-2 td {
+            color: #e0e0e0 !important;
+            font-weight: bold;
+        }
+
+        .position-3 {
+            background: linear-gradient(135deg, #5a3a1a 0%, #6d4a25 100%) !important;
+        }
+        .position-3 td {
+            color: #f0c080 !important;
+            font-weight: bold;
+        }
+
+        .position-badge {
+            display: inline-block;
+            width: 45px;
+            height: 45px;
+            line-height: 45px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.12);
+            text-align: center;
+            font-weight: bold;
+            font-size: 1.4rem;
+            color: #ffffff;
+        }
+
+        .team-retired {
+            opacity: 0.4;
+            text-decoration: line-through;
+        }
+
+        .retired-badge {
+            font-size: 0.7rem;
+            background: #dc3545;
+            color: white;
+            padding: 2px 6px;
+            border-radius: 3px;
+            margin-left: 8px;
+            text-decoration: none;
+            display: inline-block;
+        }
+
+        .gap-laps {
+            color: #ff8080;
+            font-weight: bold;
+        }
+
+        .gap-time {
+            color: #ffdd57;
+        }
+
+        .best-lap-overall {
+            color: #d084ff;
+            font-weight: bold;
+        }
+
+        .no-race-message {
+            text-align: center;
+            font-size: 2rem;
+            padding: 100px 20px;
+            color: #cccccc;
+        }
+
+        .ws-status {
+            font-size: 0.75rem;
+        }
+
+        .ws-connected { color: #4ade80; }
+        .ws-disconnected { color: #f87171; }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="leaderboard-header">
+            <div>
+                <div class="leaderboard-title">
+                    {{ race.round.name }} - {{ race.get_race_type_display }}
+                </div>
+                <div class="race-info">
+                    <span><strong>Mode:</strong> {{ race.get_ending_mode_display }}</span>
+                    {% if effective_lap_count %}
+                    <span class="ms-3"><strong>Laps:</strong> {{ effective_lap_count }}</span>
+                    {% endif %}
+                    {% if round_duration %}
+                    <span class="ms-3"><strong>Time:</strong> {{ round_duration.total_seconds|duration_format }}</span>
+                    {% endif %}
+                </div>
+            </div>
+            <span id="wsStatus" class="ws-status ws-disconnected"><i class="fas fa-circle"></i> Disconnected</span>
+        </div>
+
+        {% if race.started %}
+        <div class="table-responsive">
+            <table class="standings-table table">
+                <thead>
+                    <tr>
+                        <th style="width: 70px;">Pos</th>
+                        <th style="width: 90px;">#</th>
+                        <th>Team</th>
+                        <th style="width: 90px;">Laps</th>
+                        <th style="width: 140px;">Last Lap</th>
+                        <th style="width: 140px;">Best Lap</th>
+                        <th style="width: 140px;">Gap</th>
+                    </tr>
+                </thead>
+                <tbody id="standingsBody">
+                    {% for s in standings %}
+                    <tr class="{% if s.position == 1 %}position-1{% elif s.position == 2 %}position-2{% elif s.position == 3 %}position-3{% endif %} {% if s.retired %}team-retired{% endif %}"
+                        data-team-id="{{ s.team_id }}">
+                        <td><span class="position-badge">{{ s.position }}</span></td>
+                        <td><strong>{{ s.team_number }}</strong></td>
+                        <td>{{ s.team_name }}{% if s.retired %}<span class="retired-badge">RET</span>{% endif %}</td>
+                        <td><strong>{{ s.laps_completed }}</strong></td>
+                        <td>{{ s.last_lap_time_formatted }}</td>
+                        <td>{{ s.best_lap_time_formatted }}</td>
+                        <td class="{% if '-' in s.gap_ahead %}gap-laps{% else %}gap-time{% endif %}">
+                            {{ s.gap_ahead }}
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="7" style="text-align: center;">No standings data yet</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="table-responsive">
+            <table class="standings-table table">
+                <thead>
+                    <tr>
+                        <th style="width: 90px;">#</th>
+                        <th>Team</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for team in teams %}
+                    <tr>
+                        <td><strong>{{ team.team.number }}</strong></td>
+                        <td>{{ team.team.team.name }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="2" style="text-align: center;">No teams registered</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+    </div>
+
+    <script>
+        const raceId = {{ race.id }};
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${protocol}//${window.location.host}/ws/leaderboard/${raceId}/`;
+        const wsStatus = document.getElementById('wsStatus');
+        let socket;
+        let reconnectAttempts = 0;
+        const maxReconnectAttempts = 50;
+
+        function connect() {
+            socket = new WebSocket(wsUrl);
+
+            socket.onopen = function() {
+                console.log('Leaderboard WebSocket connected');
+                reconnectAttempts = 0;
+                wsStatus.className = 'ws-status ws-connected';
+                wsStatus.innerHTML = '<i class="fas fa-circle"></i> Live';
+            };
+
+            socket.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                if (data.type === 'standings_update') {
+                    updateStandings(data.standings);
+                }
+            };
+
+            socket.onclose = function() {
+                wsStatus.className = 'ws-status ws-disconnected';
+                wsStatus.innerHTML = '<i class="fas fa-circle"></i> Disconnected';
+
+                if (reconnectAttempts < maxReconnectAttempts) {
+                    reconnectAttempts++;
+                    const delay = Math.min(3000 * reconnectAttempts, 30000);
+                    setTimeout(connect, delay);
+                }
+            };
+
+            socket.onerror = function(error) {
+                console.error('WebSocket error:', error);
+            };
+        }
+
+        function updateStandings(standings) {
+            const tbody = document.getElementById('standingsBody');
+            if (!tbody || standings.length === 0) return;
+
+            // Find the overall best lap time
+            let overallBest = null;
+            standings.forEach(s => {
+                if (s.best_lap_time !== null && (overallBest === null || s.best_lap_time < overallBest)) {
+                    overallBest = s.best_lap_time;
+                }
+            });
+
+            tbody.innerHTML = '';
+
+            standings.forEach(s => {
+                const row = document.createElement('tr');
+
+                if (s.retired) {
+                    row.classList.add('team-retired');
+                } else if (s.position === 1) {
+                    row.classList.add('position-1');
+                } else if (s.position === 2) {
+                    row.classList.add('position-2');
+                } else if (s.position === 3) {
+                    row.classList.add('position-3');
+                }
+
+                row.dataset.teamId = s.team_id;
+
+                const retiredBadge = s.retired ? '<span class="retired-badge">RET</span>' : '';
+                const gapClass = s.gap_ahead && s.gap_ahead.includes('-') ? 'gap-laps' : 'gap-time';
+                const bestLapClass = (s.best_lap_time !== null && s.best_lap_time === overallBest) ? 'best-lap-overall' : '';
+
+                row.innerHTML = `
+                    <td><span class="position-badge">${s.position}</span></td>
+                    <td><strong>${s.team_number}</strong></td>
+                    <td>${s.team_name}${retiredBadge}</td>
+                    <td><strong>${s.laps_completed}</strong></td>
+                    <td>${s.last_lap_time_formatted}</td>
+                    <td class="${bestLapClass}">${s.best_lap_time_formatted}</td>
+                    <td class="${gapClass}">${s.gap_ahead}</td>
+                `;
+
+                tbody.appendChild(row);
+            });
+        }
+
+        if ({{ race.started|yesno:"true,false" }}) {
+            connect();
+        }
+    </script>
+</body>
+</html>

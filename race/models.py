@@ -1,3 +1,5 @@
+import uuid
+
 from django.db import models
 from django.db.models import Q, UniqueConstraint
 from django_countries.fields import CountryField
@@ -113,9 +115,39 @@ class Team(models.Model):
 
 
 class Championship(models.Model):
+    ENDING_MODES = (
+        ("CROSS_AFTER_TIME", "Cross Start/Finish Line after time"),
+        ("CROSS_AFTER_LAPS", "Cross Start/Finish line after Nb laps"),
+        ("QUALIFYING", "Qualifying - Best lap time before time elapses"),
+        (
+            "QUALIFYING_PLUS",
+            "Qualifying+ - Best time crossing line, last lap starts after time",
+        ),
+        ("FULL_LAPS", "Full laps - Race ends when you complete set number of laps"),
+        (
+            "TIME_ONLY",
+            "Time Only - Positions frozen at last crossing before time expired",
+        ),
+        ("AUTO_TRANSFORM", "Auto-transform to CROSS_AFTER_TIME when max time expires"),
+    )
+
     name = models.CharField(max_length=128, unique=True)
     start = models.DateField()
     end = models.DateField()
+
+    # Race ending mode configuration (LOCKED for all rounds in this championship)
+    default_ending_mode = models.CharField(
+        max_length=32,
+        choices=ENDING_MODES,
+        default="TIME_ONLY",
+        verbose_name="Default Race Ending Mode",
+    )
+    default_lap_count = models.IntegerField(
+        null=True, blank=True, verbose_name="Default Lap Count"
+    )
+    default_time_limit = models.DurationField(
+        null=True, blank=True, verbose_name="Default Time Limit"
+    )
 
     @property
     def ongoing(self):
@@ -183,13 +215,33 @@ class Round(models.Model):
         null=True,
         help_text="Weight penalty configuration in format: ['oper', [limit1, value1], [limit2, value2], ...]",
     )
+
+    # Lap-based timing configuration (rounds can only adjust parameters, not change mode)
+    uses_legacy_session_model = models.BooleanField(
+        default=True,
+        verbose_name="Use Legacy Session Model",
+        help_text="True=time-only (legacy), False=lap-based timing",
+    )
+    lap_count_adjustment = models.IntegerField(
+        null=True,
+        blank=True,
+        verbose_name="Lap Count Adjustment",
+        help_text="Override championship default lap count for this round",
+    )
+    time_limit_adjustment = models.DurationField(
+        null=True,
+        blank=True,
+        verbose_name="Time Limit Adjustment",
+        help_text="Override championship default time limit for this round",
+    )
+
     # No user serviceable parts below
     ready = models.BooleanField(default=False)
     started = models.DateTimeField(null=True, blank=True)
     ended = models.DateTimeField(null=True, blank=True)
     post_race_check_completed = models.BooleanField(default=False)
     qr_fernet = models.BinaryField(
-        max_length=64, default=Fernet.generate_key(), editable=False
+        max_length=64, default=Fernet.generate_key, editable=False
     )
 
     @property
@@ -814,6 +866,567 @@ class Round(models.Model):
         return f"{self.name} of {self.championship.name}"
 
 
+class Race(models.Model):
+    """
+    Represents a single race within a Round.
+    A Round can contain multiple races (e.g., Q1, Q2, Q3, Main).
+    """
+
+    RACE_TYPES = (
+        ("Q1", "Qualifying 1"),
+        ("Q2", "Qualifying 2"),
+        ("Q3", "Qualifying 3"),
+        ("MAIN", "Main Race"),
+        ("PRACTICE", "Practice"),
+    )
+
+    round = models.ForeignKey(Round, on_delete=models.CASCADE, related_name="races")
+    race_type = models.CharField(max_length=16, choices=RACE_TYPES)
+    sequence_number = models.IntegerField(
+        verbose_name="Sequence Number",
+        help_text="Order within round (1=first, 2=second, etc.)",
+    )
+
+    # Inherits mode from Championship, can override parameters
+    ending_mode = models.CharField(
+        max_length=32,
+        choices=Championship.ENDING_MODES,
+        verbose_name="Race Ending Mode",
+    )
+    lap_count_override = models.IntegerField(
+        null=True, blank=True, verbose_name="Lap Count Override"
+    )
+    time_limit_override = models.DurationField(
+        null=True, blank=True, verbose_name="Time Limit Override"
+    )
+    count_crossings_during_suspension = models.BooleanField(
+        default=False, verbose_name="Count Crossings During Suspension"
+    )
+
+    # State (mirrors Round pattern)
+    started = models.DateTimeField(null=True, blank=True)
+    ended = models.DateTimeField(null=True, blank=True)
+    ready = models.BooleanField(default=False)
+
+    # Dependencies
+    depends_on_race = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="dependent_races",
+        verbose_name="Depends On Race",
+    )
+    grid_locked = models.BooleanField(default=False, verbose_name="Grid Locked")
+
+    class Meta:
+        verbose_name = _("Race")
+        verbose_name_plural = _("Races")
+        unique_together = ("round", "sequence_number")
+        ordering = ["round", "sequence_number"]
+
+    def __str__(self):
+        return f"{self.get_race_type_display()} - {self.round.name}"
+
+    def get_effective_lap_count(self):
+        """Get the effective lap count (override or round adjustment or championship default)"""
+        if self.lap_count_override is not None:
+            return self.lap_count_override
+        if self.round.lap_count_adjustment is not None:
+            return self.round.lap_count_adjustment
+        return self.round.championship.default_lap_count or 0
+
+    def get_effective_time_limit(self):
+        """Get the effective time limit (override or round adjustment or championship default)"""
+        if self.time_limit_override is not None:
+            return self.time_limit_override
+        if self.round.time_limit_adjustment is not None:
+            return self.round.time_limit_adjustment
+        return self.round.championship.default_time_limit or dt.timedelta(hours=4)
+
+    def get_all_teams(self):
+        """Get all teams registered for this race (including retired)"""
+        return self.round.round_team_set.all()
+
+    def get_participating_teams_count(self):
+        """Get count of active (non-retired) teams in this race"""
+        return self.round.round_team_set.filter(retired=False).count()
+
+    def get_participating_teams(self):
+        """Get active (non-retired) teams in this race"""
+        return self.round.round_team_set.filter(retired=False)
+
+    def is_race_finished(self):
+        """Check if race ended based on configured mode"""
+        if not self.started:
+            return False
+
+        mode_checkers = {
+            "CROSS_AFTER_TIME": self._check_cross_after_time,
+            "CROSS_AFTER_LAPS": self._check_cross_after_laps,
+            "QUALIFYING": self._check_qualifying,
+            "QUALIFYING_PLUS": self._check_qualifying_plus,
+            "FULL_LAPS": self._check_full_laps,
+            "TIME_ONLY": self._check_time_only,
+            "AUTO_TRANSFORM": self._check_auto_transform,
+        }
+        checker = mode_checkers.get(self.ending_mode)
+        if checker:
+            return checker()
+        return False
+
+    def _check_cross_after_time(self):
+        """Leader-based finish: leader must cross after time, then all active teams must cross."""
+        time_limit = self.get_effective_time_limit()
+        cutoff_time = self.started + time_limit
+
+        if timezone.now() < cutoff_time:
+            return False
+
+        active_teams = self.get_participating_teams()
+        if not active_teams.exists():
+            return True
+
+        # Find leader: most valid laps, then earliest last crossing time
+        leader = None
+        leader_laps = -1
+        leader_last_crossing = None
+
+        for team in active_teams:
+            team_laps = self.lap_crossings.filter(team=team, is_valid=True).count()
+            if team_laps > 0:
+                last_crossing = (
+                    self.lap_crossings.filter(team=team, is_valid=True)
+                    .order_by("-crossing_time")
+                    .first()
+                    .crossing_time
+                )
+            else:
+                last_crossing = None
+
+            if team_laps > leader_laps or (
+                team_laps == leader_laps
+                and last_crossing is not None
+                and (
+                    leader_last_crossing is None or last_crossing < leader_last_crossing
+                )
+            ):
+                leader = team
+                leader_laps = team_laps
+                leader_last_crossing = last_crossing
+
+        if leader is None:
+            return False
+
+        # Leader must have crossed after cutoff
+        leader_crossed_after = self.lap_crossings.filter(
+            team=leader, crossing_time__gte=cutoff_time
+        ).exists()
+        if not leader_crossed_after:
+            return False
+
+        # All other active teams must also have crossed after cutoff
+        teams_crossed_after = (
+            self.lap_crossings.filter(crossing_time__gte=cutoff_time)
+            .values_list("team_id", flat=True)
+            .distinct()
+        )
+
+        return set(active_teams.values_list("id", flat=True)).issubset(
+            set(teams_crossed_after)
+        )
+
+    def _check_cross_after_laps(self):
+        """
+        When first racer completes required laps and crosses line, THAT racer's race ends.
+        Other racers' races end individually when THEY cross the line after completing laps.
+        Race is finished when all racers have crossed after completing required laps.
+        """
+        required_laps = self.get_effective_lap_count()
+
+        # Check if any team has completed required laps
+        teams_completed = (
+            self.lap_crossings.filter(lap_number__gte=required_laps, is_valid=True)
+            .values_list("team_id", flat=True)
+            .distinct()
+        )
+
+        if not teams_completed:
+            return False  # No one has finished yet
+
+        # Race is finished when all teams have crossed after completing laps
+        return len(teams_completed) == self.get_participating_teams_count()
+
+    def _check_qualifying(self):
+        """Time elapsed - all laps that finish before time count"""
+        time_limit = self.get_effective_time_limit()
+        elapsed = timezone.now() - self.started
+        return elapsed >= time_limit
+
+    def _check_qualifying_plus(self):
+        """
+        Last lap that counts MUST have started before time expired
+        but can finish after time (last start-finish crossing after time ran out).
+        This is F1 qualifying style.
+        """
+        time_limit = self.get_effective_time_limit()
+        cutoff_time = self.started + time_limit
+
+        if timezone.now() < cutoff_time:
+            return False  # Time hasn't expired yet
+
+        # Find all teams that started a lap before cutoff but haven't finished it yet
+        teams_still_on_final_lap = set()
+
+        for team in self.get_participating_teams():
+            last_crossing = (
+                self.lap_crossings.filter(team=team, is_valid=True)
+                .order_by("-crossing_time")
+                .first()
+            )
+
+            if last_crossing and last_crossing.crossing_time < cutoff_time:
+                # Started a lap before cutoff
+                # Check if they've crossed since cutoff
+                crossed_after_cutoff = self.lap_crossings.filter(
+                    team=team, crossing_time__gt=cutoff_time, is_valid=True
+                ).exists()
+
+                if not crossed_after_cutoff:
+                    teams_still_on_final_lap.add(team.id)
+
+        # Race finished when all teams that started final lap have crossed
+        return len(teams_still_on_final_lap) == 0
+
+    def _check_full_laps(self):
+        """All teams completed required laps"""
+        required_laps = self.get_effective_lap_count()
+        teams_finished = (
+            self.lap_crossings.filter(lap_number=required_laps, is_valid=True)
+            .values_list("team_id", flat=True)
+            .distinct()
+        )
+
+        return len(teams_finished) == self.get_participating_teams_count()
+
+    def _check_time_only(self):
+        """Time limit reached - positions frozen at last crossing before time"""
+        time_limit = self.get_effective_time_limit()
+        elapsed = timezone.now() - self.started
+        return elapsed >= time_limit
+
+    def _check_auto_transform(self):
+        """
+        If time expired, transform to CROSS_AFTER_TIME.
+        Otherwise check lap completion.
+        """
+        time_limit = self.get_effective_time_limit()
+        elapsed = timezone.now() - self.started
+
+        if elapsed < time_limit:
+            # Still in lap-based mode
+            required_laps = self.get_effective_lap_count()
+            max_laps_result = (
+                self.lap_crossings.filter(is_valid=True)
+                .values("team")
+                .annotate(max_lap=models.Max("lap_number"))
+                .aggregate(models.Max("max_lap"))
+            )
+            max_laps = max_laps_result.get("max_lap__max")
+
+            return max_laps and max_laps >= required_laps
+        else:
+            # Time expired, transform to CROSS_AFTER_TIME
+            if self.ending_mode == "AUTO_TRANSFORM":
+                self.ending_mode = "CROSS_AFTER_TIME"
+                self.save()
+            return self._check_cross_after_time()
+
+    def get_qualifying_results(self):
+        """
+        Get qualifying results sorted by best lap time.
+        Returns list of tuples: [(team, best_lap_time), ...]
+        """
+        results = []
+        for team in self.get_all_teams():
+            # Get best (minimum) valid lap time for this team
+            best_lap = (
+                self.lap_crossings.filter(
+                    team=team, is_valid=True, lap_time__isnull=False
+                )
+                .order_by("lap_time")
+                .first()
+            )
+            if best_lap:
+                results.append((team, best_lap.lap_time))
+            else:
+                # Team didn't complete any valid laps - put at end with max time
+                results.append((team, dt.timedelta(hours=99)))
+
+        # Sort by lap time
+        results.sort(key=lambda x: x[1])
+        return results
+
+    def process_qualifying_knockout(self):
+        """
+        Process qualifying knockout rules for this race.
+        Applies all knockout rules to set grid positions for dependent races.
+        """
+        if self.race_type not in ["Q1", "Q2", "Q3"]:
+            return  # Only qualifying races have knockout rules
+
+        results = self.get_qualifying_results()
+
+        for rule in self.qualifyingknockoutrule_set.all():
+            # Get eliminated teams based on position range
+            # Negative indices mean from end (e.g., -5 = bottom 5)
+            start_idx = rule.eliminates_to_position_range_start
+            end_idx = rule.eliminates_to_position_range_end
+
+            if start_idx < 0 and end_idx < 0:
+                # Both negative - slice from end
+                eliminated = results[start_idx : end_idx + 1 if end_idx != -1 else None]
+            else:
+                # Positive indices
+                eliminated = results[start_idx : end_idx + 1]
+
+            # Set grid positions for target race
+            for idx, (team, _) in enumerate(eliminated):
+                GridPosition.objects.update_or_create(
+                    race=rule.sets_grid_positions_for,
+                    team=team,
+                    defaults={
+                        "position": rule.grid_position_offset + idx + 1,
+                        "source": "KNOCKOUT",
+                        "source_race": self,
+                        "manually_overridden": False,
+                    },
+                )
+
+    @staticmethod
+    def combine_qualifying_results(qualifying_races, main_race, method="best"):
+        """
+        Combine results from multiple qualifying races to set grid for main race.
+
+        Args:
+            qualifying_races: List of Race objects (Q1, Q2, Q3, etc.)
+            main_race: Race object to set grid positions for
+            method: "best" (best lap) or "average" (average of best laps)
+        """
+        combined = {}
+
+        for race in qualifying_races:
+            for team, best_lap in race.get_qualifying_results():
+                if best_lap < dt.timedelta(hours=99):  # Valid lap time
+                    combined.setdefault(team, []).append(best_lap)
+
+        # Calculate final times
+        if method == "average":
+            final = [
+                (team, sum(times, dt.timedelta()) / len(times))
+                for team, times in combined.items()
+            ]
+        else:  # "best"
+            final = [(team, min(times)) for team, times in combined.items()]
+
+        # Sort by time
+        final.sort(key=lambda x: x[1])
+
+        # Assign grid positions
+        for position, (team, _) in enumerate(final, 1):
+            GridPosition.objects.update_or_create(
+                race=main_race,
+                team=team,
+                defaults={
+                    "position": position,
+                    "source": "COMBINED_Q",
+                    "manually_overridden": False,
+                },
+            )
+
+    def auto_assign_grid_positions(self, source_type="CHAMPIONSHIP"):
+        """
+        Auto-assign grid positions based on source.
+
+        Args:
+            source_type: "CHAMPIONSHIP" (championship standings) or "QUALIFYING" (from depends_on_race)
+        """
+        if self.grid_locked:
+            return  # Grid is locked, cannot auto-assign
+
+        if source_type == "QUALIFYING" and self.depends_on_race:
+            # Use qualifying race results
+            results = self.depends_on_race.get_qualifying_results()
+            for position, (team, _) in enumerate(results, 1):
+                GridPosition.objects.update_or_create(
+                    race=self,
+                    team=team,
+                    defaults={
+                        "position": position,
+                        "source": "QUALIFYING",
+                        "source_race": self.depends_on_race,
+                        "manually_overridden": False,
+                    },
+                )
+        elif source_type == "CHAMPIONSHIP":
+            # Use championship standings (placeholder - would need championship_team ordering)
+            teams = list(self.get_all_teams())
+            for position, team in enumerate(teams, 1):
+                GridPosition.objects.update_or_create(
+                    race=self,
+                    team=team,
+                    defaults={
+                        "position": position,
+                        "source": "CHAMPIONSHIP",
+                        "manually_overridden": False,
+                    },
+                )
+
+    def lock_grid(self):
+        """Lock grid positions to prevent further auto-assignment"""
+        self.grid_locked = True
+        self.save()
+
+    def unlock_grid(self):
+        """Unlock grid positions to allow auto-assignment"""
+        self.grid_locked = False
+        self.save()
+
+    def clone_transponder_assignments_from(self, source_race):
+        """Bulk-create transponder assignments from another race."""
+        source_assignments = RaceTransponderAssignment.objects.filter(race=source_race)
+        new_assignments = []
+        for a in source_assignments:
+            new_assignments.append(
+                RaceTransponderAssignment(
+                    race=self,
+                    transponder=a.transponder,
+                    team=a.team,
+                    kart_number=a.kart_number,
+                    confirmed=a.confirmed,
+                )
+            )
+        if new_assignments:
+            RaceTransponderAssignment.objects.bulk_create(
+                new_assignments, ignore_conflicts=True
+            )
+
+    def reset_grid_to_auto(self):
+        """Reset grid to auto-assigned positions (remove manual overrides)"""
+        if self.grid_locked:
+            return
+
+        # Delete all grid positions and re-auto-assign
+        GridPosition.objects.filter(race=self).delete()
+
+        if self.depends_on_race:
+            self.auto_assign_grid_positions(source_type="QUALIFYING")
+        else:
+            self.auto_assign_grid_positions(source_type="CHAMPIONSHIP")
+
+    def calculate_race_standings(self):
+        """
+        Calculate current race standings.
+        Returns list of dicts with team info, laps, times, positions, and gaps.
+        """
+        if not self.started:
+            return []
+
+        standings = []
+        for team in self.get_all_teams():
+            # Get all valid lap crossings for this team
+            laps = self.lap_crossings.filter(team=team, is_valid=True).order_by(
+                "crossing_time"
+            )
+
+            if laps.exists():
+                laps_completed = laps.count()
+                last_crossing = laps.last()
+                total_time = last_crossing.crossing_time - self.started
+                last_lap_time = last_crossing.lap_time
+                best_lap = (
+                    laps.filter(lap_time__isnull=False).order_by("lap_time").first()
+                )
+                best_lap_time = best_lap.lap_time if best_lap else None
+            else:
+                laps_completed = 0
+                total_time = None
+                last_lap_time = None
+                best_lap_time = None
+
+            # Get grid position if available
+            try:
+                grid_pos = GridPosition.objects.get(race=self, team=team)
+                starting_position = grid_pos.position
+            except GridPosition.DoesNotExist:
+                starting_position = None
+
+            standings.append(
+                {
+                    "team_id": team.id,
+                    "team_number": team.team.number,
+                    "team_name": team.team.name,
+                    "retired": team.retired,
+                    "laps_completed": laps_completed,
+                    "total_time": total_time.total_seconds() if total_time else None,
+                    "total_time_formatted": str(total_time).split(".")[0]
+                    if total_time
+                    else "—",
+                    "last_lap_time": last_lap_time.total_seconds()
+                    if last_lap_time
+                    else None,
+                    "last_lap_time_formatted": str(last_lap_time).split(".")[0]
+                    if last_lap_time
+                    else "—",
+                    "best_lap_time": best_lap_time.total_seconds()
+                    if best_lap_time
+                    else None,
+                    "best_lap_time_formatted": str(best_lap_time).split(".")[0]
+                    if best_lap_time
+                    else "—",
+                    "starting_position": starting_position,
+                }
+            )
+
+        # Sort by laps (desc), then total time (asc)
+        standings.sort(
+            key=lambda x: (
+                -x["laps_completed"],
+                x["total_time"] if x["total_time"] is not None else float("inf"),
+            )
+        )
+
+        # Add positions and gaps
+        for idx, standing in enumerate(standings, 1):
+            standing["position"] = idx
+
+            if idx == 1:
+                standing["gap_ahead"] = "—"
+                standing["position_change"] = 0
+            else:
+                car_ahead = standings[idx - 2]
+                if standing["laps_completed"] < car_ahead["laps_completed"]:
+                    lap_diff = car_ahead["laps_completed"] - standing["laps_completed"]
+                    standing[
+                        "gap_ahead"
+                    ] = f"-{lap_diff} lap{'s' if lap_diff > 1 else ''}"
+                elif standing["total_time"] and car_ahead["total_time"]:
+                    time_diff = standing["total_time"] - car_ahead["total_time"]
+                    standing["gap_ahead"] = f"+{time_diff:.1f}s"
+                else:
+                    standing["gap_ahead"] = "—"
+
+                # Calculate position change from starting grid
+                if standing["starting_position"]:
+                    standing["position_change"] = (
+                        standing["starting_position"] - standing["position"]
+                    )
+                else:
+                    standing["position_change"] = 0
+
+        return standings
+
+
 class round_pause(models.Model):
     round = models.ForeignKey(Round, on_delete=models.CASCADE)
     start = models.DateTimeField(default=dt.datetime.now)
@@ -846,6 +1459,7 @@ class championship_team(models.Model):
 class round_team(models.Model):
     round = models.ForeignKey(Round, on_delete=models.CASCADE)
     team = models.ForeignKey(championship_team, on_delete=models.CASCADE)
+    retired = models.BooleanField(default=False)
 
     class Meta:
         unique_together = ("round", "team")
@@ -1064,6 +1678,11 @@ class Session(models.Model):
     start = models.DateTimeField(null=True, blank=True)
     end = models.DateTimeField(null=True, blank=True)
 
+    # Link to specific race within round (for lap-based timing)
+    race = models.ForeignKey(
+        Race, null=True, blank=True, on_delete=models.CASCADE, verbose_name="Race"
+    )
+
     class Meta:
         verbose_name = _("Session")
         verbose_name_plural = _("Sessions")
@@ -1101,6 +1720,207 @@ class Session(models.Model):
 
         total_time += session_time - paused_time
         return total_time
+
+
+class Transponder(models.Model):
+    """Hardware transponder registration"""
+
+    transponder_id = models.CharField(
+        max_length=32, unique=True, verbose_name="Transponder ID"
+    )
+    description = models.CharField(
+        max_length=128, blank=True, verbose_name="Description"
+    )
+    active = models.BooleanField(default=True, verbose_name="Active")
+    last_seen = models.DateTimeField(null=True, blank=True, verbose_name="Last Seen")
+
+    class Meta:
+        verbose_name = _("Transponder")
+        verbose_name_plural = _("Transponders")
+
+    def __str__(self):
+        return f"Transponder {self.transponder_id}"
+
+
+class RaceTransponderAssignment(models.Model):
+    """Matching phase: transponder → team/kart"""
+
+    race = models.ForeignKey(
+        Race, on_delete=models.CASCADE, related_name="transponder_assignments"
+    )
+    transponder = models.ForeignKey(Transponder, on_delete=models.CASCADE)
+    team = models.ForeignKey("round_team", on_delete=models.CASCADE)
+    kart_number = models.IntegerField(
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(1), MaxValueValidator(99)],
+        verbose_name="Kart Number",
+    )
+    confirmed = models.BooleanField(default=False, verbose_name="Confirmed")
+    assigned_at = models.DateTimeField(auto_now_add=True, verbose_name="Assigned At")
+
+    class Meta:
+        verbose_name = _("Race Transponder Assignment")
+        verbose_name_plural = _("Race Transponder Assignments")
+        unique_together = [
+            ("race", "transponder"),
+            ("race", "team"),
+        ]
+        constraints = [
+            UniqueConstraint(
+                fields=["race", "kart_number"],
+                condition=Q(kart_number__isnull=False),
+                name="unique_race_kart_number_when_set",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.transponder.transponder_id} → Team {self.team} (Kart #{self.kart_number})"
+
+
+class LapCrossing(models.Model):
+    """Core lap timing data - records each finish line crossing"""
+
+    race = models.ForeignKey(
+        Race, on_delete=models.CASCADE, related_name="lap_crossings"
+    )
+    team = models.ForeignKey("round_team", on_delete=models.CASCADE)
+    transponder = models.ForeignKey(
+        Transponder, on_delete=models.CASCADE, null=True, blank=True
+    )
+
+    # Lap timing data
+    lap_number = models.IntegerField(
+        validators=[MinValueValidator(1)], verbose_name="Lap Number"
+    )
+    crossing_time = models.DateTimeField(verbose_name="Crossing Time")
+    lap_time = models.DurationField(null=True, blank=True, verbose_name="Lap Time")
+    raw_time = models.FloatField(null=True, blank=True, verbose_name="Decoder Raw Time")
+    message_id = models.UUIDField(
+        null=True, blank=True, unique=True, verbose_name="Message ID"
+    )
+
+    # Lap status
+    is_valid = models.BooleanField(default=True, verbose_name="Valid")
+    is_suspicious = models.BooleanField(default=False, verbose_name="Suspicious")
+    was_split = models.BooleanField(default=False, verbose_name="Was Split")
+    split_from = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="split_laps",
+        verbose_name="Split From",
+    )
+    counted_during_suspension = models.BooleanField(
+        default=False, verbose_name="Counted During Suspension"
+    )
+    session = models.ForeignKey(
+        Session, null=True, blank=True, on_delete=models.SET_NULL
+    )
+
+    class Meta:
+        verbose_name = _("Lap Crossing")
+        verbose_name_plural = _("Lap Crossings")
+        ordering = ["race", "team", "lap_number"]
+        indexes = [
+            models.Index(fields=["race", "team", "lap_number"]),
+            models.Index(fields=["race", "crossing_time"]),
+            models.Index(fields=["is_suspicious"]),
+            models.Index(fields=["transponder", "crossing_time"]),
+        ]
+
+    def __str__(self):
+        return f"Lap {self.lap_number} - Team {self.team} @ {self.crossing_time}"
+
+
+class GridPosition(models.Model):
+    """Starting positions for races"""
+
+    AUTO_SOURCES = (
+        ("QUALIFYING", "From Qualifying Result"),
+        ("COMBINED_Q", "From Combined Qualifying Results"),
+        ("KNOCKOUT", "From Knockout Qualifying"),
+        ("CHAMPIONSHIP", "From Championship Standings"),
+        ("MANUAL", "Manually Assigned"),
+    )
+
+    race = models.ForeignKey(
+        Race, on_delete=models.CASCADE, related_name="grid_positions"
+    )
+    team = models.ForeignKey("round_team", on_delete=models.CASCADE)
+    position = models.IntegerField(
+        validators=[MinValueValidator(1)], verbose_name="Grid Position"
+    )
+
+    # Position source tracking
+    source = models.CharField(
+        max_length=32, choices=AUTO_SOURCES, default="MANUAL", verbose_name="Source"
+    )
+    source_race = models.ForeignKey(
+        Race,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="grid_source_for",
+        verbose_name="Source Race",
+    )
+
+    # Override capability
+    manually_overridden = models.BooleanField(
+        default=False, verbose_name="Manually Overridden"
+    )
+    override_reason = models.TextField(blank=True, verbose_name="Override Reason")
+
+    class Meta:
+        verbose_name = _("Grid Position")
+        verbose_name_plural = _("Grid Positions")
+        unique_together = [
+            ("race", "team"),
+            ("race", "position"),
+        ]
+        ordering = ["race", "position"]
+
+    def __str__(self):
+        return f"P{self.position} - Team {self.team}"
+
+
+class QualifyingKnockoutRule(models.Model):
+    """Complex qualifying logic - knockout rules"""
+
+    qualifying_race = models.ForeignKey(
+        Race,
+        on_delete=models.CASCADE,
+        related_name="knockout_rules",
+        verbose_name="Qualifying Race",
+    )
+    eliminates_to_position_range_start = models.IntegerField(
+        verbose_name="Eliminate From Position", help_text="e.g., -5 for bottom 5 teams"
+    )
+    eliminates_to_position_range_end = models.IntegerField(
+        verbose_name="Eliminate To Position", help_text="e.g., -1 for last team"
+    )
+
+    # What happens to eliminated teams
+    sets_grid_positions_for = models.ForeignKey(
+        Race,
+        on_delete=models.CASCADE,
+        related_name="knockout_sources",
+        verbose_name="Sets Grid For Race",
+    )
+    grid_position_offset = models.IntegerField(
+        default=0,
+        verbose_name="Grid Position Offset",
+        help_text="Where to place them in main race grid",
+    )
+
+    class Meta:
+        verbose_name = _("Qualifying Knockout Rule")
+        verbose_name_plural = _("Qualifying Knockout Rules")
+        ordering = ["qualifying_race", "eliminates_to_position_range_start"]
+
+    def __str__(self):
+        return f"{self.qualifying_race} → {self.sets_grid_positions_for} (positions {self.eliminates_to_position_range_start} to {self.eliminates_to_position_range_end})"
 
 
 class ChangeLane(models.Model):

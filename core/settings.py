@@ -25,15 +25,20 @@ STOPANDGO_HMAC_SECRET = os.environ.get(
     "STOPANDGO_HMAC_SECRET", "race_control_hmac_key_2024"
 )
 
+# Timing Station HMAC Secret
+TIMING_HMAC_SECRET = os.environ.get(
+    "TIMING_HMAC_SECRET", "timing_hmac_secret_change_me_2025"
+)
+
 DEBUG = os.environ.get("DEBUG", True)
-APP_DOMAIN = os.getenv("APP_DOMAIN", "gokart.wautier.eu")
+APP_HOSTNAME = os.getenv("APP_HOSTNAME", "gokart.wautier.eu")
 APP_PORT = os.getenv("APP_PORT", "5085")
 
 # HOSTs List
 ALLOWED_HOSTS = [
     "127.0.0.1",
     "localhost",
-    APP_DOMAIN,
+    APP_HOSTNAME,
 ]
 
 # Add here your deployment HOSTS
@@ -42,13 +47,17 @@ CSRF_TRUSTED_ORIGINS = [
     "http://localhost:5085",
     "http://127.0.0.1:8000",
     "http://127.0.0.1:5085",
-    f"http://{APP_DOMAIN}",
-    f"https://{APP_DOMAIN}",
-    f"http://{APP_DOMAIN}:8000",
-    f"https://{APP_DOMAIN}:8000",
-    f"http://{APP_DOMAIN}:{APP_PORT}",
-    f"https://{APP_DOMAIN}:{APP_PORT}",
+    f"http://{APP_HOSTNAME}",
+    f"https://{APP_HOSTNAME}",
+    f"http://{APP_HOSTNAME}:8000",
+    f"https://{APP_HOSTNAME}:8000",
+    f"http://{APP_HOSTNAME}:{APP_PORT}",
+    f"https://{APP_HOSTNAME}:{APP_PORT}",
 ]
+
+EXTRA_ALLOWED_HOST = os.environ.get("EXTRA_ALLOWED_HOST")
+if EXTRA_ALLOWED_HOST:
+    ALLOWED_HOSTS.append(EXTRA_ALLOWED_HOST)
 
 RENDER_EXTERNAL_HOSTNAME = os.environ.get("RENDER_EXTERNAL_HOSTNAME")
 if RENDER_EXTERNAL_HOSTNAME:
