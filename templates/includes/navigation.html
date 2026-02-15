@@ -82,17 +82,6 @@
                           </a>
                         </li>
                         {% if user|has_group:"Race Director" %}
-                        {% if active_round_has_timing %}
-                        <li class="nav-item list-group-item border-0 p-0">
-                          <a class="dropdown-item py-2 ps-3 border-radius-md"
-                          href="/transponder/manage/">
-                            <h6
-                            class="dropdown-header text-dark font-weight-bolder d-flex justify-content-cente align-items-center p-0">
-                            Manage Transponders</h6>
-                            <span class="text-sm">Add, edit, and delete transponders.</span>
-                          </a>
-                        </li>
-                        {% endif %}
                         {% if active_race_id and active_round_has_timing %}
                         <li class="nav-item list-group-item border-0 p-0">
                           <a class="dropdown-item py-2 ps-3 border-radius-md"
@@ -182,6 +171,15 @@
                               class="dropdown-header text-dark font-weight-bolder d-flex justify-content-cente align-items-center p-0">
                               Manage Sponsors</h6>
                             <span class="text-sm">Add, edit, and delete sponsor and organiser logos.</span>
+                          </a>
+                        </li>
+                        <li class="nav-item list-group-item border-0 p-0">
+                          <a class="dropdown-item py-2 ps-3 border-radius-md"
+                            href="/transponder/manage/">
+                            <h6
+                              class="dropdown-header text-dark font-weight-bolder d-flex justify-content-cente align-items-center p-0">
+                              Manage Transponders</h6>
+                            <span class="text-sm">Add, edit, and delete transponders.</span>
                           </a>
                         </li>
                       </ul>
