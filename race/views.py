@@ -643,6 +643,16 @@ def round_list_update(request):
             context["current_ending_mode"] = getattr(
                 existing_race, "ending_mode", "CROSS_AFTER_TIME"
             )
+            qual_info = _get_qualifying_info(selected_round)
+            context["qualifying_count"] = qual_info["qualifying_count"]
+            context["qualifying_ending_mode"] = qual_info["qualifying_ending_mode"]
+            context["qualifying_grid_method"] = qual_info["qualifying_grid_method"]
+            context["qualifying_durations_json"] = json.dumps(
+                qual_info["qualifying_durations"]
+            )
+            context["qualifying_cutoffs_json"] = json.dumps(
+                qual_info["qualifying_cutoffs"]
+            )
         except Round.DoesNotExist:
             messages.error(request, "Round not found")
 
