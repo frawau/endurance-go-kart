@@ -357,11 +357,29 @@ def preracecheck(request):
     if res:
         return JsonResponse({"result": False, "error": res})
 
-    # For lap-based rounds, also mark the active race as ready
+    # For lap-based rounds, check transponder assignments and mark race ready
     active_race = cround.active_race
-    if active_race and not active_race.ready:
-        active_race.ready = True
-        active_race.save()
+    if active_race:
+        # Every non-retired team must have a transponder assignment for this race
+        teams_without_transponder = []
+        for rt in cround.round_team_set.filter(retired=False):
+            if not RaceTransponderAssignment.objects.filter(
+                race=active_race, team=rt
+            ).exists():
+                teams_without_transponder.append(
+                    f"Team {rt.team.team.name} ({rt.team.number}) has no transponder assigned."
+                )
+
+        if teams_without_transponder:
+            # Undo the ready state and ChangeLanes that pre_race_check just created
+            cround.ready = False
+            cround.save()
+            ChangeLane.objects.filter(round=cround).delete()
+            return JsonResponse({"result": False, "error": teams_without_transponder})
+
+        if not active_race.ready:
+            active_race.ready = True
+            active_race.save()
 
     return JsonResponse({"result": True})
 
