@@ -440,16 +440,18 @@ class Round(models.Model):
 
         if errors:
             return errors
-        else:
-            self.ready = True
-            self.save()
-            for i in range(self.change_lanes):
-                lane = ChangeLane.objects.create(
-                    driver=None,
-                    round=self,
-                    lane=i + 1,
-                )
-            return None
+        return None
+
+    def activate_race_ready(self):
+        """Set round ready and create change lanes. Call after all pre-checks pass."""
+        self.ready = True
+        self.save()
+        for i in range(self.change_lanes):
+            ChangeLane.objects.create(
+                driver=None,
+                round=self,
+                lane=i + 1,
+            )
 
     def post_race_check(self):
         """
