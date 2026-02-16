@@ -353,17 +353,30 @@ def racecontrol(request):
 @user_passes_test(is_race_director)
 def preracecheck(request):
     cround = current_round()
+    active_race = cround.active_race
 
-    # Phase 1: validate drivers and weights (no side effects)
-    res = cround.pre_race_check()
+    # Determine eliminated teams for Q2+ races in elimination mode
+    excluded_team_ids = set()
+    if active_race and active_race.race_type in ("Q2", "Q3"):
+        main_race = cround.races.filter(race_type="MAIN").first()
+        if main_race:
+            excluded_team_ids = set(
+                GridPosition.objects.filter(
+                    race=main_race, source="KNOCKOUT"
+                ).values_list("team_id", flat=True)
+            )
+
+    # Phase 1: validate drivers and weights (skip eliminated teams)
+    res = cround.pre_race_check(excluded_team_ids=excluded_team_ids or None)
     if res:
         return JsonResponse({"result": False, "error": res})
 
     # Phase 2: for lap-based rounds, check transponder assignments
-    active_race = cround.active_race
     if active_race:
         teams_without_transponder = []
         for rt in cround.round_team_set.filter(retired=False):
+            if rt.pk in excluded_team_ids:
+                continue
             if not RaceTransponderAssignment.objects.filter(
                 race=active_race, team=rt
             ).exists():
@@ -516,6 +529,24 @@ def endofrace(request):
             register__isnull=False, start__isnull=True, end__isnull=True
         ).delete()
         ChangeLane.objects.all().delete()
+
+        # Process qualifying results when a Q-race ends
+        if active_race.race_type.startswith("Q"):
+            tiebreaker = cround.championship.qualifying_tiebreaker
+            main_race = cround.races.filter(race_type="MAIN").first()
+
+            # Elimination mode: assign knockout grid positions
+            if active_race.knockout_rules.exists():
+                active_race.process_qualifying_knockout()
+
+            # Always: combine all ended Q-races to fill MAIN grid
+            if main_race:
+                ended_q_races = cround.races.filter(
+                    race_type__startswith="Q", ended__isnull=False
+                )
+                Race.combine_qualifying_results(
+                    ended_q_races, main_race, tiebreaker=tiebreaker
+                )
 
         # Check if there is a next race
         next_race = cround.active_race  # re-query after saving

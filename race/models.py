@@ -131,6 +131,11 @@ class Championship(models.Model):
         ("AUTO_TRANSFORM", "Auto-transform to CROSS_AFTER_TIME when max time expires"),
     )
 
+    QUALIFYING_TIEBREAKER_CHOICES = (
+        ("FIRST_SET", "First to set the time"),
+        ("BEST_TIMES", "Compare 2nd, 3rd, ... best times"),
+    )
+
     name = models.CharField(max_length=128, unique=True)
     start = models.DateField()
     end = models.DateField()
@@ -147,6 +152,12 @@ class Championship(models.Model):
     )
     default_time_limit = models.DurationField(
         null=True, blank=True, verbose_name="Default Time Limit"
+    )
+    qualifying_tiebreaker = models.CharField(
+        max_length=16,
+        choices=QUALIFYING_TIEBREAKER_CHOICES,
+        default="FIRST_SET",
+        verbose_name="Qualifying Tiebreaker",
     )
 
     @property
@@ -407,14 +418,21 @@ class Round(models.Model):
             latest_pause.end = None
             latest_pause.save()
 
-    def pre_race_check(self):
+    def pre_race_check(self, excluded_team_ids=None):
         """
         Checks that each team has exactly one driver with a registered but unstarted session,
         and that all drivers have a non-zero weight.
+
+        Args:
+            excluded_team_ids: set/list of round_team PKs to skip (e.g. eliminated teams)
         """
         errors = []
+        excluded = set(excluded_team_ids) if excluded_team_ids else set()
 
         for round_team_instance in self.round_team_set.all():
+            if round_team_instance.pk in excluded:
+                continue
+
             drivers = round_team_instance.team_member_set.filter(driver=True)
 
             registered_drivers = []
@@ -1188,28 +1206,40 @@ class Race(models.Model):
                 self.save()
             return self._check_cross_after_time()
 
-    def get_qualifying_results(self):
+    def get_qualifying_results(self, tiebreaker="FIRST_SET"):
         """
-        Get qualifying results sorted by best lap time.
-        Returns list of tuples: [(team, best_lap_time), ...]
+        Get qualifying results sorted by best lap time with tiebreaker.
+
+        Args:
+            tiebreaker: "FIRST_SET" — ties broken by who set the time first
+                        "BEST_TIMES" — ties broken by comparing 2nd, 3rd, ... best times
+
+        Returns list of tuples: [(team, sort_key), ...]
+        sort_key is (lap_time, crossing_time) for FIRST_SET or [lap_time, ...] for BEST_TIMES.
         """
+        NO_TIME = dt.timedelta(hours=99)
         results = []
         for team in self.get_all_teams():
-            # Get best (minimum) valid lap time for this team
-            best_lap = (
-                self.lap_crossings.filter(
-                    team=team, is_valid=True, lap_time__isnull=False
-                )
-                .order_by("lap_time")
-                .first()
+            crossings = self.lap_crossings.filter(
+                team=team, is_valid=True, lap_time__isnull=False
             )
-            if best_lap:
-                results.append((team, best_lap.lap_time))
-            else:
-                # Team didn't complete any valid laps - put at end with max time
-                results.append((team, dt.timedelta(hours=99)))
+            if not crossings.exists():
+                if tiebreaker == "FIRST_SET":
+                    sort_key = (NO_TIME, dt.datetime.max)
+                else:
+                    sort_key = [NO_TIME]
+                results.append((team, sort_key))
+                continue
 
-        # Sort by lap time
+            if tiebreaker == "FIRST_SET":
+                best = crossings.order_by("lap_time", "crossing_time").first()
+                sort_key = (best.lap_time, best.crossing_time)
+            else:  # BEST_TIMES
+                sort_key = list(
+                    crossings.order_by("lap_time").values_list("lap_time", flat=True)
+                )
+            results.append((team, sort_key))
+
         results.sort(key=lambda x: x[1])
         return results
 
@@ -1221,9 +1251,10 @@ class Race(models.Model):
         if self.race_type not in ["Q1", "Q2", "Q3"]:
             return  # Only qualifying races have knockout rules
 
-        results = self.get_qualifying_results()
+        tiebreaker = self.round.championship.qualifying_tiebreaker
+        results = self.get_qualifying_results(tiebreaker=tiebreaker)
 
-        for rule in self.qualifyingknockoutrule_set.all():
+        for rule in self.knockout_rules.all():
             # Get eliminated teams based on position range
             # Negative indices mean from end (e.g., -5 = bottom 5)
             start_idx = rule.eliminates_to_position_range_start
@@ -1250,44 +1281,71 @@ class Race(models.Model):
                 )
 
     @staticmethod
-    def combine_qualifying_results(qualifying_races, main_race, method="best"):
+    def combine_qualifying_results(qualifying_races, main_race, tiebreaker="FIRST_SET"):
         """
         Combine results from multiple qualifying races to set grid for main race.
+        Only assigns positions to teams that are NOT already placed via KNOCKOUT.
 
         Args:
-            qualifying_races: List of Race objects (Q1, Q2, Q3, etc.)
+            qualifying_races: QuerySet/list of Race objects (Q1, Q2, Q3, etc.)
             main_race: Race object to set grid positions for
-            method: "best" (best lap) or "average" (average of best laps)
+            tiebreaker: "FIRST_SET" or "BEST_TIMES"
         """
-        combined = {}
+        # Teams already eliminated via knockout — skip them
+        knockout_team_ids = set(
+            GridPosition.objects.filter(race=main_race, source="KNOCKOUT").values_list(
+                "team_id", flat=True
+            )
+        )
+
+        combined = {}  # team -> list of (lap_time, crossing_time) or list of lap_times
 
         for race in qualifying_races:
-            for team, best_lap in race.get_qualifying_results():
-                if best_lap < dt.timedelta(hours=99):  # Valid lap time
-                    combined.setdefault(team, []).append(best_lap)
+            crossings = race.lap_crossings.filter(is_valid=True, lap_time__isnull=False)
+            for team in race.get_all_teams():
+                if team.pk in knockout_team_ids:
+                    continue
+                team_crossings = crossings.filter(team=team)
+                if not team_crossings.exists():
+                    continue
 
-        # Calculate final times
-        if method == "average":
-            final = [
-                (team, sum(times, dt.timedelta()) / len(times))
-                for team, times in combined.items()
-            ]
-        else:  # "best"
-            final = [(team, min(times)) for team, times in combined.items()]
+                if tiebreaker == "FIRST_SET":
+                    best = team_crossings.order_by("lap_time", "crossing_time").first()
+                    prev = combined.get(team)
+                    if prev is None or (best.lap_time, best.crossing_time) < prev:
+                        combined[team] = (best.lap_time, best.crossing_time)
+                else:  # BEST_TIMES
+                    lap_times = list(team_crossings.values_list("lap_time", flat=True))
+                    combined.setdefault(team, []).extend(lap_times)
 
-        # Sort by time
+        # Build final sort keys
+        if tiebreaker == "FIRST_SET":
+            final = [(team, sort_key) for team, sort_key in combined.items()]
+        else:  # BEST_TIMES
+            final = [(team, sorted(lap_times)) for team, lap_times in combined.items()]
+
         final.sort(key=lambda x: x[1])
 
+        # Clear previous COMBINED_Q positions (safe to re-run after each Q-race)
+        GridPosition.objects.filter(race=main_race, source="COMBINED_Q").delete()
+
+        # Start positions after any existing knockout positions
+        knockout_max = (
+            GridPosition.objects.filter(race=main_race, source="KNOCKOUT")
+            .aggregate(models.Max("position"))
+            .get("position__max")
+            or 0
+        )
+
         # Assign grid positions
-        for position, (team, _) in enumerate(final, 1):
-            GridPosition.objects.update_or_create(
+        for idx, (team, _) in enumerate(final):
+            position = knockout_max + idx + 1
+            GridPosition.objects.create(
                 race=main_race,
                 team=team,
-                defaults={
-                    "position": position,
-                    "source": "COMBINED_Q",
-                    "manually_overridden": False,
-                },
+                position=position,
+                source="COMBINED_Q",
+                manually_overridden=False,
             )
 
     def auto_assign_grid_positions(self, source_type="CHAMPIONSHIP"):
