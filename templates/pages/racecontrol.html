@@ -10,11 +10,27 @@
             </a>
             <h1>
                 {% if round %}
-                    {{ round.name }}&nbsp;&nbsp;Remaining Time: {% timer_widget "race-control-countdown" "countdownDisplay" round %}
+                    {% if active_race %}
+                        <span id="raceHeaderLabel">{{ round.name }} - {{ active_race.get_race_type_display }}</span>
+                        &nbsp;&nbsp;Remaining Time: {% timer_widget "race-control-countdown" "countdownDisplay" active_race %}
+                    {% else %}
+                        {{ round.name }}&nbsp;&nbsp;Remaining Time: {% timer_widget "race-control-countdown" "countdownDisplay" round %}
+                    {% endif %}
                 {% else %}
                     Race Control - No Active Round
                 {% endif %}
             </h1>
+            {% if race_sequence %}
+            <div id="raceProgressIndicator" class="d-flex justify-content-center gap-2 mt-1">
+                {% for race in race_sequence %}
+                    <span class="badge {% if race == active_race %}bg-primary{% elif race.ended %}bg-success{% else %}bg-secondary{% endif %}"
+                          data-race-type="{{ race.race_type }}"
+                          id="race-badge-{{ race.race_type }}">
+                        {{ race.get_race_type_display }}
+                    </span>
+                {% endfor %}
+            </div>
+            {% endif %}
         </div>
     </div>
     <div class="row" style="height: 90%;">
@@ -30,36 +46,48 @@
                                 <button id="preRaceCheckButton" class="btn btn-warning btn-lg me-2 mb-2 race-action-btn"
                                         data-action="pre_check"
                                         data-url="{% url 'preracecheck' %}"
-                                        {% if round.ready or round.started or round.ended %}hidden{% endif %}>
+                                        {% if active_race %}
+                                            {% if active_race.ready or active_race.started or active_race.ended %}hidden{% endif %}
+                                        {% else %}
+                                            {% if round.ready or round.started or round.ended %}hidden{% endif %}
+                                        {% endif %}>
                                     <i class="fas fa-tasks me-1"></i> Pre Race Check
                                 </button>
 
                                 <button id="startButton" class="btn btn-success btn-lg me-2 mb-2 race-action-btn"
                                         data-action="start"
                                         data-url="{% url 'race_start' %}"
-                                        {% if not round.ready or round.started or round.ended %}hidden{% endif %}>
-                                    <i class="fas fa-play me-1"></i> Start Race
+                                        {% if active_race %}
+                                            {% if not active_race.ready or active_race.started or active_race.ended %}hidden{% endif %}
+                                        {% else %}
+                                            {% if not round.ready or round.started or round.ended %}hidden{% endif %}
+                                        {% endif %}>
+                                    <i class="fas fa-play me-1"></i> {% if active_race %}Start {{ active_race.get_race_type_display }}{% else %}Start Race{% endif %}
                                 </button>
 
                                 <button id="pauseButton" class="btn btn-warning btn-lg me-2 mb-2 race-action-btn"
                                         data-action="pause"
                                         data-url="{% url 'racepaused' %}"
                                         {% if not round.started or round.is_paused or round.ended %}hidden{% endif %}>
-                                    <i class="fas fa-pause me-1"></i> Pause Race
+                                    <i class="fas fa-pause me-1"></i> Pause
                                 </button>
 
                                 <button id="resumeButton" class="btn btn-info btn-lg me-2 mb-2 race-action-btn"
                                         data-action="resume"
                                         data-url="{% url 'racerestart' %}"
                                         {% if not round.started or not round.is_paused or round.ended %}hidden{% endif %}>
-                                    <i class="fas fa-play-circle me-1"></i> Resume Race
+                                    <i class="fas fa-play-circle me-1"></i> Resume
                                 </button>
 
                                 <button id="endButton" class="btn btn-danger btn-lg me-2 mb-2 race-action-btn"
                                         data-action="end"
                                         data-url="{% url 'endofrace' %}"
-                                        {% if not round.started or round.ended %}hidden{% endif %}>
-                                    <i class="fas fa-stop me-1"></i> End Race
+                                        {% if active_race %}
+                                            {% if not active_race.started or active_race.ended %}hidden{% endif %}
+                                        {% else %}
+                                            {% if not round.started or round.ended %}hidden{% endif %}
+                                        {% endif %}>
+                                    <i class="fas fa-stop me-1"></i> {% if active_race %}End {{ active_race.get_race_type_display }}{% else %}End Race{% endif %}
                                 </button>
 
                                 <button id="falseStartButton" class="btn btn-secondary btn-lg me-2 mb-2 race-action-btn"
@@ -339,7 +367,11 @@ data-started="{{ round.started|yesno:'true,false' }}"
 data-ended="{{ round.ended|yesno:'true,false' }}"
 data-ready="{{ round.is_ready|yesno:'true,false' }}"
 data-lanes="{{ lanes }}"
-data-hmac-secret="{{ settings.STOPANDGO_HMAC_SECRET }}">
+data-hmac-secret="{{ settings.STOPANDGO_HMAC_SECRET }}"
+data-lap-based="{% if round and not round.uses_legacy_session_model %}true{% else %}false{% endif %}"
+data-active-race-type="{% if active_race %}{{ active_race.race_type }}{% endif %}"
+data-active-race-label="{% if active_race %}{{ active_race.get_race_type_display }}{% endif %}"
+data-round-name="{% if round %}{{ round.name }}{% endif %}">
 </div>
 
 {% endblock content %}
@@ -392,16 +424,33 @@ document.addEventListener('DOMContentLoaded', function() {
                             });
                         }
 
+                        // --- Update multi-race UI if applicable ---
+                        if (isLapBased && typeof updateMultiRaceUI === 'function') {
+                            updateMultiRaceUI(data);
+                        }
+
                         // --- Determine State from WS Data ---
                         const isStarted = data.started === true;
                         const isEnded = data.ended === true;
                         const isReady = data.ready === true;
 
                         let currentState = 'initial';
-                        if (isEnded) currentState = 'ended';
-                        else if (isStarted && isPaused) currentState = 'paused';
-                        else if (isStarted && !isPaused) currentState = 'running';
-                        else if (isReady && !isStarted) currentState = 'ready';
+                        if (isEnded && data.has_more_races) {
+                            // Race ended but more races to go — auto-advance to next pre-check
+                            currentState = 'initial';
+                            addSystemMessage(
+                                `${activeRaceLabel || 'Race'} ended. Advancing to ${data.active_race_label || 'next race'}...`,
+                                'info'
+                            );
+                        } else if (isEnded) {
+                            currentState = 'ended';
+                        } else if (isStarted && isPaused) {
+                            currentState = 'paused';
+                        } else if (isStarted && !isPaused) {
+                            currentState = 'running';
+                        } else if (isReady && !isStarted) {
+                            currentState = 'ready';
+                        }
 
                         updateButtonVisibility(currentState);
                     }

@@ -8,6 +8,7 @@ from .models import (
     team_member,
     round_team,
     Round,
+    Race,
     Session,
     PenaltyQueue,
 )
@@ -113,54 +114,79 @@ def change_lane_deleted(sender, instance, **kwargs):
     pass
 
 
+def _build_round_update_payload(cround):
+    """Build the common payload dict for round/race/pause updates."""
+    active = cround.active_race  # None for legacy rounds
+
+    if active:
+        remaining = round(
+            (active.duration - active.time_elapsed).total_seconds()
+            if active.started
+            else active.duration.total_seconds()
+        )
+        started = active.started is not None
+        ready = active.ready
+        ended = False  # active_race is always unfinished
+    else:
+        # Legacy round or all races finished
+        if not cround.uses_legacy_session_model and cround.ended:
+            # All races done
+            remaining = 0
+            started = True
+            ready = True
+            ended = True
+        else:
+            # Legacy path
+            remaining = round(
+                (cround.duration - cround.time_elapsed).total_seconds()
+                if cround.started
+                else cround.duration.total_seconds()
+            )
+            started = cround.started is not None
+            ready = cround.ready
+            ended = cround.ended is not None
+
+    return {
+        "is paused": cround.is_paused,
+        "remaining seconds": remaining,
+        "started": started,
+        "ready": ready,
+        "ended": ended,
+        "active_race_type": active.race_type if active else None,
+        "active_race_label": active.get_race_type_display() if active else None,
+        "has_more_races": active is not None,
+    }
+
+
 @receiver(post_save, sender=round_pause)
 def handle_pause_change(sender, instance, **kwargs):
     cround = instance.round
-    is_paused = cround.is_paused
-    is_ready = cround.ready
-    started = cround.started != None
-    ended = cround.ended != None
-    remaining = round((cround.duration - cround.time_elapsed).total_seconds())
+    payload = _build_round_update_payload(cround)
+    payload["type"] = "pause_update"
 
     channel_layer = get_channel_layer()
-    async_to_sync(channel_layer.group_send)(
-        f"round_{cround.id}",
-        {
-            "type": "pause_update",
-            "is paused": is_paused,
-            "remaining seconds": remaining,
-            "started": started,
-            "ready": is_ready,
-            "ended": ended,
-        },
-    )
+    async_to_sync(channel_layer.group_send)(f"round_{cround.id}", payload)
 
 
 @receiver(post_save, sender=Round)
 def handle_round_change(sender, instance, **kwargs):
     """Handle round state changes (started, ended) for timer updates"""
-    is_paused = instance.is_paused
-    is_ready = instance.ready
-    started = instance.started != None
-    ended = instance.ended != None
-    remaining = round(
-        (instance.duration - instance.time_elapsed).total_seconds()
-        if instance.started
-        else instance.duration.total_seconds()
-    )
+    payload = _build_round_update_payload(instance)
+    payload["type"] = "round_update"
 
     channel_layer = get_channel_layer()
-    async_to_sync(channel_layer.group_send)(
-        f"round_{instance.id}",
-        {
-            "type": "round_update",
-            "is paused": is_paused,
-            "remaining seconds": remaining,
-            "started": started,
-            "ready": is_ready,
-            "ended": ended,
-        },
-    )
+    async_to_sync(channel_layer.group_send)(f"round_{instance.id}", payload)
+
+
+@receiver(post_save, sender=Race)
+def handle_race_change(sender, instance, **kwargs):
+    """Handle race state changes for multi-race rounds."""
+    cround = instance.round
+    payload = _build_round_update_payload(cround)
+    payload["type"] = "round_update"
+
+    channel_layer = get_channel_layer()
+    async_to_sync(channel_layer.group_send)(f"round_{cround.id}", payload)
 
 
 @receiver(post_save, sender=Session)

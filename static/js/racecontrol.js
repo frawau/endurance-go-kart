@@ -5,6 +5,11 @@ let falseRestartTimeoutId = null;
 let falseRestartTimeoutExpired = false;
 let emptyTeamsSocketInstance = null;
 
+// Multi-race state
+let isLapBased = false;
+let activeRaceType = null;
+let activeRaceLabel = null;
+
 // Stop & Go state variables
 let stopAndGoSocket = null;
 let stopAndGoState = 'idle'; // 'idle', 'active', 'served'
@@ -352,22 +357,35 @@ function updateButtonVisibility(state, options = {}) {
   if (!options.keepFalseStart) hideFalseStartButton();
   if (!options.keepFalseRestart) hideFalseRestartButton();
 
+  // Determine label suffix for lap-based rounds
+  const raceLabel = (isLapBased && activeRaceLabel) ? activeRaceLabel : "Race";
+
   // Show buttons based on state
   switch (state) {
     case "initial": // Not ready, not started
       document.getElementById("preRaceCheckButton")?.removeAttribute("hidden");
-      document
-        .getElementById("emptyTeamsCard")
-        ?.style.setProperty("display", "block", "important");
-      document
-        .getElementById("teamSelectCard")
-        ?.style.setProperty("display", "none", "important");
+      // For multi-race auto-advance, show penalty card (teams already set up)
+      if (isLapBased && activeRaceType) {
+        document
+          .getElementById("emptyTeamsCard")
+          ?.style.setProperty("display", "none", "important");
+        document
+          .getElementById("teamSelectCard")
+          ?.style.setProperty("display", "block", "important");
+      } else {
+        document
+          .getElementById("emptyTeamsCard")
+          ?.style.setProperty("display", "block", "important");
+        document
+          .getElementById("teamSelectCard")
+          ?.style.setProperty("display", "none", "important");
+      }
       break;
     case "ready": // Ready, not started
       const startBtn = document.getElementById("startButton");
       if (startBtn) {
         startBtn.removeAttribute("hidden");
-        startBtn.innerHTML = '<i class="fas fa-play me-1"></i> Start Race';
+        startBtn.innerHTML = `<i class="fas fa-play me-1"></i> Start ${raceLabel}`;
         startBtn.disabled = false;
       }
       document
@@ -410,14 +428,30 @@ function updateButtonVisibility(state, options = {}) {
       } else {
         document.getElementById("pauseButton")?.removeAttribute("hidden");
       }
+      // Show end button during running state
+      {
+        const endBtn = document.getElementById("endButton");
+        if (endBtn) {
+          endBtn.removeAttribute("hidden");
+          endBtn.innerHTML = `<i class="fas fa-stop me-1"></i> End ${raceLabel}`;
+        }
+      }
       break;
 
     case "paused": // Started, paused
       const resumeBtn = document.getElementById("resumeButton");
       if (resumeBtn) {
         resumeBtn.removeAttribute("hidden");
-        resumeBtn.innerHTML = '<i class="fas fa-play-circle me-1"></i> Resume Race';
+        resumeBtn.innerHTML = '<i class="fas fa-play-circle me-1"></i> Resume';
         resumeBtn.disabled = false;
+      }
+      // Show end button during paused state too
+      {
+        const endBtnP = document.getElementById("endButton");
+        if (endBtnP) {
+          endBtnP.removeAttribute("hidden");
+          endBtnP.innerHTML = `<i class="fas fa-stop me-1"></i> End ${raceLabel}`;
+        }
       }
       break;
     case "ended": // Ended
@@ -538,15 +572,24 @@ async function handleRaceAction(event) {
             options = { showFalseRestart: true };
             break; // Resume goes back to running
           case "end":
-            nextState = "ended";
-            // Add penalty count message if penalties were created
-            if (data.penalty_count > 0) {
+            if (data.has_next_race) {
+              // Multi-race: advance to next race's pre-check
+              nextState = "initial";
               addSystemMessage(
-                `Race ended. ${data.penalty_count} post-race penalties applied.`,
+                `${activeRaceLabel || 'Race'} ended. Advancing to ${data.next_race_label || 'next race'}...`,
                 "info"
               );
             } else {
-              addSystemMessage("Race ended successfully.", "success");
+              nextState = "ended";
+              // Add penalty count message if penalties were created
+              if (data.penalty_count > 0) {
+                addSystemMessage(
+                  `Race ended. ${data.penalty_count} post-race penalties applied.`,
+                  "info"
+                );
+              } else {
+                addSystemMessage("Race ended successfully.", "success");
+              }
             }
             break;
           case "false_start":
@@ -701,6 +744,15 @@ document.addEventListener("DOMContentLoaded", () => {
     console.log('HMAC secret not loaded yet, trying again...');
     loadHmacSecret();
   }
+
+  // Initialize multi-race state from data attributes
+  const roundDataEl = document.getElementById('round-data');
+  if (roundDataEl) {
+    isLapBased = roundDataEl.dataset.lapBased === 'true';
+    activeRaceType = roundDataEl.dataset.activeRaceType || null;
+    activeRaceLabel = roundDataEl.dataset.activeRaceLabel || null;
+  }
+
   // Add listeners to all race action buttons
   const actionButtons = document.querySelectorAll(".race-action-btn");
   actionButtons.forEach((button) => {
@@ -1383,7 +1435,7 @@ function resetStopAndGoForm() {
  */
 function updateFenceButton() {
   const toggleFenceButton = document.getElementById('toggleFenceButton');
-  
+
   if (toggleFenceButton && fenceEnabled !== null) {
     if (fenceEnabled) {
       toggleFenceButton.style.backgroundColor = '#28a745';
@@ -1394,6 +1446,66 @@ function updateFenceButton() {
       toggleFenceButton.style.color = 'black';
       toggleFenceButton.textContent = 'Toggle Fence';
     }
+  }
+}
+
+/**
+ * Update multi-race UI elements (header label, progress badges) from WS data.
+ */
+function updateMultiRaceUI(data) {
+  if (!isLapBased) return;
+
+  const newType = data.active_race_type;
+  const newLabel = data.active_race_label;
+
+  // Update cached state
+  activeRaceType = newType;
+  activeRaceLabel = newLabel;
+
+  // Update header label
+  const headerLabel = document.getElementById('raceHeaderLabel');
+  const roundData = document.getElementById('round-data');
+  const roundName = roundData ? roundData.dataset.roundName : '';
+  if (headerLabel) {
+    if (newLabel) {
+      headerLabel.textContent = `${roundName} - ${newLabel}`;
+    } else {
+      headerLabel.textContent = roundName;
+    }
+  }
+
+  // Update progress badges
+  const badges = document.querySelectorAll('#raceProgressIndicator .badge');
+  badges.forEach(badge => {
+    const badgeType = badge.dataset.raceType;
+    if (badgeType === newType) {
+      badge.className = 'badge bg-primary';
+    } else if (!badge.classList.contains('bg-success')) {
+      // Not already marked as completed — mark completed if it's before the active one
+      // Simple heuristic: if badge is not active and not already success, leave as secondary
+      badge.className = 'badge bg-secondary';
+    }
+  });
+
+  // Mark all badges before the active one as completed (success)
+  let foundActive = false;
+  badges.forEach(badge => {
+    const badgeType = badge.dataset.raceType;
+    if (badgeType === newType) {
+      foundActive = true;
+      badge.className = 'badge bg-primary';
+    } else if (!foundActive) {
+      badge.className = 'badge bg-success';
+    } else {
+      badge.className = 'badge bg-secondary';
+    }
+  });
+
+  // If no active race (all done), mark all as success
+  if (!newType) {
+    badges.forEach(badge => {
+      badge.className = 'badge bg-success';
+    });
   }
 }
 

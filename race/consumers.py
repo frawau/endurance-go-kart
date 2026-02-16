@@ -244,6 +244,9 @@ class RoundConsumer(AsyncWebsocketConsumer):
                     "started": event["started"],
                     "ready": event["ready"],
                     "ended": event["ended"],
+                    "active_race_type": event.get("active_race_type"),
+                    "active_race_label": event.get("active_race_label"),
+                    "has_more_races": event.get("has_more_races"),
                 }
             )
         )
@@ -275,6 +278,9 @@ class RoundConsumer(AsyncWebsocketConsumer):
                     "started": event["started"],
                     "ready": event["ready"],
                     "ended": event["ended"],
+                    "active_race_type": event.get("active_race_type"),
+                    "active_race_label": event.get("active_race_label"),
+                    "has_more_races": event.get("has_more_races"),
                 }
             )
         )

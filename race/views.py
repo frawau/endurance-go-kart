@@ -322,6 +322,10 @@ def racecontrol(request):
 
             # Add as property to the session object
             session.team_completed_count = completed_count
+        active_race = cround.active_race
+        race_sequence = (
+            list(cround.races.all()) if not cround.uses_legacy_session_model else []
+        )
         return render(
             request,
             "pages/racecontrol.html",
@@ -330,6 +334,8 @@ def racecontrol(request):
                 "lanes": lanes,
                 "pending_sessions": pending_sessions,
                 "settings": {"STOPANDGO_HMAC_SECRET": settings.STOPANDGO_HMAC_SECRET},
+                "active_race": active_race,
+                "race_sequence": race_sequence,
             },
         )
     except:
@@ -351,6 +357,12 @@ def preracecheck(request):
     if res:
         return JsonResponse({"result": False, "error": res})
 
+    # For lap-based rounds, also mark the active race as ready
+    active_race = cround.active_race
+    if active_race and not active_race.ready:
+        active_race.ready = True
+        active_race.save()
+
     return JsonResponse({"result": True})
 
 
@@ -358,21 +370,44 @@ def preracecheck(request):
 @user_passes_test(is_race_director)
 def race_start(request):
     cround = current_round()
-    cround.start_race()
+    active_race = cround.active_race
 
-    # For lap-based timing: auto-clone transponder assignments for races
-    # that depend on another race with existing assignments
-    if not cround.uses_legacy_session_model:
-        for race in cround.races.filter(depends_on_race__isnull=False).order_by(
-            "sequence_number"
-        ):
-            source = race.depends_on_race
+    if active_race:
+        # ---- Lap-based: start the active race ----
+        now = dt.datetime.now()
+        active_race.started = now
+        active_race.save()
+
+        # Set Round.started on first race start
+        if cround.started is None:
+            cround.started = now
+            cround.save()
+
+        # Clone transponder assignments from depends_on_race if needed
+        if active_race.depends_on_race:
+            source = active_race.depends_on_race
             if (
-                source
-                and RaceTransponderAssignment.objects.filter(race=source).exists()
-                and not RaceTransponderAssignment.objects.filter(race=race).exists()
+                RaceTransponderAssignment.objects.filter(race=source).exists()
+                and not RaceTransponderAssignment.objects.filter(
+                    race=active_race
+                ).exists()
             ):
-                race.clone_transponder_assignments_from(source)
+                active_race.clone_transponder_assignments_from(source)
+
+        # Start driver sessions — set Session.race on each
+        sessions = cround.session_set.filter(
+            round=cround,
+            register__isnull=False,
+            start__isnull=True,
+            end__isnull=True,
+        )
+        for session in sessions:
+            session.start = now
+            session.race = active_race
+            session.save()
+    else:
+        # ---- Legacy path ----
+        cround.start_race()
 
     return JsonResponse({"result": True})
 
@@ -381,7 +416,35 @@ def race_start(request):
 @user_passes_test(is_race_director)
 def falsestart(request):
     cround = current_round()
-    cround.false_start()
+    active_race = cround.active_race
+
+    if active_race and active_race.started:
+        # ---- Lap-based: reset the active race ----
+        # Reset sessions for this race
+        sessions = cround.session_set.filter(
+            round=cround,
+            register__isnull=False,
+            start__isnull=False,
+            end__isnull=True,
+        )
+        for session in sessions:
+            session.start = None
+            session.save()
+
+        active_race.started = None
+        active_race.save()
+
+        # If this was the first race and Round.started was just set, reset it too
+        other_started_races = cround.races.filter(started__isnull=False).exclude(
+            pk=active_race.pk
+        )
+        if not other_started_races.exists() and cround.started is not None:
+            cround.started = None
+            cround.save()
+    else:
+        # ---- Legacy path ----
+        cround.false_start()
+
     return JsonResponse({"result": True})
 
 
@@ -413,8 +476,54 @@ def falserestart(request):
 @user_passes_test(is_race_director)
 def endofrace(request):
     cround = current_round()
-    race_end_requested.send(sender=endofrace, round_id=cround.id)
-    return JsonResponse({"result": True})
+
+    # Determine which race is currently active
+    active_race = cround.active_race
+
+    if active_race:
+        # ---- Lap-based: end the active race ----
+        now = dt.datetime.now()
+        active_race.ended = now
+        active_race.save()
+
+        # End all active sessions
+        sessions = cround.session_set.filter(
+            register__isnull=False, start__isnull=False, end__isnull=True
+        )
+        for session in sessions:
+            session.end = now
+            session.save()
+
+        # Delete pending (unstarted) sessions
+        cround.session_set.filter(
+            register__isnull=False, start__isnull=True, end__isnull=True
+        ).delete()
+        ChangeLane.objects.all().delete()
+
+        # Check if there is a next race
+        next_race = cround.active_race  # re-query after saving
+        penalty_count = 0
+        if next_race is None:
+            # Last race finished — close the round
+            cround.ended = now
+            cround.save()
+            penalty_count = cround.post_race_check()
+
+        return JsonResponse(
+            {
+                "result": True,
+                "penalty_count": penalty_count,
+                "has_next_race": next_race is not None,
+                "next_race_type": next_race.race_type if next_race else None,
+                "next_race_label": next_race.get_race_type_display()
+                if next_race
+                else None,
+            }
+        )
+    else:
+        # ---- Legacy path ----
+        race_end_requested.send(sender=endofrace, round_id=cround.id)
+        return JsonResponse({"result": True})
 
 
 @csrf_exempt

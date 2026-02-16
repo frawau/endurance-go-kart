@@ -245,6 +245,13 @@ class Round(models.Model):
     )
 
     @property
+    def active_race(self):
+        """Return the first unfinished race in sequence order, or None for legacy rounds."""
+        if self.uses_legacy_session_model:
+            return None
+        return self.races.filter(ended__isnull=True).order_by("sequence_number").first()
+
+    @property
     def ongoing(self):
         if self.started is None:
             return False
@@ -928,6 +935,43 @@ class Race(models.Model):
     def __str__(self):
         return f"{self.get_race_type_display()} - {self.round.name}"
 
+    # ---- properties used by timer_widget and signals ----
+
+    @property
+    def duration(self):
+        """Effective time limit as timedelta (same interface as Round.duration)."""
+        return self.get_effective_time_limit()
+
+    @property
+    def time_elapsed(self):
+        """Wall-clock time minus pauses since this race started."""
+        if not self.started:
+            return dt.timedelta()
+        now = dt.datetime.now()
+        end = self.ended or now
+        totalpause = dt.timedelta()
+        for pause in self.round.round_pause_set.all():
+            if pause.end is None:
+                # Open pause — freeze clock at pause start
+                end = min(self.ended or pause.start, pause.start)
+            else:
+                # Closed pause — count overlap with race window
+                p_start = max(pause.start, self.started)
+                p_end = min(pause.end, self.ended or now)
+                if p_end > p_start:
+                    totalpause += p_end - p_start
+        return end - self.started - totalpause
+
+    @property
+    def is_paused(self):
+        """Delegates to the parent round."""
+        return self.round.is_paused
+
+    @property
+    def is_ready(self):
+        """Alias for template consistency with Round."""
+        return self.ready
+
     def get_effective_lap_count(self):
         """Get the effective lap count (override or round adjustment or championship default)"""
         if self.lap_count_override is not None:
@@ -1480,9 +1524,11 @@ class round_team(models.Model):
 
     @property
     def required_changes_transgression(self):
-        sess_count = Session.objects.filter(
-            driver__team=self, end__isnull=False
-        ).count()
+        sess_count = (
+            Session.objects.filter(driver__team=self, end__isnull=False)
+            .filter(Q(race__race_type="MAIN") | Q(race__isnull=True))
+            .count()
+        )
         if sess_count <= self.round.required_changes:
             return 1 + self.round.required_changes - sess_count
         return 0
@@ -1529,7 +1575,9 @@ class team_member(models.Model):
 
     @property
     def time_spent(self):
-        sessions = self.session_set.filter(driver=self, start__isnull=False)
+        sessions = self.session_set.filter(driver=self, start__isnull=False).filter(
+            Q(race__race_type="MAIN") | Q(race__isnull=True)
+        )
         total_time = dt.timedelta(0)
         now = dt.datetime.now()
         for session in sessions:
