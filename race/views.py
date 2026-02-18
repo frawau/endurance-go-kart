@@ -405,10 +405,16 @@ def race_start(request):
     if active_race:
         # ---- Lap-based: start the active race ----
         now = dt.datetime.now()
-        active_race.started = now
-        active_race.save()
 
-        # Set Round.started on first race start
+        if active_race.start_mode == "FIRST_CROSSING":
+            # Timer stays frozen — Race.started remains None until first passage
+            pass
+        else:
+            # IMMEDIATE: start the race clock now
+            active_race.started = now
+            active_race.save()
+
+        # Set Round.started on first race start (needed for timing consumer)
         if cround.started is None:
             cround.started = now
             cround.save()
@@ -448,7 +454,16 @@ def falsestart(request):
     cround = current_round()
     active_race = cround.active_race
 
-    if active_race and active_race.started:
+    # Detect armed state: FIRST_CROSSING mode where Round.started is set
+    # but Race.started is still None
+    is_armed = (
+        active_race
+        and active_race.started is None
+        and active_race.start_mode == "FIRST_CROSSING"
+        and cround.started is not None
+    )
+
+    if active_race and (active_race.started or is_armed):
         # ---- Lap-based: reset the active race ----
         # Reset sessions for this race
         sessions = cround.session_set.filter(
@@ -460,6 +475,20 @@ def falsestart(request):
         for session in sessions:
             session.start = None
             session.save()
+
+        # Delete any lap crossings recorded while armed/running
+        LapCrossing.objects.filter(race=active_race).delete()
+
+        # Delete grid order penalties created during this race
+        grid_order_penalty = ChampionshipPenalty.objects.filter(
+            championship=cround.championship,
+            penalty__name="grid order",
+        ).first()
+        if grid_order_penalty:
+            RoundPenalty.objects.filter(
+                round=cround,
+                penalty=grid_order_penalty,
+            ).delete()
 
         active_race.started = None
         active_race.save()

@@ -907,6 +907,11 @@ class Race(models.Model):
         ("PRACTICE", "Practice"),
     )
 
+    START_MODES = (
+        ("IMMEDIATE", "Immediate countdown"),
+        ("FIRST_CROSSING", "Start on first passage"),
+    )
+
     round = models.ForeignKey(Round, on_delete=models.CASCADE, related_name="races")
     race_type = models.CharField(max_length=16, choices=RACE_TYPES)
     sequence_number = models.IntegerField(
@@ -928,6 +933,13 @@ class Race(models.Model):
     )
     count_crossings_during_suspension = models.BooleanField(
         default=False, verbose_name="Count Crossings During Suspension"
+    )
+
+    start_mode = models.CharField(
+        max_length=16,
+        choices=START_MODES,
+        default="IMMEDIATE",
+        verbose_name="Start Mode",
     )
 
     # State (mirrors Round pattern)

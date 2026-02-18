@@ -371,6 +371,7 @@ data-hmac-secret="{{ settings.STOPANDGO_HMAC_SECRET }}"
 data-lap-based="{% if round and not round.uses_legacy_session_model %}true{% else %}false{% endif %}"
 data-active-race-type="{% if active_race %}{{ active_race.race_type }}{% endif %}"
 data-active-race-label="{% if active_race %}{{ active_race.get_race_type_display }}{% endif %}"
+data-start-mode="{% if active_race %}{{ active_race.start_mode }}{% endif %}"
 data-round-name="{% if round %}{{ round.name }}{% endif %}">
 </div>
 
@@ -412,6 +413,18 @@ document.addEventListener('DOMContentLoaded', function() {
                 try {
                     const data = JSON.parse(e.data);
                     console.log("Round WS received:", data);
+
+                    // Handle grid violation alerts
+                    if (data.type === 'grid_violation') {
+                        addSystemMessage(
+                            `Grid order violation: Team #${data.team_number} (${data.team_name}) ` +
+                            `crossed in position ${data.actual_position}, ` +
+                            `expected grid position ${data.expected_position}`,
+                            'warning'
+                        );
+                        return;
+                    }
+
                     if (!data.session_update) {
                         // --- Timer Update ---
                         const isPaused = data.is_paused;
@@ -448,6 +461,8 @@ document.addEventListener('DOMContentLoaded', function() {
                             currentState = 'paused';
                         } else if (isStarted && !isPaused) {
                             currentState = 'running';
+                        } else if (isReady && !isStarted && data.armed) {
+                            currentState = 'armed';
                         } else if (isReady && !isStarted) {
                             currentState = 'ready';
                         }

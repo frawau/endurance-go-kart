@@ -36,6 +36,7 @@ class Command(BaseCommand):
             ("time limit min", "Driving less than the minimum time required."),
             ("time limit", "Driving more than the maximum drive time."),
             ("required changes", "Too few driver changes."),
+            ("grid order", "Crossing the start line out of grid position order."),
         ]
         for name, description in penalties:
             penalty, created = Penalty.objects.get_or_create(

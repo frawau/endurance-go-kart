@@ -127,6 +127,8 @@ def _build_round_update_payload(cround):
         started = active.started is not None
         ready = active.ready
         ended = False  # active_race is always unfinished
+        armed = active.ready and active.started is None and cround.started is not None
+        start_mode = active.start_mode
     else:
         # Legacy round or all races finished
         if not cround.uses_legacy_session_model and cround.ended:
@@ -152,6 +154,8 @@ def _build_round_update_payload(cround):
         "started": started,
         "ready": ready,
         "ended": ended,
+        "armed": armed if active else False,
+        "start_mode": start_mode if active else None,
         "active_race_type": active.race_type if active else None,
         "active_race_label": active.get_race_type_display() if active else None,
         "has_more_races": active is not None,

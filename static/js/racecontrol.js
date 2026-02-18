@@ -9,6 +9,7 @@ let emptyTeamsSocketInstance = null;
 let isLapBased = false;
 let activeRaceType = null;
 let activeRaceLabel = null;
+let activeStartMode = null;
 
 // Stop & Go state variables
 let stopAndGoSocket = null;
@@ -395,6 +396,21 @@ function updateButtonVisibility(state, options = {}) {
         .getElementById("teamSelectCard")
         ?.style.setProperty("display", "block", "important");
       break;
+    case "armed": // FIRST_CROSSING: waiting for first passage
+      {
+        const falseStartBtn = document.getElementById("falseStartButton");
+        if (falseStartBtn) {
+          falseStartBtn.removeAttribute("hidden");
+          falseStartBtn.innerHTML = '<i class="fas fa-undo me-1"></i> False Start';
+          falseStartBtn.disabled = false;
+        }
+        const endBtn = document.getElementById("endButton");
+        if (endBtn) {
+          endBtn.removeAttribute("hidden");
+          endBtn.innerHTML = `<i class="fas fa-stop me-1"></i> End ${raceLabel}`;
+        }
+      }
+      break;
     case "running": // Ready, started
       if (options.showFalseStart) {
         const falseStartBtn = document.getElementById("falseStartButton");
@@ -561,8 +577,12 @@ async function handleRaceAction(event) {
             nextState = "ready";
             break;
           case "start":
-            nextState = "running";
-            options = { showFalseStart: true };
+            if (activeStartMode === "FIRST_CROSSING") {
+              nextState = "armed";
+            } else {
+              nextState = "running";
+              options = { showFalseStart: true };
+            }
             break;
           case "pause":
             nextState = "paused";
@@ -751,6 +771,7 @@ document.addEventListener("DOMContentLoaded", () => {
     isLapBased = roundDataEl.dataset.lapBased === 'true';
     activeRaceType = roundDataEl.dataset.activeRaceType || null;
     activeRaceLabel = roundDataEl.dataset.activeRaceLabel || null;
+    activeStartMode = roundDataEl.dataset.startMode || null;
   }
 
   // Add listeners to all race action buttons
@@ -1461,6 +1482,7 @@ function updateMultiRaceUI(data) {
   // Update cached state
   activeRaceType = newType;
   activeRaceLabel = newLabel;
+  if (data.start_mode) activeStartMode = data.start_mode;
 
   // Update header label
   const headerLabel = document.getElementById('raceHeaderLabel');

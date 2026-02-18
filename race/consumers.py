@@ -17,6 +17,9 @@ from .models import (
     Transponder,
     RaceTransponderAssignment,
     LapCrossing,
+    GridPosition,
+    ChampionshipPenalty,
+    RoundPenalty,
 )
 from django.template.loader import render_to_string
 from channels.db import database_sync_to_async
@@ -244,6 +247,8 @@ class RoundConsumer(AsyncWebsocketConsumer):
                     "started": event["started"],
                     "ready": event["ready"],
                     "ended": event["ended"],
+                    "armed": event.get("armed", False),
+                    "start_mode": event.get("start_mode"),
                     "active_race_type": event.get("active_race_type"),
                     "active_race_label": event.get("active_race_label"),
                     "has_more_races": event.get("has_more_races"),
@@ -278,9 +283,24 @@ class RoundConsumer(AsyncWebsocketConsumer):
                     "started": event["started"],
                     "ready": event["ready"],
                     "ended": event["ended"],
+                    "armed": event.get("armed", False),
+                    "start_mode": event.get("start_mode"),
                     "active_race_type": event.get("active_race_type"),
                     "active_race_label": event.get("active_race_label"),
                     "has_more_races": event.get("has_more_races"),
+                }
+            )
+        )
+
+    async def grid_violation(self, event):
+        await self.send(
+            text_data=json.dumps(
+                {
+                    "type": "grid_violation",
+                    "team_number": event["team_number"],
+                    "team_name": event["team_name"],
+                    "expected_position": event["expected_position"],
+                    "actual_position": event["actual_position"],
                 }
             )
         )
@@ -858,6 +878,12 @@ class TimingConsumer(AsyncWebsocketConsumer):
             },
         )
 
+        if result.get("grid_violation"):
+            await self.channel_layer.group_send(
+                f"round_{round_id}",
+                {"type": "grid_violation", **result["grid_violation"]},
+            )
+
         if result.get("race_finished"):
             print(f"Race {race_id} finished!")
             await self.channel_layer.group_send(
@@ -1016,9 +1042,20 @@ class TimingConsumer(AsyncWebsocketConsumer):
                 f"Time: {lap_time}, raw={raw_time}"
             )
 
+            # Trigger Race.started on first crossing (FIRST_CROSSING mode)
+            race_started = False
+            if (
+                lap_number == 1
+                and race.started is None
+                and race.start_mode != "IMMEDIATE"
+            ):
+                race.started = crossing_time
+                race.save(update_fields=["started"])
+                race_started = True
+
             race_finished = race.is_race_finished()
 
-            return {
+            result = {
                 "race_id": race.id,
                 "round_id": race.round.id,
                 "team_number": team_number,
@@ -1027,7 +1064,36 @@ class TimingConsumer(AsyncWebsocketConsumer):
                 "is_suspicious": crossing.is_suspicious,
                 "race_finished": race_finished,
                 "race_type": race.race_type if race_finished else None,
+                "race_started": race_started,
             }
+
+            # Grid order check (MAIN race only, driven by ChampionshipPenalty)
+            if lap_number == 1 and race.race_type == "MAIN":
+                grid_order_penalty = ChampionshipPenalty.objects.filter(
+                    championship=race.round.championship,
+                    penalty__name="grid order",
+                ).first()
+                if grid_order_penalty:
+                    grid_pos = GridPosition.objects.filter(race=race, team=team).first()
+                    crossing_order = LapCrossing.objects.filter(
+                        race=race, lap_number=1
+                    ).count()
+                    if grid_pos and crossing_order != grid_pos.position:
+                        RoundPenalty.objects.create(
+                            round=race.round,
+                            offender=team,
+                            penalty=grid_order_penalty,
+                            value=grid_order_penalty.value,
+                            imposed=crossing_time,
+                        )
+                        result["grid_violation"] = {
+                            "team_number": team_number,
+                            "team_name": team.team.team.name,
+                            "expected_position": grid_pos.position,
+                            "actual_position": crossing_order,
+                        }
+
+            return result
 
         except Exception as e:
             print(f"Timing: Error handling lap crossing: {e}")
