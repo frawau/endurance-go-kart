@@ -31,11 +31,21 @@
             text-transform: uppercase;
             letter-spacing: 2px;
             color: #ffffff;
+            text-align: center;
+            flex: 1;
         }
 
-        .race-info {
-            font-size: 1rem;
-            color: #d0d0d0;
+        #raceCountdown {
+            color: #ffd700;
+        }
+
+        #raceCountdown.time-low {
+            color: #ff6060;
+            animation: blink-clock 1s step-start infinite;
+        }
+
+        @keyframes blink-clock {
+            50% { opacity: 0.3; }
         }
 
         .standings-table {
@@ -161,21 +171,12 @@
 <body>
     <div class="container-fluid">
         <div class="leaderboard-header">
-            <div>
-                <div class="leaderboard-title">
-                    {{ race.round.name }} - {{ race.get_race_type_display }}
-                </div>
-                <div class="race-info">
-                    <span><strong>Mode:</strong> {{ race.get_ending_mode_display }}</span>
-                    {% if effective_lap_count %}
-                    <span class="ms-3"><strong>Laps:</strong> {{ effective_lap_count }}</span>
-                    {% endif %}
-                    {% if round_duration %}
-                    <span class="ms-3"><strong>Time:</strong> {{ round_duration.total_seconds|duration_format }}</span>
-                    {% endif %}
-                </div>
-            </div>
             <span id="wsStatus" class="ws-status ws-disconnected"><i class="fas fa-circle"></i> Disconnected</span>
+            <div class="leaderboard-title">
+                {{ race.round.name }} — {{ race.get_race_type_display }}
+                &nbsp;&nbsp;<span id="raceCountdown">--:--</span>
+            </div>
+            <span style="width:90px;"></span><!-- balance the ws-status on the left -->
         </div>
 
         {% if race.started %}
@@ -338,6 +339,33 @@
                 }
             }
         }
+
+        // Countdown timer
+        (function() {
+            const startedEpoch = {{ race_started_epoch|default:"null" }};
+            const timeLimitSeconds = {{ race_time_limit_seconds }};
+            const el = document.getElementById('raceCountdown');
+
+            function formatCountdown(seconds) {
+                if (seconds <= 0) return '00:00';
+                const h = Math.floor(seconds / 3600);
+                const m = Math.floor((seconds % 3600) / 60);
+                const s = Math.floor(seconds % 60);
+                if (h > 0) return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+                return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+            }
+
+            function tick() {
+                if (startedEpoch === null) { el.textContent = '--:--'; return; }
+                const elapsed = (Date.now() / 1000) - startedEpoch;
+                const remaining = Math.max(0, timeLimitSeconds - elapsed);
+                el.textContent = formatCountdown(remaining);
+                el.classList.toggle('time-low', remaining <= 300 && remaining > 0);
+                if (remaining > 0) setTimeout(tick, 500);
+                else el.textContent = '00:00';
+            }
+            tick();
+        })();
 
         if ({{ race.started|yesno:"true,false" }}) {
             connect();

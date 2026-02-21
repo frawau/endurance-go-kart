@@ -3418,8 +3418,9 @@ def public_leaderboard(request, race_id):
         "race": race,
         "standings": standings,
         "teams": teams,
-        "round_duration": race.round.duration,
         "effective_lap_count": race.get_effective_lap_count(),
+        "race_time_limit_seconds": int(race.get_effective_time_limit().total_seconds()),
+        "race_started_epoch": int(race.started.timestamp()) if race.started else None,
     }
 
     return render(request, "pages/public_leaderboard.html", context)
