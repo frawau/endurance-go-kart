@@ -1452,6 +1452,19 @@ class Race(models.Model):
         if not self.started:
             return []
 
+        def fmt_time(td):
+            """Format timedelta as MM:SS.mmm"""
+            if td is None:
+                return "—"
+            total_ms = int(td.total_seconds() * 1000)
+            ms = total_ms % 1000
+            total_s = total_ms // 1000
+            s = total_s % 60
+            m = total_s // 60
+            return f"{m:02d}:{s:02d}.{ms:03d}"
+
+        is_qualifying = self.race_type != "MAIN"
+
         standings = []
         for team in self.get_all_teams():
             # Get all valid lap crossings for this team
@@ -1460,7 +1473,8 @@ class Race(models.Model):
             )
 
             if laps.exists():
-                laps_completed = laps.count()
+                # First passage (lap_number=1) has no lap_time — not a completed lap
+                laps_completed = laps.filter(lap_time__isnull=False).count()
                 last_crossing = laps.last()
                 total_time = last_crossing.crossing_time - self.started
                 last_lap_time = last_crossing.lap_time
@@ -1489,32 +1503,36 @@ class Race(models.Model):
                     "retired": team.retired,
                     "laps_completed": laps_completed,
                     "total_time": total_time.total_seconds() if total_time else None,
-                    "total_time_formatted": str(total_time).split(".")[0]
-                    if total_time
-                    else "—",
+                    "total_time_formatted": fmt_time(total_time),
                     "last_lap_time": last_lap_time.total_seconds()
                     if last_lap_time
                     else None,
-                    "last_lap_time_formatted": str(last_lap_time).split(".")[0]
-                    if last_lap_time
-                    else "—",
+                    "last_lap_time_formatted": fmt_time(last_lap_time),
                     "best_lap_time": best_lap_time.total_seconds()
                     if best_lap_time
                     else None,
-                    "best_lap_time_formatted": str(best_lap_time).split(".")[0]
-                    if best_lap_time
-                    else "—",
+                    "best_lap_time_formatted": fmt_time(best_lap_time),
                     "starting_position": starting_position,
                 }
             )
 
-        # Sort by laps (desc), then total time (asc)
-        standings.sort(
-            key=lambda x: (
-                -x["laps_completed"],
-                x["total_time"] if x["total_time"] is not None else float("inf"),
+        if is_qualifying:
+            # Sort by best lap time ascending (no time = last)
+            standings.sort(
+                key=lambda x: (
+                    x["best_lap_time"]
+                    if x["best_lap_time"] is not None
+                    else float("inf"),
+                )
             )
-        )
+        else:
+            # Sort by laps (desc), then total time (asc)
+            standings.sort(
+                key=lambda x: (
+                    -x["laps_completed"],
+                    x["total_time"] if x["total_time"] is not None else float("inf"),
+                )
+            )
 
         # Add positions and gaps
         for idx, standing in enumerate(standings, 1):
@@ -1525,24 +1543,33 @@ class Race(models.Model):
                 standing["position_change"] = 0
             else:
                 car_ahead = standings[idx - 2]
-                if standing["laps_completed"] < car_ahead["laps_completed"]:
-                    lap_diff = car_ahead["laps_completed"] - standing["laps_completed"]
-                    standing[
-                        "gap_ahead"
-                    ] = f"-{lap_diff} lap{'s' if lap_diff > 1 else ''}"
-                elif standing["total_time"] and car_ahead["total_time"]:
-                    time_diff = standing["total_time"] - car_ahead["total_time"]
-                    standing["gap_ahead"] = f"+{time_diff:.1f}s"
-                else:
-                    standing["gap_ahead"] = "—"
-
-                # Calculate position change from starting grid
-                if standing["starting_position"]:
-                    standing["position_change"] = (
-                        standing["starting_position"] - standing["position"]
-                    )
-                else:
+                if is_qualifying:
+                    if standing["best_lap_time"] and car_ahead["best_lap_time"]:
+                        diff = standing["best_lap_time"] - car_ahead["best_lap_time"]
+                        standing["gap_ahead"] = f"+{diff:.3f}s"
+                    else:
+                        standing["gap_ahead"] = "—"
                     standing["position_change"] = 0
+                else:
+                    if standing["laps_completed"] < car_ahead["laps_completed"]:
+                        lap_diff = (
+                            car_ahead["laps_completed"] - standing["laps_completed"]
+                        )
+                        standing[
+                            "gap_ahead"
+                        ] = f"-{lap_diff} lap{'s' if lap_diff > 1 else ''}"
+                    elif standing["total_time"] and car_ahead["total_time"]:
+                        time_diff = standing["total_time"] - car_ahead["total_time"]
+                        standing["gap_ahead"] = f"+{time_diff:.3f}s"
+                    else:
+                        standing["gap_ahead"] = "—"
+
+                    if standing["starting_position"]:
+                        standing["position_change"] = (
+                            standing["starting_position"] - standing["position"]
+                        )
+                    else:
+                        standing["position_change"] = 0
 
         return standings
 
