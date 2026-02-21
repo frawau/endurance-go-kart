@@ -56,6 +56,40 @@ class Command(BaseCommand):
                                 self.style.SUCCESS(f"Created M2M table: {m2m_table}")
                             )
 
+        # Drop obsolete constraints (idempotent — IF EXISTS)
+        with connection.cursor() as cursor:
+            # (race, team) unique constraint on RaceTransponderAssignment was removed
+            # to allow multiple transponders per team. Drop it if it still exists.
+            cursor.execute(
+                """
+                DO $$ DECLARE rec RECORD; BEGIN
+                  FOR rec IN
+                    SELECT c.conname
+                    FROM pg_constraint c
+                    JOIN pg_class t ON c.conrelid = t.oid
+                    JOIN pg_attribute a ON a.attrelid = t.oid
+                                       AND a.attnum = ANY(c.conkey)
+                    WHERE t.relname = 'race_racetransponderassignment'
+                      AND c.contype = 'u'
+                      AND a.attname = 'team_id'
+                  LOOP
+                    EXECUTE format(
+                      'ALTER TABLE race_racetransponderassignment DROP CONSTRAINT IF EXISTS %I',
+                      rec.conname
+                    );
+                  END LOOP;
+                END $$;
+                """
+            )
+            # Named kart_number partial unique constraint also removed
+            cursor.execute(
+                "ALTER TABLE race_racetransponderassignment "
+                "DROP CONSTRAINT IF EXISTS unique_race_kart_number_when_set"
+            )
+        self.stdout.write(
+            "Checked/removed obsolete transponder assignment constraints."
+        )
+
         # Ensure 0001_initial is recorded so migrate doesn't try to re-run it
         recorder = MigrationRecorder(connection)
         if not recorder.migration_qs.filter(app="race", name="0001_initial").exists():

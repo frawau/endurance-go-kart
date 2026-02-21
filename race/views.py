@@ -3686,19 +3686,19 @@ def assign_transponder(request, race_id):
         team = get_object_or_404(round_team, id=team_id)
         transponder = get_object_or_404(Transponder, transponder_id=transponder_id)
 
-        # Default kart_number to team number if not provided
+        # Default kart_number: inherit from existing assignment, else use team number
         if not kart_number:
-            kart_number = team.number
+            existing = RaceTransponderAssignment.objects.filter(
+                race=race, team=team
+            ).first()
+            kart_number = existing.kart_number if existing else team.number
 
-        # Create or update assignment
-        assignment, created = RaceTransponderAssignment.objects.update_or_create(
+        assignment = RaceTransponderAssignment.objects.create(
             race=race,
             team=team,
-            defaults={
-                "transponder": transponder,
-                "kart_number": kart_number,
-                "confirmed": True,
-            },
+            transponder=transponder,
+            kart_number=kart_number,
+            confirmed=True,
         )
 
         return JsonResponse(
@@ -3779,9 +3779,14 @@ def lock_transponder_assignments(request, race_id):
     try:
         race = get_object_or_404(Race, id=race_id)
 
-        # Check if all teams have assignments
+        # Check if all teams have at least one assignment
         participating_teams = race.get_all_teams().count()
-        assigned_teams = RaceTransponderAssignment.objects.filter(race=race).count()
+        assigned_teams = (
+            RaceTransponderAssignment.objects.filter(race=race)
+            .values("team")
+            .distinct()
+            .count()
+        )
 
         if assigned_teams < participating_teams:
             return JsonResponse(

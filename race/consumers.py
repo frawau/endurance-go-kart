@@ -546,6 +546,7 @@ class StopAndGoConsumer(AsyncWebsocketConsumer):
                     "team_number": event["team_number"],
                     "lap_number": event["lap_number"],
                     "is_suspicious": event.get("is_suspicious", False),
+                    "crossing_id": event.get("crossing_id"),
                 }
             )
         )
@@ -875,6 +876,7 @@ class TimingConsumer(AsyncWebsocketConsumer):
                 "team_number": team_number,
                 "lap_number": lap_number,
                 "is_suspicious": is_suspicious,
+                "crossing_id": result.get("crossing_id"),
             },
         )
 
@@ -992,6 +994,22 @@ class TimingConsumer(AsyncWebsocketConsumer):
             race = assignment.race
             team = assignment.team
 
+            # Dedup: if this team already had a crossing within TRANSPONDER_DEDUP_SECONDS,
+            # this is a redundant transponder on the same kart — drop it silently.
+            TRANSPONDER_DEDUP_SECONDS = 7
+            if LapCrossing.objects.filter(
+                race=race,
+                team=team,
+                crossing_time__gt=crossing_time
+                - dt.timedelta(seconds=TRANSPONDER_DEDUP_SECONDS),
+                crossing_time__lte=crossing_time,
+            ).exists():
+                print(
+                    f"Timing: Transponder dedup — team {team.number} "
+                    f"already crossed within {TRANSPONDER_DEDUP_SECONDS}s, skipping"
+                )
+                return None
+
             # Get last crossing for this team (for lap number and raw_time reference)
             last_crossing = (
                 LapCrossing.objects.filter(race=race, team=team, is_valid=True)
@@ -1062,6 +1080,7 @@ class TimingConsumer(AsyncWebsocketConsumer):
                 "lap_number": lap_number,
                 "lap_time": lap_time,
                 "is_suspicious": crossing.is_suspicious,
+                "crossing_id": crossing.id,
                 "race_finished": race_finished,
                 "race_type": race.race_type if race_finished else None,
                 "race_started": race_started,

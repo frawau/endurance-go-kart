@@ -1884,14 +1884,6 @@ class RaceTransponderAssignment(models.Model):
         verbose_name_plural = _("Race Transponder Assignments")
         unique_together = [
             ("race", "transponder"),
-            ("race", "team"),
-        ]
-        constraints = [
-            UniqueConstraint(
-                fields=["race", "kart_number"],
-                condition=Q(kart_number__isnull=False),
-                name="unique_race_kart_number_when_set",
-            ),
         ]
 
     def __str__(self):

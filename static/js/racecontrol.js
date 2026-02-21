@@ -198,6 +198,50 @@ function addSystemMessage(message, tag) {
 }
 
 /**
+ * Show a persistent warning alert for a suspicious (possibly double) lap.
+ * The race director can split the lap at the midpoint or dismiss the alert.
+ */
+function showSuspiciousLapAlert(teamNumber, lapNumber, crossingId) {
+  const alertId = `suspicious-lap-${crossingId}`;
+  if (document.getElementById(alertId)) return; // already shown
+
+  const messagesContainer = document.getElementById("messagesContainer");
+  if (!messagesContainer) return;
+
+  const alertDiv = document.createElement("div");
+  alertDiv.id = alertId;
+  alertDiv.className = "alert alert-warning alert-dismissible fade show m-2";
+  alertDiv.setAttribute("role", "alert");
+  alertDiv.innerHTML =
+    `<strong>Suspicious lap:</strong> Team #${teamNumber}, Lap ${lapNumber} — ` +
+    `possible missed crossing (both transponders?). ` +
+    `<button class="btn btn-sm btn-warning ms-2" onclick="splitSuspiciousLap(${crossingId}, '${alertId}')">` +
+    `<i class="fas fa-cut"></i> Split Lap</button>` +
+    `<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>`;
+
+  // Insert at top of messages area and leave it until dismissed or split
+  messagesContainer.insertBefore(alertDiv, messagesContainer.firstChild);
+}
+
+function splitSuspiciousLap(crossingId, alertId) {
+  fetch(`/api/lap/${crossingId}/split/`, {
+    method: "POST",
+    headers: { "X-CSRFToken": getCookie("csrftoken") },
+  })
+    .then((r) => r.json())
+    .then((data) => {
+      if (data.success) {
+        const el = document.getElementById(alertId);
+        if (el) el.remove();
+        addSystemMessage(`Lap split successfully for crossing #${crossingId}`, "success");
+      } else {
+        addSystemMessage("Error splitting lap: " + (data.error || "unknown error"), "danger");
+      }
+    })
+    .catch(() => addSystemMessage("Failed to split lap — check connection", "danger"));
+}
+
+/**
  * Function to connect to lane sockets (Keep as is)
  */
 function connectToLaneSockets() {

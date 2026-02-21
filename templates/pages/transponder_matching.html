@@ -304,7 +304,9 @@ function renderAssignments() {
 }
 
 function updateProgress() {
-    const assignedCount = assignments.length;
+    // Count unique teams (a team may have multiple transponders)
+    const assignedTeamIds = new Set(assignments.map(a => a.team_id));
+    const assignedCount = assignedTeamIds.size;
     const percentage = totalTeams > 0 ? (assignedCount / totalTeams) * 100 : 0;
 
     const progressBar = document.getElementById('progressBar');

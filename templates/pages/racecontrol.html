@@ -425,6 +425,12 @@ document.addEventListener('DOMContentLoaded', function() {
                         return;
                     }
 
+                    // Handle suspicious lap (possible missed double-transponder crossing)
+                    if (data.type === 'race_lap_update' && data.is_suspicious && data.crossing_id) {
+                        showSuspiciousLapAlert(data.team_number, data.lap_number, data.crossing_id);
+                        return;
+                    }
+
                     if (!data.session_update) {
                         // --- Timer Update ---
                         const isPaused = data.is_paused;
