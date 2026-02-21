@@ -228,7 +228,7 @@ document.addEventListener('DOMContentLoaded', function() {
         .then(r => r.json())
         .then(data => {
             if (data.success) {
-                location.reload();
+                window.location.href = window.location.pathname;
             } else {
                 alert('Error: ' + data.error);
             }
