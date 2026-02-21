@@ -5,6 +5,8 @@ from race.models import (
     Round,
     Race,
     Session,
+    round_pause,
+    ChangeLane,
     RoundPenalty,
     PenaltyQueue,
     LapCrossing,
@@ -16,7 +18,7 @@ import datetime as dt
 class Command(BaseCommand):
     help = (
         "Reset the last started race in the current round. "
-        "Clears lap crossings, sessions, and penalties for that race, "
+        "Clears lap crossings, sessions, penalties, pauses, and pit lanes for that race, "
         "and unconfirms transponder assignments so they can be re-locked. "
         "Transponder assignments and grid positions are kept."
     )
@@ -71,6 +73,7 @@ class Command(BaseCommand):
 
         crossings_count = LapCrossing.objects.filter(race=race).count()
         sessions_count = Session.objects.filter(round=cround, race=race).count()
+
         # Penalties imposed while this race was running
         penalties_qs = RoundPenalty.objects.filter(round=cround)
         if race_started:
@@ -82,6 +85,16 @@ class Command(BaseCommand):
         penalty_queue_count = PenaltyQueue.objects.filter(
             round_penalty__in=penalties_qs
         ).count()
+
+        # Pauses that started during this race
+        pauses_qs = round_pause.objects.filter(round=cround)
+        if race_started:
+            pauses_qs = pauses_qs.filter(start__gte=race_started)
+        pauses_count = pauses_qs.count()
+
+        # Pit lane (ChangeLane) records are round-level, delete all for the round
+        changelanes_count = ChangeLane.objects.filter(round=cround).count()
+
         confirmed_assignments = RaceTransponderAssignment.objects.filter(
             race=race, confirmed=True
         ).count()
@@ -95,6 +108,8 @@ class Command(BaseCommand):
         self.stdout.write(f"Ended:      {race_ended}")
         self.stdout.write(f"\nFound {crossings_count} lap crossings to delete")
         self.stdout.write(f"Found {sessions_count} sessions to delete")
+        self.stdout.write(f"Found {pauses_count} pauses to delete")
+        self.stdout.write(f"Found {changelanes_count} pit lanes to delete")
         self.stdout.write(
             f"Found {penalty_queue_count} penalty queue entries to delete"
         )
@@ -110,6 +125,8 @@ class Command(BaseCommand):
                     "\nDRY RUN — would reset the race by:\n"
                     "- Deleting all lap crossings for this race\n"
                     "- Deleting sessions linked to this race\n"
+                    "- Deleting pauses that started during this race\n"
+                    "- Deleting all pit lane (ChangeLane) records for the round\n"
                     "- Deleting penalty queue entries and penalties imposed during this race\n"
                     "- Unconfirming transponder assignments (assignments kept)\n"
                     "- Resetting race: started=None, ended=None, ready=False\n"
@@ -127,6 +144,12 @@ class Command(BaseCommand):
 
                 n, _ = Session.objects.filter(round=cround, race=race).delete()
                 self.stdout.write(self.style.SUCCESS(f"Deleted {n} sessions"))
+
+                n, _ = pauses_qs.delete()
+                self.stdout.write(self.style.SUCCESS(f"Deleted {n} pauses"))
+
+                n, _ = ChangeLane.objects.filter(round=cround).delete()
+                self.stdout.write(self.style.SUCCESS(f"Deleted {n} pit lanes"))
 
                 n, _ = PenaltyQueue.objects.filter(
                     round_penalty__in=penalties_qs
