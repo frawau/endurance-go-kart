@@ -32,7 +32,7 @@ A comprehensive Django-based management system for endurance go-kart races and c
   - Kart number auto-defaults to team number (user can override)
   - Scan button for quick transponder detection during assignment
   - Assignments auto-clone to dependent races (Q1 assignments carry forward to Q2, Q3, MAIN)
-  - **Redundant transponders**: assign multiple transponders per team for hardware redundancy — a 7-second deduplication window ensures only one crossing per lap is counted; if both transponders miss a lap, the resulting suspicious lap is flagged in race control with a one-click split option
+  - **Redundant transponders**: assign multiple transponders per team for hardware redundancy — a 7-second deduplication window ensures only one crossing per lap is counted; if all transponders miss a lap, the resulting suspicious lap is flagged in race control with a one-click split option
 - **Qualifying Race Configuration**: Multi-session qualifying support
   - Configure 0-3 qualifying sessions (Q1, Q2, Q3) before the main race
   - Two qualifying ending modes: standard (before time) and F1-style (last lap after time)

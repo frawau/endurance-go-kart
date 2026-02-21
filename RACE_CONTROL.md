@@ -167,7 +167,7 @@ minor network delays do not cause false duplicates.
 
 #### Double transponder failure
 
-In rare cases both transponders may fail to register for the same lap. When this happens,
+In rare cases all transponders on a kart may fail to register for the same lap. When this happens,
 the team's next crossing covers two laps — its measured time will be roughly twice a normal
 lap. The system detects this automatically (> 2× the team's median lap time) and flags the
 crossing as **suspicious**.
