@@ -22,7 +22,7 @@ case "$SSL_MODE" in
         echo "SSL Setup: Configuring HTTP-only mode"
 
         # Process template for HTTP-only
-        envsubst '${APP_HOSTNAME}' < /etc/nginx/templates/default.conf.template > /tmp/nginx.conf
+        envsubst '${APP_HOSTNAME} ${APP_PORT}' < /etc/nginx/templates/default.conf.template > /tmp/nginx.conf
 
         # Keep ssl_redirect as "no" (already default in template)
 
@@ -34,7 +34,7 @@ case "$SSL_MODE" in
         echo "SSL Setup: Configuring HTTPS mode (${SSL_MODE})"
 
         # Process template for HTTPS
-        envsubst '${APP_HOSTNAME}' < /etc/nginx/templates/default.conf.template > /tmp/nginx.conf
+        envsubst '${APP_HOSTNAME} ${APP_PORT}' < /etc/nginx/templates/default.conf.template > /tmp/nginx.conf
 
         # Set ssl_redirect to "yes" for SSL modes
         sed -i 's/default "no";/default "yes";/' /tmp/nginx.conf
