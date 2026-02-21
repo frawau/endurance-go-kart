@@ -240,8 +240,6 @@
         const wsStatus = document.getElementById('wsStatus');
         let socket;
         let reconnectAttempts = 0;
-        const maxReconnectAttempts = 50;
-
         function connect() {
             socket = new WebSocket(wsUrl);
 
@@ -262,12 +260,10 @@
             socket.onclose = function() {
                 wsStatus.className = 'ws-status ws-disconnected';
                 wsStatus.innerHTML = '<i class="fas fa-circle"></i> Disconnected';
-
-                if (reconnectAttempts < maxReconnectAttempts) {
-                    reconnectAttempts++;
-                    const delay = Math.min(3000 * reconnectAttempts, 30000);
-                    setTimeout(connect, delay);
-                }
+                reconnectAttempts++;
+                // Back off up to 30s, then retry indefinitely at 30s
+                const delay = Math.min(1000 * reconnectAttempts, 30000);
+                setTimeout(connect, delay);
             };
 
             socket.onerror = function(error) {
