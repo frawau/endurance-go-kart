@@ -534,6 +534,18 @@ configure_stations() {
         log_warning "Timing config not found at $timing_toml"
     fi
 
+    # nettag-proxy — not auto-configured from .env but refresh deployed copy if present
+    local proxy_toml="$SCRIPT_DIR/proxy/nettag-proxy.toml"
+    local deployed_proxy_toml="/var/lib/nettag-proxy/nettag-proxy.toml"
+    if [ -f "$proxy_toml" ] && [ -f "$deployed_proxy_toml" ]; then
+        sudo cp "$proxy_toml" "$deployed_proxy_toml"
+        log_success "Refreshed deployed proxy config at $deployed_proxy_toml"
+        if systemctl is-active --quiet nettag-proxy; then
+            sudo systemctl restart nettag-proxy
+            log_success "Restarted nettag-proxy service"
+        fi
+    fi
+
     if [ "$missing" -eq 0 ]; then
         log_success "All station configs updated successfully"
     else
@@ -567,9 +579,14 @@ deploy_proxy() {
     log_info "Installing service as user=$PROXY_USER group=$PROXY_GROUP"
     log_info "Working directory: $PROXY_DIR"
 
-    # Create state directory for SQLite buffer
+    # Create state directory for SQLite buffer and config copy
     sudo mkdir -p "$STATE_DIR"
     sudo chown "$PROXY_USER:$PROXY_GROUP" "$STATE_DIR"
+
+    # Copy config to state dir so git pull cannot overwrite the live config
+    sudo cp "$PROXY_DIR/nettag-proxy.toml" "$STATE_DIR/nettag-proxy.toml"
+    sudo chown "$PROXY_USER:$PROXY_GROUP" "$STATE_DIR/nettag-proxy.toml"
+    log_success "Config deployed to $STATE_DIR/nettag-proxy.toml"
 
     # Generate service file from template
     sed \
@@ -586,7 +603,7 @@ deploy_proxy() {
     sudo systemctl start nettag-proxy
 
     log_success "nettag-proxy service deployed and started!"
-    log_info "Config: $PROXY_DIR/nettag-proxy.toml"
+    log_info "Config: $STATE_DIR/nettag-proxy.toml (source: $PROXY_DIR/nettag-proxy.toml)"
     log_info "Buffer: $STATE_DIR/nettag_buffer.db"
     log_info "Check status: $0 proxy-status"
     log_info "View logs: journalctl -u nettag-proxy -f"
