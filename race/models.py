@@ -301,6 +301,9 @@ class Round(models.Model):
 
     @property
     def pit_lane_open(self):
+        active = self.active_race
+        if active is not None and active.race_type != "MAIN":
+            return True
         elapsed = self.time_elapsed
         if elapsed < self.pitlane_open_after:
             return False
