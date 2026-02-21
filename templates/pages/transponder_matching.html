@@ -120,6 +120,45 @@
     </div>
 </div>
 
+<!-- Replace Transponder Modal -->
+<div class="modal fade" id="replaceTransponderModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="fas fa-exchange-alt me-2"></i>Replace Transponder</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p class="mb-3">
+                    Team: <strong id="replaceTeamName"></strong><br>
+                    Current transponder: <code id="replaceCurrentId"></code>
+                </p>
+                <label for="replaceTransponderSelect" class="form-label">Replacement transponder:</label>
+                <div class="input-group">
+                    <select id="replaceTransponderSelect" class="form-select">
+                        <option value="">-- Select Transponder --</option>
+                        {% for transponder in transponders %}
+                        <option value="{{ transponder.transponder_id }}">
+                            {{ transponder.transponder_id }}{% if transponder.description %} - {{ transponder.description }}{% endif %}
+                        </option>
+                        {% endfor %}
+                    </select>
+                    <button type="button" class="btn btn-outline-info" id="scan-btn-replace"
+                            onclick="startReplaceScan()">
+                        <i class="fas fa-broadcast-tower"></i> Scan
+                    </button>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-warning" id="confirmReplaceBtn" onclick="confirmReplace()">
+                    <i class="fas fa-exchange-alt"></i> Replace
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
 const raceId = {{ race.id }};
 const totalTeams = {{ race.get_all_teams.count }};
@@ -240,6 +279,12 @@ function renderAssignments() {
 
         const kartDisplay = assignment.kart_number || '-';
 
+        const replaceBtn = assignment.confirmed
+            ? `<button class="btn btn-sm btn-warning me-1" onclick="openReplaceModal(${assignment.id}, '${assignment.team_name}', '${assignment.transponder_id}')">
+                   <i class="fas fa-exchange-alt"></i> Replace
+               </button>`
+            : '';
+
         row.innerHTML = `
             <td><strong>${assignment.team_number}</strong></td>
             <td>${assignment.team_name}</td>
@@ -247,6 +292,7 @@ function renderAssignments() {
             <td><code>${assignment.transponder_id}</code></td>
             <td>${statusBadge}</td>
             <td>
+                ${replaceBtn}
                 <button class="btn btn-sm btn-danger" onclick="removeAssignment(${assignment.id})">
                     <i class="fas fa-trash"></i> Remove
                 </button>
@@ -363,6 +409,103 @@ function removeAssignment(assignmentId) {
     .catch(error => {
         console.error('Error:', error);
         alert('Failed to remove assignment');
+    });
+}
+
+let replaceAssignmentId = null;
+let replaceScanSocket = null;
+let replaceScanTimeout = null;
+
+function openReplaceModal(assignmentId, teamName, currentTransponderId) {
+    replaceAssignmentId = assignmentId;
+    document.getElementById('replaceTeamName').textContent = teamName;
+    document.getElementById('replaceCurrentId').textContent = currentTransponderId;
+
+    // Reset select, excluding the current transponder
+    const select = document.getElementById('replaceTransponderSelect');
+    select.value = '';
+    Array.from(select.options).forEach(opt => {
+        opt.disabled = opt.value === currentTransponderId;
+    });
+
+    new bootstrap.Modal(document.getElementById('replaceTransponderModal')).show();
+}
+
+function startReplaceScan() {
+    const btn = document.getElementById('scan-btn-replace');
+    const select = document.getElementById('replaceTransponderSelect');
+
+    if (replaceScanSocket) {
+        stopReplaceScan();
+        return;
+    }
+
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    replaceScanSocket = new WebSocket(`${wsProtocol}://${window.location.host}/ws/transponder-scan/`);
+
+    btn.innerHTML = '<i class="fas fa-spinner fa-pulse"></i> Listening...';
+    btn.classList.replace('btn-outline-info', 'btn-warning');
+
+    replaceScanSocket.onmessage = function(e) {
+        const data = JSON.parse(e.data);
+        if (data.type === 'transponder_detected') {
+            let found = false;
+            for (const opt of select.options) {
+                if (opt.value === data.transponder_id) {
+                    select.value = data.transponder_id;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                const opt = document.createElement('option');
+                opt.value = data.transponder_id;
+                opt.text = data.transponder_id + ' (scanned)';
+                select.appendChild(opt);
+                select.value = data.transponder_id;
+            }
+            stopReplaceScan();
+        }
+    };
+
+    replaceScanSocket.onerror = function() { stopReplaceScan(); };
+    replaceScanTimeout = setTimeout(stopReplaceScan, 60000);
+}
+
+function stopReplaceScan() {
+    const btn = document.getElementById('scan-btn-replace');
+    if (replaceScanSocket) { replaceScanSocket.close(); replaceScanSocket = null; }
+    if (replaceScanTimeout) { clearTimeout(replaceScanTimeout); replaceScanTimeout = null; }
+    btn.innerHTML = '<i class="fas fa-broadcast-tower"></i> Scan';
+    btn.classList.replace('btn-warning', 'btn-outline-info');
+}
+
+function confirmReplace() {
+    const transponderId = document.getElementById('replaceTransponderSelect').value;
+    if (!transponderId) { alert('Please select a replacement transponder'); return; }
+
+    const btn = document.getElementById('confirmReplaceBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Replacing...';
+
+    fetch(`/api/transponder-assignment/${replaceAssignmentId}/replace/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+        body: JSON.stringify({ transponder_id: transponderId })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            bootstrap.Modal.getInstance(document.getElementById('replaceTransponderModal')).hide();
+            loadAssignments();
+        } else {
+            alert('Error: ' + data.error);
+        }
+    })
+    .catch(() => alert('Failed to replace transponder'))
+    .finally(() => {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-exchange-alt"></i> Replace';
     });
 }
 

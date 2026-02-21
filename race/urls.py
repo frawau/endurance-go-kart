@@ -254,6 +254,11 @@ urlpatterns = [
         name="remove_transponder_assignment",
     ),
     path(
+        "api/transponder-assignment/<int:assignment_id>/replace/",
+        views.replace_transponder_assignment,
+        name="replace_transponder_assignment",
+    ),
+    path(
         "api/race/<int:race_id>/lock-transponder-assignments/",
         views.lock_transponder_assignments,
         name="lock_transponder_assignments",

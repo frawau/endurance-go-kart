@@ -293,6 +293,13 @@ def is_race_director(user):
     return user.is_authenticated and user.groups.filter(name="Race Director").exists()
 
 
+def is_admin_or_race_director(user):
+    return (
+        user.is_authenticated
+        and user.groups.filter(name__in=["Admin", "Race Director"]).exists()
+    )
+
+
 @login_required
 @user_passes_test(is_race_director)
 def racecontrol(request):
@@ -3721,6 +3728,41 @@ def remove_transponder_assignment(request, assignment_id):
             {
                 "success": True,
                 "message": f"Transponder assignment removed from Team #{team_number}",
+            }
+        )
+
+    except Exception as e:
+        return JsonResponse({"success": False, "error": str(e)}, status=400)
+
+
+@login_required
+@user_passes_test(is_admin_or_race_director)
+@csrf_exempt
+@require_POST
+def replace_transponder_assignment(request, assignment_id):
+    """Replace the transponder on a single assignment without disturbing the lock state."""
+    try:
+        assignment = get_object_or_404(RaceTransponderAssignment, id=assignment_id)
+        data = json.loads(request.body)
+        transponder_id = data.get("transponder_id")
+        if not transponder_id:
+            return JsonResponse(
+                {"success": False, "error": "transponder_id is required"}, status=400
+            )
+
+        transponder = get_object_or_404(Transponder, transponder_id=transponder_id)
+
+        old_id = assignment.transponder.transponder_id
+        assignment.transponder = transponder
+        assignment.save(update_fields=["transponder"])
+
+        return JsonResponse(
+            {
+                "success": True,
+                "message": (
+                    f"Transponder replaced for Team #{assignment.team.number}: "
+                    f"{old_id} → {transponder_id}"
+                ),
             }
         )
 
