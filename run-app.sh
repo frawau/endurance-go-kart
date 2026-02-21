@@ -50,6 +50,9 @@ else
     echo "Database already initialized - checking for new migrations..."
     python manage.py makemigrations race
     python manage.py migrate
+    # sync_race_schema adds columns/tables that makemigrations+migrate miss
+    # because Django skips 0001_initial when it is already recorded as applied.
+    python manage.py sync_race_schema
 fi
 
 # Start the application
