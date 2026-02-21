@@ -76,13 +76,45 @@ class FrameBuffer:
         return row[0] or 0
 
     def register_client(self, addr: str):
-        """Register a new client starting from the current max seq."""
+        """Register a new client starting from the current max seq.
+
+        If the client already exists with a pointer that is behind the oldest
+        available frame (stale from a previous run where frames were cleaned
+        up), advance it to the current max so it starts receiving new frames.
+        """
         now = time.time()
         current_max = self.max_seq()
         self.conn.execute(
             "INSERT OR IGNORE INTO clients (addr, last_acked_seq, last_seen) VALUES (?, ?, ?)",
             (addr, current_max, now),
         )
+        # Detect and fix stale pointer: if the next frame the client expects
+        # no longer exists in the buffer, it will never make progress.
+        row = self.conn.execute(
+            "SELECT last_acked_seq FROM clients WHERE addr = ?", (addr,)
+        ).fetchone()
+        if row:
+            oldest = self.conn.execute("SELECT MIN(seq) FROM frames").fetchone()
+            oldest_seq = oldest[0] if (oldest and oldest[0] is not None) else 1
+            if row[0] < oldest_seq - 1:
+                log.warning(
+                    "Client %s has stale pointer (seq=%d, oldest frame=%d); "
+                    "advancing to current max %d",
+                    addr,
+                    row[0],
+                    oldest_seq,
+                    current_max,
+                )
+                self.conn.execute(
+                    "UPDATE clients SET last_acked_seq = ?, last_seen = ? WHERE addr = ?",
+                    (current_max, now, addr),
+                )
+        self.conn.commit()
+
+    def clear(self):
+        """Delete all frames and clients from the buffer."""
+        self.conn.execute("DELETE FROM frames")
+        self.conn.execute("DELETE FROM clients")
         self.conn.commit()
 
     def ack_client(self, addr: str) -> int | None:
@@ -465,6 +497,11 @@ async def main():
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
         help="Log level (default: INFO)",
     )
+    parser.add_argument(
+        "--clear-db",
+        action="store_true",
+        help="Clear the frame buffer and client table, then exit",
+    )
     args = parser.parse_args()
 
     config = build_config(args)
@@ -477,6 +514,14 @@ async def main():
         level=level,
         format="%(asctime)s [%(levelname)s] %(message)s",
     )
+
+    if args.clear_db:
+        db_path = config.get("buffer", {}).get("db", "nettag_buffer.db")
+        buf = FrameBuffer(db_path)
+        buf.clear()
+        buf.close()
+        print(f"Buffer cleared: {db_path}")
+        return
 
     if not config.get("client"):
         parser.error(
