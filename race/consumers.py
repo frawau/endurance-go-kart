@@ -305,6 +305,33 @@ class RoundConsumer(AsyncWebsocketConsumer):
             )
         )
 
+    async def race_lap_update(self, event):
+        """Broadcast lap crossing updates to race control"""
+        await self.send(
+            text_data=json.dumps(
+                {
+                    "type": "race_lap_update",
+                    "race_id": event["race_id"],
+                    "team_number": event["team_number"],
+                    "lap_number": event["lap_number"],
+                    "is_suspicious": event.get("is_suspicious", False),
+                    "crossing_id": event.get("crossing_id"),
+                }
+            )
+        )
+
+    async def race_finished(self, event):
+        """Broadcast race finished notification to race control"""
+        await self.send(
+            text_data=json.dumps(
+                {
+                    "type": "race_finished",
+                    "race_id": event["race_id"],
+                    "race_type": event["race_type"],
+                }
+            )
+        )
+
 
 class StopAndGoConsumer(AsyncWebsocketConsumer):
     def __init__(self, *args, **kwargs):
