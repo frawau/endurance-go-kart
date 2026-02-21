@@ -679,13 +679,14 @@ def agent_login(request):
         if ":" in settings.APP_HOSTNAME:
             # APP_HOSTNAME already includes port
             servurl = f"{schema}://{settings.APP_HOSTNAME}"
-        elif is_external:
-            # External connection - get external port from X-Forwarded-Port or use default 8000
-            external_port = request.META.get("HTTP_X_FORWARDED_PORT", "8000")
-            servurl = f"{schema}://{settings.APP_HOSTNAME}:{external_port}"
         else:
-            # Internal connection - no port needed (uses standard 443/80)
-            servurl = f"{schema}://{settings.APP_HOSTNAME}"
+            # Use the port nginx forwarded; omit if it's a standard port for the scheme
+            forwarded_port = request.META.get("HTTP_X_FORWARDED_PORT")
+            standard_ports = {"http": "80", "https": "443"}
+            if forwarded_port and forwarded_port != standard_ports.get(schema):
+                servurl = f"{schema}://{settings.APP_HOSTNAME}:{forwarded_port}"
+            else:
+                servurl = f"{schema}://{settings.APP_HOSTNAME}"
     else:
         # Fallback to original logic if APP_HOSTNAME is not configured
         schema = request.scheme
