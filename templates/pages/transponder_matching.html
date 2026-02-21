@@ -75,8 +75,8 @@
                             <button id="refreshBtn" class="btn btn-outline-primary me-2">
                                 <i class="fas fa-sync-alt"></i> Refresh
                             </button>
-                            <button id="lockAllBtn" class="btn btn-danger">
-                                <i class="fas fa-lock"></i> Lock All Assignments
+                            <button id="lockAllBtn" class="btn btn-danger" {% if race.grid_locked %}disabled{% endif %}>
+                                <i class="fas fa-lock"></i> {% if race.grid_locked %}Assignments Locked{% else %}Lock All Assignments{% endif %}
                             </button>
                         </div>
                     </div>
@@ -107,10 +107,13 @@
 
                     <!-- Progress Indicator -->
                     <div class="mt-3">
-                        <div class="progress" style="height: 30px;">
-                            <div id="progressBar" class="progress-bar bg-success" role="progressbar" style="width: 0%;"
-                                 aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
-                                <span id="progressText">0 / 0 teams assigned</span>
+                        <div class="d-flex justify-content-between mb-1">
+                            <span class="fw-semibold">Assignment progress</span>
+                            <span id="progressText" class="fw-semibold">0 / 0 teams assigned</span>
+                        </div>
+                        <div class="progress" style="height: 20px;">
+                            <div id="progressBar" class="progress-bar bg-success" role="progressbar"
+                                 style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
                             </div>
                         </div>
                     </div>
@@ -512,7 +515,8 @@ function confirmReplace() {
 }
 
 function lockAllAssignments() {
-    const assignedCount = assignments.length;
+    const assignedTeamIds = new Set(assignments.map(a => a.team_id));
+    const assignedCount = assignedTeamIds.size;
 
     if (assignedCount < totalTeams) {
         if (!confirm(`Only ${assignedCount} of ${totalTeams} teams have transponders assigned. Lock anyway?`)) return;
@@ -531,17 +535,18 @@ function lockAllAssignments() {
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            alert(data.message);
+            lockBtn.innerHTML = '<i class="fas fa-lock"></i> Assignments Locked';
+            // keep disabled — lock is permanent until racereset
             loadAssignments();
         } else {
             alert('Error: ' + data.error);
+            lockBtn.disabled = false;
+            lockBtn.innerHTML = '<i class="fas fa-lock"></i> Lock All Assignments';
         }
     })
     .catch(error => {
         console.error('Error:', error);
         alert('Failed to lock assignments');
-    })
-    .finally(() => {
         lockBtn.disabled = false;
         lockBtn.innerHTML = '<i class="fas fa-lock"></i> Lock All Assignments';
     });
