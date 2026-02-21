@@ -519,6 +519,17 @@ configure_stations() {
         fi
 
         log_success "Updated $timing_toml"
+
+        # If the service is deployed, refresh its config copy and restart
+        local deployed_toml="/var/lib/timing-station/timing-station.toml"
+        if [ -f "$deployed_toml" ]; then
+            sudo cp "$timing_toml" "$deployed_toml"
+            log_success "Refreshed deployed config at $deployed_toml"
+            if systemctl is-active --quiet timing-station; then
+                sudo systemctl restart timing-station
+                log_success "Restarted timing-station service"
+            fi
+        fi
     else
         log_warning "Timing config not found at $timing_toml"
     fi
@@ -625,13 +636,16 @@ deploy_timing() {
     log_info "Installing dependencies..."
     "$VENV_DIR/bin/pip" install --quiet -r "$TIMING_DIR/requirements.txt"
 
-    # Generate timing-station.toml from .env values
-    log_info "Generating timing-station.toml from .env..."
-    configure_stations
-
-    # Create state directory
+    # Create state directory (must exist before copying config)
     sudo mkdir -p "$STATE_DIR"
     sudo chown "$TIMING_USER:$TIMING_GROUP" "$STATE_DIR"
+
+    # Generate timing-station.toml from .env values, then copy to state dir
+    log_info "Generating timing-station.toml from .env..."
+    configure_stations
+    sudo cp "$TIMING_DIR/timing-station.toml" "$STATE_DIR/timing-station.toml"
+    sudo chown "$TIMING_USER:$TIMING_GROUP" "$STATE_DIR/timing-station.toml"
+    log_success "Config deployed to $STATE_DIR/timing-station.toml"
 
     # Generate service file from template
     sed \
@@ -645,7 +659,7 @@ deploy_timing() {
     sudo systemctl start timing-station
 
     log_success "Timing station service deployed and started!"
-    log_info "Config: $TIMING_DIR/timing-station.toml"
+    log_info "Config: $STATE_DIR/timing-station.toml (source: $TIMING_DIR/timing-station.toml)"
     log_info "Check status: $0 timing-status"
     log_info "View logs: journalctl -u timing-station -f"
 }
