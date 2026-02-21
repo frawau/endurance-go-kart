@@ -136,6 +136,13 @@
             font-weight: bold;
         }
 
+        @keyframes row-flash {
+            0%   { background: #ffffff !important; color: #000000 !important; }
+            20%  { background: #ffeb3b !important; color: #000000 !important; }
+            100% { background: inherit; color: inherit; }
+        }
+        .row-flash td { animation: row-flash 1.4s ease-out; }
+
         .no-race-message {
             text-align: center;
             font-size: 2rem;
@@ -188,7 +195,7 @@
                 <tbody id="standingsBody">
                     {% for s in standings %}
                     <tr class="{% if s.position == 1 %}position-1{% elif s.position == 2 %}position-2{% elif s.position == 3 %}position-3{% endif %} {% if s.retired %}team-retired{% endif %}"
-                        data-team-id="{{ s.team_id }}">
+                        data-team-id="{{ s.team_id }}" data-team-number="{{ s.team_number }}">
                         <td><span class="position-badge">{{ s.position }}</span></td>
                         <td><strong>{{ s.team_number }}</strong></td>
                         <td>{{ s.team_name }}{% if s.retired %}<span class="retired-badge">RET</span>{% endif %}</td>
@@ -253,7 +260,7 @@
             socket.onmessage = function(event) {
                 const data = JSON.parse(event.data);
                 if (data.type === 'standings_update') {
-                    updateStandings(data.standings);
+                    updateStandings(data.standings, data.flash_team_number);
                 }
             };
 
@@ -271,7 +278,7 @@
             };
         }
 
-        function updateStandings(standings) {
+        function updateStandings(standings, flashTeamNumber) {
             const tbody = document.getElementById('standingsBody');
             if (standings.length === 0) return;
             // If the page loaded before the race started, standingsBody doesn't exist yet — reload
@@ -301,6 +308,7 @@
                 }
 
                 row.dataset.teamId = s.team_id;
+                row.dataset.teamNumber = s.team_number;
 
                 const retiredBadge = s.retired ? '<span class="retired-badge">RET</span>' : '';
                 const gapClass = s.gap_ahead && s.gap_ahead.includes('-') ? 'gap-laps' : 'gap-time';
@@ -318,6 +326,17 @@
 
                 tbody.appendChild(row);
             });
+
+            if (flashTeamNumber != null) {
+                const flashRow = tbody.querySelector(`[data-team-number="${flashTeamNumber}"]`);
+                if (flashRow) {
+                    flashRow.classList.remove('row-flash');
+                    // Force reflow so re-adding the class restarts the animation
+                    void flashRow.offsetWidth;
+                    flashRow.classList.add('row-flash');
+                    flashRow.addEventListener('animationend', () => flashRow.classList.remove('row-flash'), { once: true });
+                }
+            }
         }
 
         if ({{ race.started|yesno:"true,false" }}) {

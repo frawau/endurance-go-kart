@@ -1231,7 +1231,15 @@ class LeaderboardConsumer(AsyncWebsocketConsumer):
 
         standings = await self.get_current_standings()
         await self.send(
-            text_data=json.dumps({"type": "standings_update", "standings": standings})
+            text_data=json.dumps(
+                {
+                    "type": "standings_update",
+                    "standings": standings,
+                    "flash_team_number": event.get("crossing_data", {}).get(
+                        "team_number"
+                    ),
+                }
+            )
         )
 
     @database_sync_to_async
