@@ -333,15 +333,17 @@
         {
             const startedEpoch = {{ race_started_epoch|default:"null" }};
             const timeLimitSeconds = {{ race_time_limit_seconds }};
-            const elapsed = startedEpoch !== null ? (Date.now() / 1000) - startedEpoch : 0;
+            const raceStarted = startedEpoch !== null;
+            const elapsed = raceStarted ? (Date.now() / 1000) - startedEpoch : 0;
             const remaining = Math.max(0, timeLimitSeconds - elapsed);
             new TimerWidget({
                 elementId: 'raceCountdown',
                 startValue: remaining,
                 countDirection: 'down',
                 timerType: 'countdownDisplay',
+                initialPaused: !raceStarted,
                 showHours: timeLimitSeconds >= 3600,
-                limit: 300,  // go red in last 5 minutes
+                limit: 300,
             });
         }
 
