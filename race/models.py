@@ -1481,8 +1481,8 @@ class Race(models.Model):
             standings.append(
                 {
                     "team_id": team.id,
-                    "team_number": team.team.number,
-                    "team_name": team.team.name,
+                    "team_number": team.number,
+                    "team_name": team.name,
                     "retired": team.retired,
                     "laps_completed": laps_completed,
                     "total_time": total_time.total_seconds() if total_time else None,
