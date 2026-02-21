@@ -38,7 +38,7 @@ class Command(BaseCommand):
 
                     for field in model._meta.local_fields:
                         if field.column not in existing_columns:
-                            editor.add_column(model, field)
+                            editor.add_field(model, field)
                             added_columns.append(f"{table_name}.{field.column}")
                             self.stdout.write(
                                 self.style.SUCCESS(
