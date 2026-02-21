@@ -105,6 +105,91 @@ For **subsequent races** (e.g., MAIN after Q1), the race director must:
 
 Transponder assignments are automatically cloned from `depends_on_race` at start time if not already present.
 
+---
+
+## Transponder Management
+
+### Transponder Matching Page
+
+Before each race, every team must have at least one transponder assigned. Navigate to
+**Race → Transponders** (`/race/<id>/transponders/`) to manage assignments.
+
+The page shows:
+- A form to assign any registered transponder to any team (scan button for live capture)
+- The current assignment table with team number, kart number, transponder ID, and status
+- A progress bar counting how many teams have at least one transponder assigned
+- **Lock All** / individual **Replace** buttons
+
+#### Assigning a transponder
+
+1. Select the team from the dropdown.
+2. Optionally set a kart number (defaults to the team's existing kart number, or the team number if none).
+3. Choose the transponder from the dropdown or click **Scan** to capture the next crossing from the live decoder.
+4. Click **Assign**.
+
+#### Locking assignments
+
+Once all teams are assigned, click **Lock All Assignments**. This marks every assignment as
+confirmed and prevents accidental changes. The pre-race check will fail if any team has no
+assignment.
+
+#### Replacing a transponder (race director / admin only)
+
+If a transponder fails mid-race (e.g. dead battery), a confirmed assignment can be swapped
+without unlocking all assignments:
+
+1. Find the team's row in the assignment table.
+2. Click the **Replace** button (visible only on confirmed rows).
+3. Select or scan the replacement transponder in the modal.
+4. Click **Replace** — the new transponder takes effect immediately.
+
+---
+
+### Redundant Transponders (Multiple Per Team)
+
+A team can have **more than one transponder** on the same kart. This is useful as a backup:
+if one transponder fails to register for a lap, the other one will still record it.
+
+To add a second transponder to a team that already has one, simply repeat the assign process.
+The second assignment inherits the same kart number automatically.
+
+#### How deduplication works
+
+When two transponders cross the finish line for the same team, the timing station sends two
+separate crossing events within a second or two of each other. To prevent these from being
+counted as two separate laps, the system applies a **7-second deduplication window**:
+
+- The first crossing to arrive is recorded as the lap.
+- Any subsequent crossing for the same team within 7 seconds is silently discarded.
+
+This is based on the hardware timestamp from the decoder, not the server receive time, so
+minor network delays do not cause false duplicates.
+
+#### Double transponder failure
+
+In rare cases both transponders may fail to register for the same lap. When this happens,
+the team's next crossing covers two laps — its measured time will be roughly twice a normal
+lap. The system detects this automatically (> 2× the team's median lap time) and flags the
+crossing as **suspicious**.
+
+**Race control response:**
+
+When a suspicious lap is detected, an orange alert appears at the top of the Race Control
+messages panel:
+
+> **Suspicious lap:** Team #7, Lap 23 — possible missed crossing (both transponders?).
+> **[Split Lap]**
+
+Clicking **Split Lap** splits the crossing at the midpoint: two equal half-laps are created,
+the original suspicious crossing is replaced, and the alert is dismissed. If the lap was not
+actually a double (e.g. the team was genuinely slow), the race director can dismiss the alert
+without splitting.
+
+Splits can also be performed after the race from the **Lap Management** page
+(`/race/<id>/laps/`), which shows all crossings filtered by suspicious flag.
+
+---
+
 ### Start Race
 
 - Sets `Race.started = now`
