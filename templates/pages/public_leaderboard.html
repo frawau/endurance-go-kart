@@ -277,7 +277,9 @@
 
         function updateStandings(standings) {
             const tbody = document.getElementById('standingsBody');
-            if (!tbody || standings.length === 0) return;
+            if (standings.length === 0) return;
+            // If the page loaded before the race started, standingsBody doesn't exist yet — reload
+            if (!tbody) { location.reload(); return; }
 
             // Find the overall best lap time
             let overallBest = null;

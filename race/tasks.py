@@ -37,6 +37,25 @@ class RaceTasks:
                     # Nothing to do
                     return
 
+                # For non-MAIN races, pit lane is always open
+                from .models import Race
+
+                active_race = (
+                    await Race.objects.filter(
+                        round=cround, started__isnull=False, ended__isnull=True
+                    )
+                    .order_by("sequence_number")
+                    .afirst()
+                )
+                if active_race and active_race.race_type != "MAIN":
+                    change_lanes = await sync_to_async(list)(
+                        ChangeLane.objects.filter(round=cround, open=False)
+                    )
+                    for alane in change_lanes:
+                        alane.open = True
+                        await alane.asave()
+                    return
+
                 elapsed = await cround.async_time_elapsed()
                 if elapsed < cround.pitlane_open_after:
                     # Do we wait for it?
