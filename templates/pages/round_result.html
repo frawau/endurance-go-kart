@@ -55,6 +55,7 @@
                                 <th>Pos</th>
                                 <th>#</th>
                                 <th>Team</th>
+                                <th>Laps</th>
                                 <th>Best Lap</th>
                                 <th>Gap</th>
                             </tr>
@@ -64,6 +65,7 @@
                                 <th>Lap #</th>
                                 <th>Lap Time</th>
                                 <th>Diff</th>
+                                <th></th>
                                 <th></th>
                             </tr>
                         </thead>
@@ -80,6 +82,7 @@
                                 <td><span class="expand-icon">▶</span>{{ entry.position }}</td>
                                 <td>{{ entry.team_number }}</td>
                                 <td>{{ entry.team_name }}</td>
+                                <td>{{ entry.laps_completed }}</td>
                                 <td>{{ entry.best_lap_time_formatted }}</td>
                                 <td>{{ entry.gap_ahead }}</td>
                             </tr>
@@ -368,7 +371,7 @@ document.addEventListener('DOMContentLoaded', function () {
         const tr = document.createElement('tr');
         tr.className = 'lap-row show';
         tr.dataset.teamId = teamId;
-        tr.innerHTML = `<td class="col-strip"></td><td colspan="5" style="color:rgba(200,200,220,0.6);font-style:italic;">${msg}</td>`;
+        tr.innerHTML = `<td class="col-strip"></td><td colspan="6" style="color:rgba(200,200,220,0.6);font-style:italic;">${msg}</td>`;
         return tr;
     }
 
@@ -413,6 +416,7 @@ document.addEventListener('DOMContentLoaded', function () {
                         `<td><span class="expand-icon">▶</span>${entry.position}</td>` +
                         `<td>${entry.team_number}</td>` +
                         `<td>${escHtml(entry.team_name)}</td>` +
+                        `<td>${entry.laps_completed ?? '—'}</td>` +
                         `<td>${entry.best_lap_time_formatted ?? '—'}</td>` +
                         `<td>${entry.gap_ahead ?? '—'}</td>`;
                     odd = !odd;
