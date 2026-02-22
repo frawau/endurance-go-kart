@@ -1444,6 +1444,52 @@ class Race(models.Model):
         else:
             self.auto_assign_grid_positions(source_type="CHAMPIONSHIP")
 
+    def end_this_race(self):
+        """End this race and handle qualifying results / round close-out.
+
+        Model-level equivalent of the endofrace view, used by automated
+        logic (e.g. all drivers crossing the line after time expires).
+        Saving race.ended triggers the post_save signal which pushes a
+        round_update to the race control WebSocket automatically.
+        """
+        now = dt.datetime.now()
+        self.ended = now
+        self.save(update_fields=["ended"])
+
+        cround = self.round
+
+        for session in cround.session_set.filter(
+            register__isnull=False, start__isnull=False, end__isnull=True
+        ):
+            session.end = now
+            session.save()
+
+        cround.session_set.filter(
+            register__isnull=False, start__isnull=True, end__isnull=True
+        ).delete()
+
+        ChangeLane.objects.all().delete()
+
+        if self.race_type.startswith("Q"):
+            tiebreaker = cround.championship.qualifying_tiebreaker
+            main_race = cround.races.filter(race_type="MAIN").first()
+
+            if self.knockout_rules.exists():
+                self.process_qualifying_knockout()
+
+            if main_race:
+                ended_q_races = cround.races.filter(
+                    race_type__startswith="Q", ended__isnull=False
+                )
+                Race.combine_qualifying_results(
+                    ended_q_races, main_race, tiebreaker=tiebreaker
+                )
+
+        if cround.active_race is None:
+            cround.ended = now
+            cround.save()
+            cround.post_race_check()
+
     def calculate_race_standings(self):
         """
         Calculate current race standings.
@@ -1473,8 +1519,10 @@ class Race(models.Model):
             )
 
             if laps.exists():
-                # First passage (lap_number=1) has no lap_time — not a completed lap
-                laps_completed = laps.filter(lap_time__isnull=False).count()
+                # Every valid crossing after the first is a completed lap.
+                # count()-1 avoids undercounting when lap_time=None on a crossing
+                # due to identical consecutive raw_times (decoder precision issue).
+                laps_completed = max(0, laps.count() - 1)
                 last_crossing = laps.last()
                 total_time = last_crossing.crossing_time - self.started
                 last_lap_time = last_crossing.lap_time

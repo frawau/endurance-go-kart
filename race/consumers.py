@@ -1007,6 +1007,7 @@ class TimingConsumer(AsyncWebsocketConsumer):
                     transponder=transponder,
                     race__round__started__isnull=False,
                     race__round__ended__isnull=True,
+                    race__ended__isnull=True,
                 )
                 .select_related("race", "race__round", "team", "team__team")
                 .first()
@@ -1036,6 +1037,25 @@ class TimingConsumer(AsyncWebsocketConsumer):
                     f"already crossed within {TRANSPONDER_DEDUP_SECONDS}s, skipping"
                 )
                 return None
+
+            # Qualifying post-expiry logic: when the race time limit expires,
+            # each non-retired team is allowed exactly ONE more crossing (their
+            # "finishing lap"). Extra crossings — e.g. the leader completing
+            # another lap before the last-place car finishes — are dropped.
+            cutoff_time = None
+            if race.race_type != "MAIN" and race.started:
+                cutoff_time = race.started + race.get_effective_time_limit()
+
+            if cutoff_time is not None and crossing_time >= cutoff_time:
+                already_finished = LapCrossing.objects.filter(
+                    race=race, team=team, crossing_time__gte=cutoff_time
+                ).exists()
+                if already_finished:
+                    print(
+                        f"Timing: Post-expiry duplicate for team {team.number} "
+                        f"({race.race_type}), dropping"
+                    )
+                    return None
 
             # Get last crossing for this team (for lap number and raw_time reference)
             last_crossing = (
@@ -1098,7 +1118,31 @@ class TimingConsumer(AsyncWebsocketConsumer):
                 race.save(update_fields=["started"])
                 race_started = True
 
-            race_finished = race.is_race_finished()
+            # Qualifying race end: triggered by crossings, not by a timer.
+            # The race ends once every non-retired team has crossed at least
+            # once after the time limit expired.
+            race_finished = False
+            if (
+                cutoff_time is not None
+                and crossing_time >= cutoff_time
+                and not race.ended
+            ):
+                active_team_ids = set(
+                    race.round.round_team_set.filter(retired=False).values_list(
+                        "id", flat=True
+                    )
+                )
+                crossed_after_ids = set(
+                    LapCrossing.objects.filter(
+                        race=race, crossing_time__gte=cutoff_time
+                    ).values_list("team_id", flat=True)
+                )
+                if active_team_ids.issubset(crossed_after_ids):
+                    race.end_this_race()
+                    race_finished = True
+
+            if not race_finished:
+                race_finished = race.is_race_finished()
 
             result = {
                 "race_id": race.id,
