@@ -141,6 +141,7 @@ def team_carousel(request):
         "pages/teamcarousel.html",
         {
             "round": cround,
+            "active_race": cround.active_race if cround else None,
             "teams_with_limits": teams_with_limits,
             "organiser_logo": get_organiser_logo(cround),
             "sponsors_logos": get_sponsor_logos(cround),
@@ -174,6 +175,7 @@ def team_carousel_with_nav(request):
         "pages/teamcarousel_nav.html",
         {
             "round": cround,
+            "active_race": cround.active_race if cround else None,
             "teams_with_limits": teams_with_limits,
             "organiser_logo": get_organiser_logo(cround),
             "sponsors_logos": get_sponsor_logos(cround),
@@ -1329,6 +1331,7 @@ def pending_drivers(request):
 
     context = {
         "round": cround,
+        "active_race": cround.active_race,
         "pending_sessions": pending_sessions,
         "organiser_logo": get_organiser_logo(cround),
     }
@@ -1380,6 +1383,7 @@ def pending_drivers_with_nav(request):
 
     context = {
         "round": cround,
+        "active_race": cround.active_race,
         "pending_sessions": pending_sessions,
         "organiser_logo": get_organiser_logo(cround),
         "sponsors_logos": get_sponsor_logos(cround),

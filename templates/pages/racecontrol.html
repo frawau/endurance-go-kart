@@ -68,14 +68,14 @@
                                 <button id="pauseButton" class="btn btn-warning btn-lg me-2 mb-2 race-action-btn"
                                         data-action="pause"
                                         data-url="{% url 'racepaused' %}"
-                                        {% if not round.started or round.is_paused or round.ended %}hidden{% endif %}>
+                                        {% if not active_race or not active_race.started or active_race.ended or round.is_paused %}hidden{% endif %}>
                                     <i class="fas fa-pause me-1"></i> Pause
                                 </button>
 
                                 <button id="resumeButton" class="btn btn-info btn-lg me-2 mb-2 race-action-btn"
                                         data-action="resume"
                                         data-url="{% url 'racerestart' %}"
-                                        {% if not round.started or not round.is_paused or round.ended %}hidden{% endif %}>
+                                        {% if not active_race or not active_race.started or active_race.ended or not round.is_paused %}hidden{% endif %}>
                                     <i class="fas fa-play-circle me-1"></i> Resume
                                 </button>
 

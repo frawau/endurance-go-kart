@@ -52,7 +52,7 @@
     {% else %}
         <div class="row mb-4">
             <div class="col-12 text-left">
-                <h2>Remaining Time: {% timer_widget "race-countdown" "countdownDisplay" round %}&nbsp;&nbsp;&nbsp;Waiting Drivers: <span id="pending-drivers-count">{{ pending_sessions|length }}</span></h2>
+                <h2>Remaining Time: {% timer_widget "race-countdown" "countdownDisplay" active_race|default:round %}&nbsp;&nbsp;&nbsp;Waiting Drivers: <span id="pending-drivers-count">{{ pending_sessions|length }}</span></h2>
             </div>
         </div>
 
