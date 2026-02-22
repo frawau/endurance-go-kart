@@ -434,12 +434,17 @@ document.addEventListener('DOMContentLoaded', function() {
                     if (!data.session_update) {
                         // --- Timer Update ---
                         const isPaused = data.is_paused;
+                        const isStarted = data.started === true;
+
+                        // Timer should only count down when the race has actually started
+                        // and is not paused. Between races (started=false) keep it frozen.
+                        const timerEffectivelyPaused = !isStarted || isPaused;
 
                         // Handle countdown timer updates
                         if (data.remaining_seconds !== undefined && data.remaining_seconds !== null) {
                             timerRegistry.countdownTimers.forEach(timer => {
                                 timer.updateRemainingTime(data.remaining_seconds);
-                                timer.updatePauseState(isPaused);
+                                timer.updatePauseState(timerEffectivelyPaused);
                             });
                         }
 
@@ -449,14 +454,16 @@ document.addEventListener('DOMContentLoaded', function() {
                         }
 
                         // --- Determine State from WS Data ---
-                        const isStarted = data.started === true;
                         const isEnded = data.ended === true;
                         const isReady = data.ready === true;
 
                         let currentState = 'initial';
                         if (isEnded && data.has_more_races) {
-                            // Race ended but more races to go — auto-advance to next pre-check
+                            // Race ended but more races to go — update badges and reset UI
                             currentState = 'initial';
+                            if (isLapBased && typeof updateMultiRaceUI === 'function') {
+                                updateMultiRaceUI(data);
+                            }
                             addSystemMessage(
                                 `${activeRaceLabel || 'Race'} ended. Advancing to ${data.active_race_label || 'next race'}...`,
                                 'info'

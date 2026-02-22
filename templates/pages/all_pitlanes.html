@@ -58,6 +58,22 @@
             startPitLaneChecker();
         {% else %}
             // Pit lanes are available - set up WebSocket connections
+
+            // Round WebSocket: reload when the active race changes (race ends → next race)
+            const pitLaneRaceType = '{{ active_race.race_type|default:"" }}';
+            const roundSocket = new WebSocket(`${wsScheme}://${window.location.host}/ws/round/{{ round.id }}/`);
+            roundSocket.onmessage = function(e) {
+                try {
+                    const d = JSON.parse(e.data);
+                    if (!d.session_update && 'active_race_type' in d) {
+                        const newType = d.active_race_type || '';
+                        if (newType !== pitLaneRaceType) {
+                            window.location.reload();
+                        }
+                    }
+                } catch (err) {}
+            };
+
             {% for change_lane in change_lanes %}
             const socket{{ change_lane.lane }} = new WebSocket(wsScheme + "://" + window.location.host + "/ws/pitlanes/{{ change_lane.lane }}/");
             

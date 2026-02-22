@@ -287,7 +287,11 @@ def all_pitlanes(request):
     return render(
         request,
         "pages/all_pitlanes.html",
-        {"change_lanes": change_lanes, "round": cround},
+        {
+            "change_lanes": change_lanes,
+            "round": cround,
+            "active_race": cround.active_race if cround else None,
+        },
     )
 
 
