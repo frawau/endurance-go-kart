@@ -163,13 +163,15 @@ document.addEventListener('DOMContentLoaded', function() {
 
             } else {
                 const isPaused = data.is_paused;
+                // Timer should be paused if explicitly paused OR race not yet started OR race ended
+                const effectivelyPaused = isPaused || !data.started || !!data.ended;
 
                 // Handle countdown timer updates
                 if (data.remaining_seconds !== undefined && data.remaining_seconds !== null) {
                     // Normal case - update all timers based on pause state
                     timerRegistry.countdownTimers.forEach(timer => {
                         timer.updateRemainingTime(data.remaining_seconds);
-                        timer.updatePauseState(isPaused);
+                        timer.updatePauseState(effectivelyPaused);
                     });
 
                     // For all other timers, update based on round state
@@ -177,7 +179,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     timerRegistry.allTimers
                         .filter(timer => ['sessiontime', 'totaltime'].includes(timer.timerType))
                         .forEach(timer => {
-                            timer.updatePauseState(isPaused);
+                            timer.updatePauseState(effectivelyPaused);
                         });
                 }
             }

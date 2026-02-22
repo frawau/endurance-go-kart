@@ -187,13 +187,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             } else {
                 const isPaused = data.is_paused;
+                const effectivelyPaused = isPaused || !data.started || !!data.ended;
 
                 // Handle countdown timer updates
                 if (data.remaining_seconds !== undefined && data.remaining_seconds !== null) {
                     // Normal case - update all timers based on pause state
                     timerRegistry.countdownTimers.forEach(timer => {
                         timer.updateRemainingTime(data.remaining_seconds);
-                        timer.updatePauseState(isPaused);
+                        timer.updatePauseState(effectivelyPaused);
                     });
                 }
             }

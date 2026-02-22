@@ -192,6 +192,13 @@ def handle_race_change(sender, instance, **kwargs):
     channel_layer = get_channel_layer()
     async_to_sync(channel_layer.group_send)(f"round_{cround.id}", payload)
 
+    # When a race ends, notify its leaderboard to redirect to the next race
+    if instance.ended is not None:
+        async_to_sync(channel_layer.group_send)(
+            f"leaderboard_{instance.id}",
+            {"type": "race_ended", "round_id": cround.id},
+        )
+
 
 @receiver(post_save, sender=Session)
 def handle_session_change(sender, instance, **kwargs):
