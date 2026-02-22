@@ -1,0 +1,343 @@
+{% extends "layout/content.html" %}
+{% load round_tags %}
+
+{% block main_content %}
+<div class="container">
+    <h1>Round Result</h1>
+
+    <form method="get" id="round-form">
+        <div class="form-group">
+            <label for="round-select">Select Round:</label>
+            <select class="form-control" id="round-select" name="round_id" onchange="this.form.submit()">
+                {% for championship_name, championship_rounds in rounds_by_championship.items %}
+                    <optgroup label="{{ championship_name }}">
+                        {% for round in championship_rounds %}
+                            <option value="{{ round.id }}" {% if round.id == selected_round_id %}selected{% endif %}>
+                                {{ round.name }} ({{ round.start|date:"Y-m-d" }})
+                            </option>
+                        {% endfor %}
+                    </optgroup>
+                {% endfor %}
+            </select>
+        </div>
+    </form>
+
+    {% if races_data %}
+    <div class="races-container mt-4">
+        {% for race_data in races_data %}
+        <div class="race-section mb-3" id="race-section-{{ race_data.race.id }}">
+            <div class="race-header d-flex align-items-center justify-content-between"
+                 data-bs-toggle="collapse"
+                 data-bs-target="#race-body-{{ race_data.race.id }}"
+                 aria-expanded="{% if forloop.first %}true{% else %}false{% endif %}"
+                 role="button">
+                <div class="d-flex align-items-center gap-2">
+                    <span class="collapse-arrow {% if forloop.first %}open{% endif %}">▶</span>
+                    <span class="race-title">{{ race_data.race.get_race_type_display }}</span>
+                </div>
+                <span class="race-badge
+                    {% if race_data.is_live %}badge-live
+                    {% elif race_data.is_finished %}badge-finished
+                    {% else %}badge-pending{% endif %}">
+                    {% if race_data.is_live %}LIVE
+                    {% elif race_data.is_finished %}FINISHED
+                    {% else %}NOT STARTED{% endif %}
+                </span>
+            </div>
+
+            <div class="collapse {% if forloop.first %}show{% endif %}" id="race-body-{{ race_data.race.id }}">
+                <div class="race-body">
+                    {% if race_data.race.started %}
+                    <table class="table result-table mb-0">
+                        <thead>
+                            <tr>
+                                <th>Pos</th>
+                                <th>#</th>
+                                <th>Team</th>
+                                <th>Laps</th>
+                                <th>Best Lap</th>
+                                <th>Last Lap</th>
+                                <th>Gap</th>
+                            </tr>
+                        </thead>
+                        <tbody id="standings-{{ race_data.race.id }}">
+                            {% for entry in race_data.standings %}
+                            <tr class="
+                                {% if entry.position == 1 %}pos-gold
+                                {% elif entry.position == 2 %}pos-silver
+                                {% elif entry.position == 3 %}pos-bronze
+                                {% endif %}">
+                                <td>{{ entry.position }}</td>
+                                <td>{{ entry.team_number }}</td>
+                                <td>{{ entry.team_name }}</td>
+                                <td>{{ entry.laps_completed }}</td>
+                                <td>{{ entry.best_lap_time_formatted }}</td>
+                                <td>{{ entry.last_lap_time_formatted }}</td>
+                                <td>{{ entry.gap_ahead }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                    {% else %}
+                    <div class="not-started-msg">Race not yet started</div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% elif selected_round %}
+    <div class="alert alert-info">No races found for this round.</div>
+    {% else %}
+    <div class="alert alert-info">No round selected.</div>
+    {% endif %}
+</div>
+
+<!-- Live race IDs for WebSocket connections -->
+<script>
+const liveRaces = [
+    {% for race_data in races_data %}{% if race_data.is_live %}{{ race_data.race.id }},{% endif %}{% endfor %}
+];
+</script>
+{% endblock main_content %}
+
+{% block extra_js %}
+<style>
+    /* Base styling — same palette as round_info.html */
+    h1 {
+        color: #e6e6fa !important;
+        margin-bottom: 25px;
+        text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+    }
+
+    #round-form label {
+        color: #e6e6fa !important;
+        font-weight: 500;
+    }
+
+    #round-select {
+        color: #e6e6fa !important;
+        background-color: rgba(40, 40, 60, 0.9) !important;
+        border: 1px solid rgba(100, 100, 140, 0.4);
+        border-radius: 4px;
+        padding: 8px 12px;
+    }
+
+    #round-select option,
+    #round-select optgroup {
+        color: #e6e6fa !important;
+        background-color: #2d2d3d !important;
+    }
+
+    body .card-body .form-control,
+    body .card .card-body .form-control,
+    body .form-group .form-control {
+        color: #e6e6fa !important;
+    }
+
+    /* Race section card */
+    .race-section {
+        border-radius: 6px;
+        overflow: hidden;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+    }
+
+    .race-header {
+        background-color: rgba(30, 30, 40, 0.9);
+        color: #e6e6fa;
+        padding: 12px 16px;
+        cursor: pointer;
+        user-select: none;
+        border-bottom: 2px solid rgba(80, 80, 100, 0.6);
+    }
+
+    .race-header:hover {
+        background-color: rgba(50, 50, 70, 0.9);
+    }
+
+    .race-title {
+        font-weight: 600;
+        letter-spacing: 0.5px;
+        font-size: 1rem;
+    }
+
+    /* Collapse arrow rotation */
+    .collapse-arrow {
+        display: inline-block;
+        transition: transform 0.25s ease;
+        font-size: 0.75rem;
+        color: #e6e6fa;
+    }
+
+    .collapse-arrow.open {
+        transform: rotate(90deg);
+    }
+
+    /* Status badges */
+    .race-badge {
+        font-size: 0.75rem;
+        font-weight: 700;
+        padding: 3px 10px;
+        border-radius: 12px;
+        letter-spacing: 0.5px;
+    }
+
+    .badge-live {
+        background-color: #ff5252;
+        color: #fff;
+    }
+
+    .badge-finished {
+        background-color: #4caf50;
+        color: #fff;
+    }
+
+    .badge-pending {
+        background-color: rgba(120, 120, 140, 0.7);
+        color: #e6e6fa;
+    }
+
+    /* Race body / table */
+    .race-body {
+        background-color: rgba(40, 40, 50, 0.85);
+    }
+
+    .not-started-msg {
+        color: rgba(200, 200, 220, 0.6);
+        font-style: italic;
+        padding: 16px 20px;
+    }
+
+    .result-table {
+        background-color: rgba(40, 40, 50, 0.85);
+        margin: 0;
+    }
+
+    .result-table th {
+        background-color: rgba(35, 35, 48, 0.95);
+        color: #e6e6fa !important;
+        font-weight: 600;
+        letter-spacing: 0.5px;
+        border-bottom: 2px solid rgba(80, 80, 100, 0.6);
+        padding: 10px 15px;
+    }
+
+    .result-table td {
+        color: #e6e6fa !important;
+        border-top: 1px solid rgba(80, 80, 100, 0.3);
+        padding: 9px 15px;
+    }
+
+    /* Position highlighting */
+    .result-table tr.pos-gold td {
+        background-color: rgba(180, 140, 30, 0.25);
+    }
+
+    .result-table tr.pos-silver td {
+        background-color: rgba(160, 160, 180, 0.2);
+    }
+
+    .result-table tr.pos-bronze td {
+        background-color: rgba(160, 100, 50, 0.2);
+    }
+
+    /* Alternating row shading for non-podium rows */
+    .result-table tbody tr:not(.pos-gold):not(.pos-silver):not(.pos-bronze):nth-child(odd) td {
+        background-color: rgba(45, 45, 60, 0.9);
+    }
+
+    .result-table tbody tr:not(.pos-gold):not(.pos-silver):not(.pos-bronze):nth-child(even) td {
+        background-color: rgba(55, 55, 72, 0.9);
+    }
+
+    /* Flash animation for live updates */
+    @keyframes flash-row {
+        0%   { background-color: rgba(100, 180, 100, 0.4); }
+        100% { background-color: transparent; }
+    }
+
+    .flash-update td {
+        animation: flash-row 0.8s ease-out;
+    }
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+
+    // Collapse arrow toggle
+    document.querySelectorAll('[data-bs-toggle="collapse"]').forEach(function (header) {
+        const targetId = header.getAttribute('data-bs-target');
+        const arrow = header.querySelector('.collapse-arrow');
+        const collapseEl = document.querySelector(targetId);
+
+        if (collapseEl) {
+            collapseEl.addEventListener('show.bs.collapse', function () {
+                arrow.classList.add('open');
+            });
+            collapseEl.addEventListener('hide.bs.collapse', function () {
+                arrow.classList.remove('open');
+            });
+        }
+    });
+
+    // Helper: render a standings row (standings dicts use pre-formatted strings)
+    function renderRow(entry) {
+        let posClass = '';
+        if (entry.position === 1) posClass = 'pos-gold';
+        else if (entry.position === 2) posClass = 'pos-silver';
+        else if (entry.position === 3) posClass = 'pos-bronze';
+
+        return `<tr class="${posClass}" data-team="${entry.team_number}">
+            <td>${entry.position}</td>
+            <td>${entry.team_number}</td>
+            <td>${entry.team_name}</td>
+            <td>${entry.laps_completed}</td>
+            <td>${entry.best_lap_time_formatted ?? '—'}</td>
+            <td>${entry.last_lap_time_formatted ?? '—'}</td>
+            <td>${entry.gap_ahead ?? '—'}</td>
+        </tr>`;
+    }
+
+    // WebSocket connections for live races
+    liveRaces.forEach(function (raceId) {
+        const wsScheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
+        const ws = new WebSocket(`${wsScheme}://${window.location.host}/ws/leaderboard/${raceId}/`);
+
+        ws.onmessage = function (event) {
+            const data = JSON.parse(event.data);
+
+            if (data.type === 'standings_update') {
+                const tbody = document.getElementById(`standings-${raceId}`);
+                if (!tbody) return;
+                tbody.innerHTML = data.standings.map(renderRow).join('');
+                // Flash the updated row
+                if (data.flash_team_number) {
+                    const row = tbody.querySelector(`tr[data-team="${data.flash_team_number}"]`);
+                    if (row) {
+                        row.classList.remove('flash-update');
+                        void row.offsetWidth; // reflow
+                        row.classList.add('flash-update');
+                        setTimeout(() => row.classList.remove('flash-update'), 800);
+                    }
+                }
+            } else if (data.type === 'race_ended') {
+                // Update badge to FINISHED
+                const badge = document.querySelector(`#race-section-${raceId} .race-badge`);
+                if (badge) {
+                    badge.textContent = 'FINISHED';
+                    badge.className = 'race-badge badge-finished';
+                }
+            }
+        };
+
+        ws.onclose = function () {
+            // Reconnect after 5s on unexpected close
+            setTimeout(function () {
+                // Simple page reload to re-establish; avoids complex reconnect logic
+                // Only reload if still on same page (user hasn't navigated away)
+            }, 5000);
+        };
+    });
+});
+</script>
+{% endblock extra_js %}

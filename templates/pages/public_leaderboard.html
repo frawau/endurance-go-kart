@@ -256,8 +256,7 @@
                     updateStandings(data.standings, data.flash_team_number);
                 } else if (data.type === 'race_ended') {
                     if (data.next_race_url) {
-                        // Brief pause to show final standings, then switch to next race
-                        setTimeout(() => { window.location.href = data.next_race_url; }, 3000);
+                        window.location.href = data.next_race_url;
                     }
                 }
             };

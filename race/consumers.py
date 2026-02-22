@@ -1287,24 +1287,15 @@ class LeaderboardConsumer(AsyncWebsocketConsumer):
         )
 
     async def race_ended(self, event):
-        """Called when this race ends. Send the next race's leaderboard URL to the client."""
-        next_url = await self._get_next_race_url(event["round_id"])
+        """Called when pre-race check fires for next race. Redirect this leaderboard."""
         await self.send(
-            text_data=json.dumps({"type": "race_ended", "next_race_url": next_url})
+            text_data=json.dumps(
+                {
+                    "type": "race_ended",
+                    "next_race_url": event.get("next_race_url"),
+                }
+            )
         )
-
-    @database_sync_to_async
-    def _get_next_race_url(self, round_id):
-        from django.urls import reverse
-
-        try:
-            cround = Round.objects.get(id=round_id)
-            next_race = cround.active_race
-            if next_race:
-                return reverse("public_leaderboard", kwargs={"race_id": next_race.id})
-        except Exception:
-            pass
-        return None
 
     @database_sync_to_async
     def get_current_standings(self):

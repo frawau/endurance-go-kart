@@ -1488,8 +1488,13 @@ def get_available_numbers(request):
 
 
 def round_info(request):
-    # Get all rounds sorted by date
-    rounds = Round.objects.select_related("championship").all().order_by("start")
+    # Only show rounds that have at least one MAIN race
+    rounds = (
+        Round.objects.filter(races__race_type="MAIN")
+        .select_related("championship")
+        .distinct()
+        .order_by("start")
+    )
 
     # Group rounds by championship name
     rounds_by_championship = {}
@@ -1516,23 +1521,33 @@ def round_info(request):
         round_teams = round_team.objects.filter(round=selected_round)
 
         # For each team, preload related members and their sessions
+        # Restrict to MAIN race sessions only (null race = legacy rounds)
+        _main_q = Q(race__isnull=True) | Q(race__race_type="MAIN")
         for rt in round_teams:
             # Get the completed sessions count
-            rt.completed_sessions_count = Session.objects.filter(
-                round=selected_round, driver__team=rt, end__isnull=False
-            ).count()
+            rt.completed_sessions_count = (
+                Session.objects.filter(
+                    round=selected_round, driver__team=rt, end__isnull=False
+                )
+                .filter(_main_q)
+                .count()
+            )
 
             # Get all team members
             rt.members = team_member.objects.filter(team=rt)
 
             # For each member, preload their sessions
             for member in rt.members:
-                member.sessions_count = Session.objects.filter(
-                    driver=member, end__isnull=False
-                ).count()
+                member.sessions_count = (
+                    Session.objects.filter(driver=member, end__isnull=False)
+                    .filter(_main_q)
+                    .count()
+                )
 
-                member.all_sessions = Session.objects.filter(driver=member).order_by(
-                    "start"
+                member.all_sessions = (
+                    Session.objects.filter(driver=member)
+                    .filter(_main_q)
+                    .order_by("start")
                 )
 
     context = {
@@ -1545,6 +1560,55 @@ def round_info(request):
         "sponsors_logos": get_sponsor_logos(selected_round),
     }
     return render(request, "pages/round_info.html", context)
+
+
+def round_result(request):
+    """Public round result page: cascading championship → round → collapsible race leaderboards."""
+    rounds = (
+        Round.objects.filter(races__race_type="MAIN")
+        .select_related("championship")
+        .distinct()
+        .order_by("start")
+    )
+
+    rounds_by_championship = {}
+    for r in rounds:
+        rounds_by_championship.setdefault(r.championship.name, []).append(r)
+
+    selected_round_id = request.GET.get("round_id")
+    if not selected_round_id:
+        today = dt.date.today()
+        closest = rounds.filter(start__date__gte=today).first() or rounds.last()
+        selected_round_id = closest.id if closest else None
+
+    selected_round = None
+    races_data = []
+
+    if selected_round_id:
+        selected_round = get_object_or_404(Round, id=int(selected_round_id))
+        for race in selected_round.races.order_by("sequence_number"):
+            standings = race.calculate_race_standings() if race.started else []
+            races_data.append(
+                {
+                    "race": race,
+                    "standings": standings,
+                    "is_live": bool(race.started and not race.ended),
+                    "is_finished": bool(race.ended),
+                }
+            )
+
+    return render(
+        request,
+        "pages/round_result.html",
+        {
+            "rounds_by_championship": rounds_by_championship,
+            "selected_round": selected_round,
+            "selected_round_id": int(selected_round_id) if selected_round_id else None,
+            "races_data": races_data,
+            "organiser_logo": get_organiser_logo(selected_round),
+            "sponsors_logos": get_sponsor_logos(selected_round),
+        },
+    )
 
 
 def round_penalties(request):
@@ -3413,6 +3477,21 @@ def auto_assign_from_championship(request, race_id):
 def public_leaderboard(request, race_id):
     """Public full-screen leaderboard display"""
     race = get_object_or_404(Race, id=race_id)
+
+    # If this race ended and the next race already has pre-race check, redirect there
+    if race.ended:
+        next_race = (
+            Race.objects.filter(
+                round=race.round,
+                sequence_number__gt=race.sequence_number,
+                ready=True,
+                ended__isnull=True,
+            )
+            .order_by("sequence_number")
+            .first()
+        )
+        if next_race:
+            return redirect("public_leaderboard", race_id=next_race.id)
 
     # Get initial standings or pre-race team list
     standings = race.calculate_race_standings() if race.started else []

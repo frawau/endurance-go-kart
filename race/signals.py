@@ -9,6 +9,7 @@ from .models import (
     round_team,
     Round,
     Race,
+    RaceTransponderAssignment,
     Session,
     PenaltyQueue,
 )
@@ -192,12 +193,36 @@ def handle_race_change(sender, instance, **kwargs):
     channel_layer = get_channel_layer()
     async_to_sync(channel_layer.group_send)(f"round_{cround.id}", payload)
 
-    # When a race ends, notify its leaderboard to redirect to the next race
-    if instance.ended is not None:
-        async_to_sync(channel_layer.group_send)(
-            f"leaderboard_{instance.id}",
-            {"type": "race_ended", "round_id": cround.id},
+    # When pre-race check fires for a new race:
+    if instance.ready and instance.started is None and instance.ended is None:
+        # Tell the previous race's leaderboard to redirect here
+        prev_ended = (
+            Race.objects.filter(
+                round=cround,
+                sequence_number__lt=instance.sequence_number,
+                ended__isnull=False,
+            )
+            .order_by("-sequence_number")
+            .first()
         )
+        if prev_ended:
+            from django.urls import reverse
+
+            next_url = reverse("public_leaderboard", kwargs={"race_id": instance.id})
+            async_to_sync(channel_layer.group_send)(
+                f"leaderboard_{prev_ended.id}",
+                {"type": "race_ended", "next_race_url": next_url},
+            )
+
+    # When a race ends, carry over its transponder assignments to the next race
+    # so the director only needs to review/edit and click "Lock all assignments"
+    if instance.ended is not None:
+        next_race = Race.objects.filter(depends_on_race=instance).first()
+        if (
+            next_race
+            and not RaceTransponderAssignment.objects.filter(race=next_race).exists()
+        ):
+            next_race.clone_transponder_assignments_from(instance)
 
 
 @receiver(post_save, sender=Session)
