@@ -237,7 +237,7 @@ document.addEventListener('DOMContentLoaded', function () {
                             collapseTeam(otherTable, r);
                         });
                     }
-                    bootstrap.Collapse.getInstance(other)?.hide();
+                    bootstrap.Collapse.getOrCreateInstance(other).hide();
                 }
             });
         });
