@@ -29,6 +29,10 @@ class SimulatorPlugin(TimingPlugin):
         self.lap_time_min = config.get("lap_time_min", 45.0)  # seconds
         self.lap_time_max = config.get("lap_time_max", 75.0)  # seconds
         self.lap_time_variance = config.get("lap_time_variance", 5.0)  # seconds
+        # Optional: fixed transponder ID list (overrides auto-generated IDs)
+        self._fixed_transponder_ids: list = config.get("transponder_ids", [])
+        # Simulation speed: 1.0 = real-time, 10.0 = 10x faster (default)
+        self.sim_speed: float = float(config.get("sim_speed", 10.0))
 
         self.timing_mode = timing_mode
         self.rollover_seconds = rollover_seconds
@@ -43,10 +47,13 @@ class SimulatorPlugin(TimingPlugin):
 
     async def connect(self) -> bool:
         """Simulate connection"""
-        # Generate transponder IDs
-        self.transponder_ids = [
-            f"{100000 + i:06d}" for i in range(self.num_transponders)
-        ]
+        # Use fixed IDs from config if provided, otherwise auto-generate
+        if self._fixed_transponder_ids:
+            self.transponder_ids = list(self._fixed_transponder_ids)
+        else:
+            self.transponder_ids = [
+                f"{100000 + i:06d}" for i in range(self.num_transponders)
+            ]
 
         # Initialize each transponder with a base lap time
         for tid in self.transponder_ids:
@@ -155,8 +162,7 @@ class SimulatorPlugin(TimingPlugin):
                 current_time = self.race_start_time
                 wait_time = next_crossing_time - current_time
                 if wait_time > 0:
-                    # Speed up simulation (1 second real time = 10 seconds race time)
-                    await asyncio.sleep(wait_time / 10.0)
+                    await asyncio.sleep(wait_time / self.sim_speed)
 
                 self.race_start_time = next_crossing_time
 
