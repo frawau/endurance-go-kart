@@ -212,12 +212,32 @@ const liveRaces = [
 <script>
 document.addEventListener('DOMContentLoaded', function () {
 
-    /* ── Section collapse arrows ── */
+    /* ── Race section accordion + collapse arrows ── */
+    const allRaceCollapses = Array.from(
+        document.querySelectorAll('.race-section .collapse')
+    );
+
     document.querySelectorAll('[data-bs-toggle="collapse"]').forEach(function (hdr) {
         const target = document.querySelector(hdr.getAttribute('data-bs-target'));
         const arrow  = hdr.querySelector('.collapse-arrow');
         if (!target || !arrow) return;
-        target.addEventListener('show.bs.collapse', () => arrow.classList.add('open'));
+
+        target.addEventListener('show.bs.collapse', () => {
+            arrow.classList.add('open');
+            /* Close every other race section */
+            allRaceCollapses.forEach(other => {
+                if (other !== target && other.classList.contains('show')) {
+                    /* Also collapse any expanded team inside before hiding */
+                    const otherTable = other.querySelector('.result-table');
+                    if (otherTable) {
+                        otherTable.querySelectorAll('.team-row.expanded').forEach(r => {
+                            collapseTeam(otherTable, r);
+                        });
+                    }
+                    bootstrap.Collapse.getInstance(other)?.hide();
+                }
+            });
+        });
         target.addEventListener('hide.bs.collapse', () => arrow.classList.remove('open'));
     });
 
