@@ -566,9 +566,12 @@ class Command(BaseCommand):
                         )
                         if resp.status_code == 200 and resp.data.get("status") == "ok":
                             stats["has_queued"] = True
-                            stats[
-                                "change_race_time"
-                            ] = elapsed_race + avg_lap * random.randint(1, 5)
+                            laps_wait = random.choices(
+                                [1, 2, 3, 4, 5], weights=[5, 30, 45, 15, 5]
+                            )[0]
+                            stats["change_race_time"] = (
+                                elapsed_race + avg_lap * laps_wait
+                            )
                             self.log(
                                 f"[PitLane] Team {team.number}: queued {driver.member.nickname}"
                             )
