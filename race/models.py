@@ -1423,7 +1423,7 @@ class Race(models.Model):
                     transponder=a.transponder,
                     team=a.team,
                     kart_number=a.kart_number,
-                    confirmed=a.confirmed,
+                    confirmed=False,
                 )
             )
         if new_assignments:
