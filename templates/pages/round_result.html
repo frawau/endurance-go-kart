@@ -197,7 +197,9 @@ const liveRaces = [
     .result-table tr.pos-bronze td { background-color: rgba(160,100,50,0.25) !important; }
 
     /* ── Lap rows (same palette as round_info session rows) ── */
-    .result-table tr.lap-row  { background-color: rgba(70,70,80,0.7); opacity: 0; transition: opacity 0.2s ease-out; }
+    .result-table tr.lap-odd  { background-color: rgba(70,70,80,0.7); }
+    .result-table tr.lap-even { background-color: rgba(80,80,90,0.7); }
+    .result-table tr.lap-row  { opacity: 0; transition: opacity 0.2s ease-out; }
     .result-table tr.lap-row.show { opacity: 1; }
 
     /* ── Expand arrow on team rows ── */
@@ -318,7 +320,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 for (let i = data.laps.length - 1; i >= 0; i--) {
                     const lap = data.laps[i];
                     const tr = document.createElement('tr');
-                    tr.className = 'lap-row';
+                    tr.className = `lap-row ${i % 2 === 0 ? 'lap-odd' : 'lap-even'}`;
                     tr.dataset.teamId = teamId;
                     tr.style.display = 'table-row';
                     tr.innerHTML =
