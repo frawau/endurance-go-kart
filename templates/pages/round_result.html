@@ -48,31 +48,39 @@
             <div class="collapse {% if forloop.first %}show{% endif %}" id="race-body-{{ race_data.race.id }}">
                 <div class="race-body">
                     {% if race_data.race.started %}
-                    <table class="table result-table mb-0">
+                    <table class="table result-table mb-0" data-race-id="{{ race_data.race.id }}">
                         <thead>
-                            <tr>
+                            <tr class="header-standings">
+                                <th class="col-strip"></th>
                                 <th>Pos</th>
                                 <th>#</th>
                                 <th>Team</th>
-                                <th>Laps</th>
                                 <th>Best Lap</th>
-                                <th>Last Lap</th>
                                 <th>Gap</th>
                             </tr>
+                            <tr class="header-laps" style="display:none;">
+                                <th class="col-strip"></th>
+                                <th>Driver</th>
+                                <th>Lap #</th>
+                                <th>Lap Time</th>
+                                <th>Diff</th>
+                                <th></th>
+                            </tr>
                         </thead>
-                        <tbody id="standings-{{ race_data.race.id }}">
+                        <tbody>
                             {% for entry in race_data.standings %}
-                            <tr class="
+                            <tr class="team-row {% cycle 'team-odd' 'team-even' as row_colors %}
                                 {% if entry.position == 1 %}pos-gold
                                 {% elif entry.position == 2 %}pos-silver
                                 {% elif entry.position == 3 %}pos-bronze
-                                {% endif %}">
-                                <td>{{ entry.position }}</td>
+                                {% endif %}"
+                                data-team-id="{{ entry.team_id }}"
+                                data-race-id="{{ race_data.race.id }}">
+                                <td class="col-strip"></td>
+                                <td><span class="expand-icon">▶</span>{{ entry.position }}</td>
                                 <td>{{ entry.team_number }}</td>
                                 <td>{{ entry.team_name }}</td>
-                                <td>{{ entry.laps_completed }}</td>
                                 <td>{{ entry.best_lap_time_formatted }}</td>
-                                <td>{{ entry.last_lap_time_formatted }}</td>
                                 <td>{{ entry.gap_ahead }}</td>
                             </tr>
                             {% endfor %}
@@ -93,7 +101,6 @@
     {% endif %}
 </div>
 
-<!-- Live race IDs for WebSocket connections -->
 <script>
 const liveRaces = [
     {% for race_data in races_data %}{% if race_data.is_live %}{{ race_data.race.id }},{% endif %}{% endfor %}
@@ -103,202 +110,265 @@ const liveRaces = [
 
 {% block extra_js %}
 <style>
-    /* Base styling — same palette as round_info.html */
+    /* ── Global ── */
     h1 {
         color: #e6e6fa !important;
         margin-bottom: 25px;
-        text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+        text-shadow: 0 2px 4px rgba(0,0,0,0.3);
     }
-
-    #round-form label {
-        color: #e6e6fa !important;
-        font-weight: 500;
-    }
-
+    #round-form label { color: #e6e6fa !important; font-weight: 500; }
     #round-select {
         color: #e6e6fa !important;
-        background-color: rgba(40, 40, 60, 0.9) !important;
-        border: 1px solid rgba(100, 100, 140, 0.4);
+        background-color: rgba(40,40,60,0.9) !important;
+        border: 1px solid rgba(100,100,140,0.4);
         border-radius: 4px;
         padding: 8px 12px;
     }
-
-    #round-select option,
-    #round-select optgroup {
+    #round-select option, #round-select optgroup {
         color: #e6e6fa !important;
         background-color: #2d2d3d !important;
     }
-
     body .card-body .form-control,
     body .card .card-body .form-control,
-    body .form-group .form-control {
-        color: #e6e6fa !important;
-    }
+    body .form-group .form-control { color: #e6e6fa !important; }
 
-    /* Race section card */
-    .race-section {
-        border-radius: 6px;
-        overflow: hidden;
-        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
-    }
-
+    /* ── Race section card ── */
+    .race-section { border-radius: 6px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.2); }
     .race-header {
-        background-color: rgba(30, 30, 40, 0.9);
+        background-color: rgba(30,30,40,0.9);
         color: #e6e6fa;
         padding: 12px 16px;
         cursor: pointer;
         user-select: none;
-        border-bottom: 2px solid rgba(80, 80, 100, 0.6);
+        border-bottom: 2px solid rgba(80,80,100,0.6);
     }
+    .race-header:hover { background-color: rgba(50,50,70,0.9); }
+    .race-title { font-weight: 600; letter-spacing: 0.5px; font-size: 1rem; }
 
-    .race-header:hover {
-        background-color: rgba(50, 50, 70, 0.9);
-    }
-
-    .race-title {
-        font-weight: 600;
-        letter-spacing: 0.5px;
-        font-size: 1rem;
-    }
-
-    /* Collapse arrow rotation */
     .collapse-arrow {
         display: inline-block;
         transition: transform 0.25s ease;
         font-size: 0.75rem;
-        color: #e6e6fa;
     }
+    .collapse-arrow.open { transform: rotate(90deg); }
 
-    .collapse-arrow.open {
-        transform: rotate(90deg);
-    }
-
-    /* Status badges */
     .race-badge {
-        font-size: 0.75rem;
-        font-weight: 700;
-        padding: 3px 10px;
-        border-radius: 12px;
-        letter-spacing: 0.5px;
+        font-size: 0.75rem; font-weight: 700;
+        padding: 3px 10px; border-radius: 12px; letter-spacing: 0.5px;
     }
+    .badge-live     { background-color: #ff5252; color: #fff; }
+    .badge-finished { background-color: #4caf50; color: #fff; }
+    .badge-pending  { background-color: rgba(120,120,140,0.7); color: #e6e6fa; }
 
-    .badge-live {
-        background-color: #ff5252;
-        color: #fff;
-    }
-
-    .badge-finished {
-        background-color: #4caf50;
-        color: #fff;
-    }
-
-    .badge-pending {
-        background-color: rgba(120, 120, 140, 0.7);
-        color: #e6e6fa;
-    }
-
-    /* Race body / table */
-    .race-body {
-        background-color: rgba(40, 40, 50, 0.85);
-    }
-
-    .not-started-msg {
-        color: rgba(200, 200, 220, 0.6);
-        font-style: italic;
-        padding: 16px 20px;
-    }
-
-    .result-table {
-        background-color: rgba(40, 40, 50, 0.85);
-        margin: 0;
-    }
+    /* ── Table ── */
+    .race-body { background-color: rgba(40,40,50,0.85); }
+    .not-started-msg { color: rgba(200,200,220,0.6); font-style: italic; padding: 16px 20px; }
+    .result-table { background-color: rgba(40,40,50,0.85); margin: 0; }
 
     .result-table th {
-        background-color: rgba(35, 35, 48, 0.95);
+        background-color: rgba(30,30,40,0.9);
         color: #e6e6fa !important;
         font-weight: 600;
         letter-spacing: 0.5px;
-        border-bottom: 2px solid rgba(80, 80, 100, 0.6);
+        border-bottom: 2px solid rgba(80,80,100,0.6);
         padding: 10px 15px;
     }
-
     .result-table td {
         color: #e6e6fa !important;
-        border-top: 1px solid rgba(80, 80, 100, 0.3);
+        border-top: 1px solid rgba(80,80,100,0.3);
         padding: 9px 15px;
     }
 
-    /* Position highlighting */
-    .result-table tr.pos-gold td {
-        background-color: rgba(180, 140, 30, 0.25);
+    /* ── Colour-strip (8 px, same as round_info) ── */
+    .col-strip {
+        width: 8px !important; min-width: 8px !important; max-width: 8px !important;
+        padding: 0 !important; border-right: none !important;
     }
 
-    .result-table tr.pos-silver td {
-        background-color: rgba(160, 160, 180, 0.2);
-    }
+    /* ── Standings rows (same palette as round_info team rows) ── */
+    .result-table tr.team-odd  { background-color: rgba(45,45,60,0.9); }
+    .result-table tr.team-even { background-color: rgba(60,60,75,0.9); }
+    .result-table tr.team-row  { cursor: pointer; transition: background-color 0.2s ease; }
+    .result-table tr.team-row:hover td { filter: brightness(1.18); }
 
-    .result-table tr.pos-bronze td {
-        background-color: rgba(160, 100, 50, 0.2);
-    }
+    /* Position highlights */
+    .result-table tr.pos-gold   td { background-color: rgba(180,140,30,0.3) !important; }
+    .result-table tr.pos-silver td { background-color: rgba(160,160,180,0.25) !important; }
+    .result-table tr.pos-bronze td { background-color: rgba(160,100,50,0.25) !important; }
 
-    /* Alternating row shading for non-podium rows */
-    .result-table tbody tr:not(.pos-gold):not(.pos-silver):not(.pos-bronze):nth-child(odd) td {
-        background-color: rgba(45, 45, 60, 0.9);
-    }
+    /* ── Lap rows (same palette as round_info session rows) ── */
+    .result-table tr.lap-odd  { background-color: rgba(70,70,80,0.7); }
+    .result-table tr.lap-even { background-color: rgba(80,80,90,0.7); }
+    .result-table tr.lap-row  { opacity: 0; transition: opacity 0.2s ease-out; }
+    .result-table tr.lap-row.show { opacity: 1; }
 
-    .result-table tbody tr:not(.pos-gold):not(.pos-silver):not(.pos-bronze):nth-child(even) td {
-        background-color: rgba(55, 55, 72, 0.9);
+    /* ── Expand arrow on team rows ── */
+    .expand-icon {
+        display: inline-block;
+        width: 14px;
+        margin-right: 5px;
+        font-size: 0.65rem;
+        transition: transform 0.2s ease;
     }
-
-    /* Flash animation for live updates */
-    @keyframes flash-row {
-        0%   { background-color: rgba(100, 180, 100, 0.4); }
-        100% { background-color: transparent; }
-    }
-
-    .flash-update td {
-        animation: flash-row 0.8s ease-out;
-    }
+    .result-table tr.team-row.expanded .expand-icon { transform: rotate(90deg); }
 </style>
 
 <script>
 document.addEventListener('DOMContentLoaded', function () {
 
-    // Collapse arrow toggle
-    document.querySelectorAll('[data-bs-toggle="collapse"]').forEach(function (header) {
-        const targetId = header.getAttribute('data-bs-target');
-        const arrow = header.querySelector('.collapse-arrow');
-        const collapseEl = document.querySelector(targetId);
-
-        if (collapseEl) {
-            collapseEl.addEventListener('show.bs.collapse', function () {
-                arrow.classList.add('open');
-            });
-            collapseEl.addEventListener('hide.bs.collapse', function () {
-                arrow.classList.remove('open');
-            });
-        }
+    /* ── Section collapse arrows ── */
+    document.querySelectorAll('[data-bs-toggle="collapse"]').forEach(function (hdr) {
+        const target = document.querySelector(hdr.getAttribute('data-bs-target'));
+        const arrow  = hdr.querySelector('.collapse-arrow');
+        if (!target || !arrow) return;
+        target.addEventListener('show.bs.collapse', () => arrow.classList.add('open'));
+        target.addEventListener('hide.bs.collapse', () => arrow.classList.remove('open'));
     });
 
-    // Helper: render a standings row (standings dicts use pre-formatted strings)
-    function renderRow(entry) {
-        let posClass = '';
-        if (entry.position === 1) posClass = 'pos-gold';
-        else if (entry.position === 2) posClass = 'pos-silver';
-        else if (entry.position === 3) posClass = 'pos-bronze';
+    /* ── Initialise each race table ── */
+    document.querySelectorAll('.result-table').forEach(initTable);
 
-        return `<tr class="${posClass}" data-team="${entry.team_number}">
-            <td>${entry.position}</td>
-            <td>${entry.team_number}</td>
-            <td>${entry.team_name}</td>
-            <td>${entry.laps_completed}</td>
-            <td>${entry.best_lap_time_formatted ?? '—'}</td>
-            <td>${entry.last_lap_time_formatted ?? '—'}</td>
-            <td>${entry.gap_ahead ?? '—'}</td>
-        </tr>`;
+    /* ─────────────────────────────── */
+    function initTable(table) {
+        const raceId    = table.dataset.raceId;
+        const hStandings = table.querySelector('.header-standings');
+        const hLaps      = table.querySelector('.header-laps');
+        const lapCache   = {};   // teamId → true once rows injected
+        const fetching   = {};   // teamId → true during fetch
+
+        /* Header switching */
+        function showHeader(which) {
+            const showLaps = (which === 'laps');
+            hLaps.style.display      = showLaps ? '' : 'none';
+            hStandings.style.display = showLaps ? 'none' : '';
+        }
+
+        table.addEventListener('mouseleave', () => showHeader('standings'));
+        table.addEventListener('mouseover', function (e) {
+            if (e.target.closest('.lap-row'))  showHeader('laps');
+            else if (e.target.closest('.team-row')) showHeader('standings');
+        });
+
+        /* Click via event delegation — works for initial AND live-updated rows */
+        table.querySelector('tbody').addEventListener('click', function (e) {
+            const row = e.target.closest('.team-row');
+            if (!row) return;
+
+            const teamId = row.dataset.teamId;
+            const isOpen = row.classList.contains('expanded');
+
+            /* Close other expanded teams */
+            table.querySelectorAll('.team-row.expanded').forEach(other => {
+                if (other !== row) collapseTeam(table, other);
+            });
+
+            if (isOpen) {
+                collapseTeam(table, row);
+            } else {
+                expandTeam(table, row, raceId, teamId, lapCache, fetching, showHeader);
+            }
+        });
     }
 
-    // WebSocket connections for live races
+    /* ── Collapse a team ── */
+    function collapseTeam(table, teamRow) {
+        const teamId = teamRow.dataset.teamId;
+        teamRow.classList.remove('expanded');
+        table.querySelectorAll(`.lap-row[data-team-id="${teamId}"]`).forEach(r => {
+            r.classList.remove('show');
+            setTimeout(() => { if (r.parentNode) r.style.display = 'none'; }, 220);
+        });
+    }
+
+    /* ── Expand a team ── */
+    function expandTeam(table, teamRow, raceId, teamId, lapCache, fetching, showHeader) {
+        teamRow.classList.add('expanded');
+
+        if (lapCache[teamId]) {
+            /* Already in DOM — just unhide */
+            table.querySelectorAll(`.lap-row[data-team-id="${teamId}"]`).forEach(r => {
+                r.style.display = 'table-row';
+                requestAnimationFrame(() => r.classList.add('show'));
+            });
+            return;
+        }
+
+        if (fetching[teamId]) return;
+        fetching[teamId] = true;
+
+        /* Loading placeholder */
+        const placeholder = makePlaceholder(teamId, 'Loading laps…');
+        teamRow.insertAdjacentElement('afterend', placeholder);
+
+        fetch(`/api/race/${raceId}/team/${teamId}/laps/`)
+            .then(r => r.json())
+            .then(data => {
+                placeholder.remove();
+                fetching[teamId] = false;
+                lapCache[teamId] = true;
+
+                if (!data.laps || data.laps.length === 0) {
+                    const empty = makePlaceholder(teamId, 'No laps recorded.');
+                    teamRow.insertAdjacentElement('afterend', empty);
+                    requestAnimationFrame(() => empty.classList.add('show'));
+                    return;
+                }
+
+                /* Build rows and insert them after teamRow in correct order.
+                   We insert each row after teamRow (insertAdjacentElement('afterend'))
+                   in reverse so the final order is ascending lap number. */
+                let lapOdd = (data.laps.length % 2 === 1); // parity so insertion reversal keeps colour scheme
+                for (let i = data.laps.length - 1; i >= 0; i--) {
+                    const lap = data.laps[i];
+                    lapOdd = (i % 2 === 0);  // 0-based index: even index → lap-odd shade
+                    const tr = document.createElement('tr');
+                    tr.className = `lap-row ${lapOdd ? 'lap-odd' : 'lap-even'}`;
+                    tr.dataset.teamId = teamId;
+                    tr.style.display = 'table-row';
+                    tr.innerHTML =
+                        `<td class="col-strip"></td>` +
+                        `<td style="color:rgba(220,200,240,0.9)">${escHtml(lap.driver)}</td>` +
+                        `<td>${lap.lap_number}</td>` +
+                        `<td>${escHtml(lap.lap_time)}</td>` +
+                        `<td style="color:${diffColor(lap.diff)}">${escHtml(lap.diff)}</td>` +
+                        `<td></td>`;
+                    teamRow.insertAdjacentElement('afterend', tr);
+                }
+
+                /* Fade in */
+                requestAnimationFrame(() => {
+                    table.querySelectorAll(`.lap-row[data-team-id="${teamId}"]`)
+                         .forEach(r => r.classList.add('show'));
+                });
+
+                showHeader('laps');
+            })
+            .catch(() => {
+                placeholder.remove();
+                fetching[teamId] = false;
+                teamRow.classList.remove('expanded');
+            });
+    }
+
+    function makePlaceholder(teamId, msg) {
+        const tr = document.createElement('tr');
+        tr.className = 'lap-row show';
+        tr.dataset.teamId = teamId;
+        tr.innerHTML = `<td class="col-strip"></td><td colspan="5" style="color:rgba(200,200,220,0.6);font-style:italic;">${msg}</td>`;
+        return tr;
+    }
+
+    function diffColor(diff) {
+        if (!diff || diff === '—') return 'inherit';
+        return diff.startsWith('+') ? '#ff8080' : '#80e080';
+    }
+
+    function escHtml(s) {
+        return String(s ?? '')
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    /* ── WebSocket live updates ── */
     liveRaces.forEach(function (raceId) {
         const wsScheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
         const ws = new WebSocket(`${wsScheme}://${window.location.host}/ws/leaderboard/${raceId}/`);
@@ -307,35 +377,49 @@ document.addEventListener('DOMContentLoaded', function () {
             const data = JSON.parse(event.data);
 
             if (data.type === 'standings_update') {
-                const tbody = document.getElementById(`standings-${raceId}`);
-                if (!tbody) return;
-                tbody.innerHTML = data.standings.map(renderRow).join('');
-                // Flash the updated row
-                if (data.flash_team_number) {
-                    const row = tbody.querySelector(`tr[data-team="${data.flash_team_number}"]`);
-                    if (row) {
-                        row.classList.remove('flash-update');
-                        void row.offsetWidth; // reflow
-                        row.classList.add('flash-update');
-                        setTimeout(() => row.classList.remove('flash-update'), 800);
-                    }
+                const table = document.querySelector(`.result-table[data-race-id="${raceId}"]`);
+                if (!table) return;
+                const tbody = table.querySelector('tbody');
+
+                /* Replace only team-row elements; keep any expanded lap rows */
+                tbody.querySelectorAll('.team-row').forEach(r => r.remove());
+
+                let odd = true;
+                const rows = data.standings.map(entry => {
+                    const tr = document.createElement('tr');
+                    let pos = '';
+                    if (entry.position === 1) pos = 'pos-gold';
+                    else if (entry.position === 2) pos = 'pos-silver';
+                    else if (entry.position === 3) pos = 'pos-bronze';
+                    tr.className = `team-row ${odd ? 'team-odd' : 'team-even'} ${pos}`;
+                    tr.dataset.teamId = entry.team_id;
+                    tr.dataset.raceId = raceId;
+                    tr.innerHTML =
+                        `<td class="col-strip"></td>` +
+                        `<td><span class="expand-icon">▶</span>${entry.position}</td>` +
+                        `<td>${entry.team_number}</td>` +
+                        `<td>${escHtml(entry.team_name)}</td>` +
+                        `<td>${entry.best_lap_time_formatted ?? '—'}</td>` +
+                        `<td>${entry.gap_ahead ?? '—'}</td>`;
+                    odd = !odd;
+                    return tr;
+                });
+
+                /* Insert team rows before the first lap-row (if any), else prepend */
+                const firstLap = tbody.querySelector('.lap-row');
+                if (firstLap) {
+                    rows.forEach(r => tbody.insertBefore(r, firstLap));
+                } else {
+                    rows.forEach(r => tbody.appendChild(r));
                 }
+
             } else if (data.type === 'race_ended') {
-                // Update badge to FINISHED
                 const badge = document.querySelector(`#race-section-${raceId} .race-badge`);
                 if (badge) {
                     badge.textContent = 'FINISHED';
                     badge.className = 'race-badge badge-finished';
                 }
             }
-        };
-
-        ws.onclose = function () {
-            // Reconnect after 5s on unexpected close
-            setTimeout(function () {
-                // Simple page reload to re-establish; avoids complex reconnect logic
-                // Only reload if still on same page (user hasn't navigated away)
-            }, 5000);
         };
     });
 });

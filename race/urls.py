@@ -57,6 +57,11 @@ urlpatterns = [
     ),
     path("round_info/", views.round_info, name="round_info"),
     path("round_result/", views.round_result, name="round_result"),
+    path(
+        "api/race/<int:race_id>/team/<int:team_id>/laps/",
+        views.round_result_team_laps,
+        name="round_result_team_laps",
+    ),
     path("round_penalties/", views.round_penalties, name="round_penalties"),
     # Admin stuffs
     path("rounds/update/", views.round_list_update, name="rounds_list"),

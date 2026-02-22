@@ -1615,6 +1615,72 @@ def round_result(request):
     )
 
 
+def round_result_team_laps(request, race_id, team_id):
+    """Return all valid laps for a team in a race, annotated with driver and diff."""
+    race = get_object_or_404(Race, id=race_id)
+    team = get_object_or_404(round_team, id=team_id)
+
+    laps = list(
+        LapCrossing.objects.filter(race=race, team=team, is_valid=True).order_by(
+            "lap_number"
+        )
+    )
+
+    sessions = list(
+        Session.objects.filter(round=race.round, driver__team=team)
+        .select_related("driver__member")
+        .order_by("start")
+    )
+
+    def get_driver(crossing_time):
+        for s in sessions:
+            if s.start and crossing_time >= s.start:
+                if s.end is None or crossing_time <= s.end:
+                    return s.driver.member.nickname
+        return None
+
+    def fmt(td):
+        if td is None:
+            return "\u2014"
+        total_ms = int(td.total_seconds() * 1000)
+        ms = total_ms % 1000
+        total_s = total_ms // 1000
+        s = total_s % 60
+        m = total_s // 60
+        return f"{m:02d}:{s:02d}.{ms:03d}"
+
+    result = []
+    prev_lap_secs = None
+    prev_driver = None
+
+    for lap in laps:
+        driver = get_driver(lap.crossing_time)
+        show_driver = driver != prev_driver
+
+        if lap.lap_time is not None:
+            lap_secs = lap.lap_time.total_seconds()
+            if prev_lap_secs is not None:
+                diff = lap_secs - prev_lap_secs
+                diff_str = f"+{diff:.3f}s" if diff >= 0 else f"{diff:.3f}s"
+            else:
+                diff_str = "\u2014"
+            prev_lap_secs = lap_secs
+        else:
+            diff_str = "\u2014"
+
+        result.append(
+            {
+                "lap_number": lap.lap_number,
+                "driver": driver if show_driver else "",
+                "lap_time": fmt(lap.lap_time),
+                "diff": diff_str,
+            }
+        )
+        prev_driver = driver
+
+    return JsonResponse({"laps": result})
+
+
 def round_penalties(request):
     """View to display penalties for a selected round with dropdown similar to round_info."""
     # Get all rounds sorted by date
