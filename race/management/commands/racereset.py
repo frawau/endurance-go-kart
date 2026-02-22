@@ -171,6 +171,7 @@ class Command(BaseCommand):
                 race.started = None
                 race.ended = None
                 race.ready = False
+                race.grid_locked = False
                 race.save()
                 self.stdout.write(
                     self.style.SUCCESS(
