@@ -568,7 +568,7 @@ class Command(BaseCommand):
                             stats["has_queued"] = True
                             stats[
                                 "change_race_time"
-                            ] = elapsed_race + avg_lap * random.uniform(1.5, 3.0)
+                            ] = elapsed_race + avg_lap * random.randint(1, 5)
                             self.log(
                                 f"[PitLane] Team {team.number}: queued {driver.member.nickname}"
                             )
