@@ -3850,8 +3850,11 @@ def auto_assign_from_qualifying(request, race_id):
         messages.error(request, "Cannot auto-assign - grid is locked")
         return redirect("race_grid_management", race_id=race_id)
 
-    if not race.depends_on_race:
-        messages.error(request, "No qualifying race configured")
+    ended_q_races = Race.objects.filter(
+        round=race.round, race_type__startswith="Q", ended__isnull=False
+    ).exists()
+    if not ended_q_races:
+        messages.error(request, "No qualifying results available")
         return redirect("race_grid_management", race_id=race_id)
 
     race.auto_assign_grid_positions(source_type="QUALIFYING")

@@ -130,6 +130,7 @@ class Command(BaseCommand):
                     "- Deleting penalty queue entries and penalties imposed during this race\n"
                     "- Unconfirming transponder assignments (assignments kept)\n"
                     "- Resetting race: started=None, ended=None, ready=False\n"
+                    "- Unlocking grid for subsequent non-started races\n"
                     "- Resetting Round.ended/started if appropriate\n\n"
                     "Grid positions are preserved.\n"
                     "Run without --dry-run to actually perform the reset."
@@ -179,6 +180,20 @@ class Command(BaseCommand):
                         f"(started=None, ended=None, ready=False)"
                     )
                 )
+
+                # Unlock grid for subsequent non-started races so qualifying
+                # results can be re-applied after a qualifying race reset.
+                n_unlocked = cround.races.filter(
+                    sequence_number__gt=race.sequence_number,
+                    started__isnull=True,
+                    grid_locked=True,
+                ).update(grid_locked=False)
+                if n_unlocked:
+                    self.stdout.write(
+                        self.style.SUCCESS(
+                            f"Unlocked grid for {n_unlocked} subsequent non-started race(s)"
+                        )
+                    )
 
                 # Reset Round.ended if it was set by this race ending
                 if cround.ended is not None:

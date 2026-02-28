@@ -1290,16 +1290,25 @@ class Race(models.Model):
         results = self.get_qualifying_results(tiebreaker=tiebreaker)
 
         for rule in self.knockout_rules.all():
-            # Get eliminated teams based on position range
-            # Negative indices mean from end (e.g., -5 = bottom 5)
+            # Get eliminated teams based on position range.
+            # Indices are 0-based into the sorted results list.
+            # end_idx == -1 means "to the last element" in both conventions
+            # (populate_round uses positive start / -1 end;
+            #  manual rules may use all-negative indices).
             start_idx = rule.eliminates_to_position_range_start
             end_idx = rule.eliminates_to_position_range_end
 
             if start_idx < 0 and end_idx < 0:
-                # Both negative - slice from end
-                eliminated = results[start_idx : end_idx + 1 if end_idx != -1 else None]
+                # Both negative — slice from end of list
+                eliminated = (
+                    results[start_idx:]
+                    if end_idx == -1
+                    else results[start_idx : end_idx + 1]
+                )
+            elif end_idx == -1:
+                # Positive start, explicit "to the end"
+                eliminated = results[start_idx:]
             else:
-                # Positive indices
                 eliminated = results[start_idx : end_idx + 1]
 
             # Set grid positions for target race
@@ -1364,17 +1373,11 @@ class Race(models.Model):
         # Clear previous COMBINED_Q positions (safe to re-run after each Q-race)
         GridPosition.objects.filter(race=main_race, source="COMBINED_Q").delete()
 
-        # Start positions after any existing knockout positions
-        knockout_max = (
-            GridPosition.objects.filter(race=main_race, source="KNOCKOUT")
-            .aggregate(models.Max("position"))
-            .get("position__max")
-            or 0
-        )
-
-        # Assign grid positions
+        # Survivors always fill from position 1 (front of grid).
+        # Knockout-eliminated teams already have their KNOCKOUT positions
+        # at the back, so there is no conflict.
         for idx, (team, _) in enumerate(final):
-            position = knockout_max + idx + 1
+            position = idx + 1
             GridPosition.objects.create(
                 race=main_race,
                 team=team,
@@ -1388,24 +1391,22 @@ class Race(models.Model):
         Auto-assign grid positions based on source.
 
         Args:
-            source_type: "CHAMPIONSHIP" (championship standings) or "QUALIFYING" (from depends_on_race)
+            source_type: "CHAMPIONSHIP" (championship standings) or "QUALIFYING" (all ended Q-races)
         """
         if self.grid_locked:
             return  # Grid is locked, cannot auto-assign
 
-        if source_type == "QUALIFYING" and self.depends_on_race:
-            # Use qualifying race results
-            results = self.depends_on_race.get_qualifying_results()
-            for position, (team, _) in enumerate(results, 1):
-                GridPosition.objects.update_or_create(
-                    race=self,
-                    team=team,
-                    defaults={
-                        "position": position,
-                        "source": "QUALIFYING",
-                        "source_race": self.depends_on_race,
-                        "manually_overridden": False,
-                    },
+        if source_type == "QUALIFYING":
+            # Combine all ended Q-races in this round (handles single or multiple qualifying sessions)
+            tiebreaker = self.round.championship.qualifying_tiebreaker
+            ended_q_races = Race.objects.filter(
+                round=self.round,
+                race_type__startswith="Q",
+                ended__isnull=False,
+            )
+            if ended_q_races.exists():
+                Race.combine_qualifying_results(
+                    ended_q_races, self, tiebreaker=tiebreaker
                 )
         elif source_type == "CHAMPIONSHIP":
             # Use championship standings (placeholder - would need championship_team ordering)
@@ -1458,7 +1459,10 @@ class Race(models.Model):
         # Delete all grid positions and re-auto-assign
         GridPosition.objects.filter(race=self).delete()
 
-        if self.depends_on_race:
+        has_ended_q = Race.objects.filter(
+            round=self.round, race_type__startswith="Q", ended__isnull=False
+        ).exists()
+        if has_ended_q:
             self.auto_assign_grid_positions(source_type="QUALIFYING")
         else:
             self.auto_assign_grid_positions(source_type="CHAMPIONSHIP")
@@ -1532,16 +1536,17 @@ class Race(models.Model):
 
         standings = []
         for team in self.get_all_teams():
-            # Get all valid lap crossings for this team
-            laps = self.lap_crossings.filter(team=team, is_valid=True).order_by(
-                "crossing_time"
-            )
+            # Count only crossings strictly after race.started.
+            # In IMMEDIATE mode the first crossing is a completed lap (karts are
+            # mid-track at start). In FIRST_CROSSING mode race.started equals the
+            # first crossing time, so __gt naturally excludes it. Either way,
+            # every crossing in this queryset is one completed lap.
+            laps = self.lap_crossings.filter(
+                team=team, is_valid=True, crossing_time__gt=self.started
+            ).order_by("crossing_time")
 
             if laps.exists():
-                # Every valid crossing after the first is a completed lap.
-                # count()-1 avoids undercounting when lap_time=None on a crossing
-                # due to identical consecutive raw_times (decoder precision issue).
-                laps_completed = max(0, laps.count() - 1)
+                laps_completed = laps.count()
                 last_crossing = laps.last()
                 total_time = last_crossing.crossing_time - self.started
                 last_lap_time = last_crossing.lap_time
