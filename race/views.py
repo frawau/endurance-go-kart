@@ -3541,6 +3541,7 @@ def race_grid_pdf(request, race_id):
     from reportlab.lib.units import cm
     from reportlab.lib import colors
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.utils import ImageReader
     from reportlab.platypus import (
         SimpleDocTemplate,
         Table,
@@ -3549,7 +3550,7 @@ def race_grid_pdf(request, race_id):
         Spacer,
         Image,
     )
-    from reportlab.lib.enums import TA_CENTER
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT
 
     race = get_object_or_404(Race, id=race_id)
     grid_positions = GridPosition.objects.filter(race=race).order_by("position")
@@ -3572,18 +3573,16 @@ def race_grid_pdf(request, race_id):
         parent=styles["Title"],
         fontSize=28,
         leading=34,
-        alignment=TA_CENTER,
+        alignment=TA_LEFT,
     )
     subtitle_style = ParagraphStyle(
         "subtitle",
         parent=styles["Normal"],
         fontSize=13,
         leading=18,
-        alignment=TA_CENTER,
+        alignment=TA_LEFT,
         textColor=colors.HexColor("#444444"),
     )
-
-    story = []
 
     # Logo — use organiser logo if set, else fall back to app logo
     from django.conf import settings as django_settings
@@ -3592,20 +3591,50 @@ def race_grid_pdf(request, race_id):
         logo_path = organiser_logo.image.path
     else:
         logo_path = str(django_settings.STATIC_ROOT / "logos" / "gokartrace-logo.png")
+
+    # Scale logo to fit a 3 cm square while preserving aspect ratio
+    square = 3 * cm
+    page_width = A4[0] - 4 * cm  # usable width after margins
+    logo_cell = ""
     try:
-        img = Image(logo_path, width=6 * cm, height=3 * cm)
-        img.hAlign = "CENTER"
-        story.append(img)
-        story.append(Spacer(1, 0.4 * cm))
+        ir = ImageReader(logo_path)
+        iw, ih = ir.getSize()
+        scale = min(square / iw, square / ih)
+        logo_img = Image(logo_path, width=iw * scale, height=ih * scale)
+        logo_img.hAlign = "RIGHT"
+        logo_cell = logo_img
     except Exception:
         pass
 
-    story.append(Paragraph("Starting Grid", title_style))
-    story.append(Spacer(1, 0.2 * cm))
-    story.append(Paragraph(race.round.championship.name, subtitle_style))
-    story.append(
-        Paragraph(f"{race.round.name} — {race.get_race_type_display()}", subtitle_style)
+    story = []
+
+    # Header: title/subtitles on the left, logo top-right
+    title_col_w = page_width - square
+    left_content = [
+        Paragraph("Starting Grid", title_style),
+        Spacer(1, 0.2 * cm),
+        Paragraph(race.round.championship.name, subtitle_style),
+        Paragraph(
+            f"{race.round.name} — {race.get_race_type_display()}", subtitle_style
+        ),
+    ]
+    header_table = Table(
+        [[left_content, logo_cell]],
+        colWidths=[title_col_w, square],
     )
+    header_table.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("ALIGN", (1, 0), (1, 0), "RIGHT"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+            ]
+        )
+    )
+    story.append(header_table)
     story.append(Spacer(1, 0.8 * cm))
 
     # Table
