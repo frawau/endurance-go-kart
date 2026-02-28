@@ -528,6 +528,11 @@ class Command(BaseCommand):
         race_duration_s = await sync_to_async(
             lambda: active_race.duration.total_seconds()
         )()
+        # Use cround.duration (the configured endurance length) for the pit window,
+        # matching the real pit_lane_open property which also uses cround.duration.
+        round_duration_s = await sync_to_async(
+            lambda: cround.duration.total_seconds()
+        )()
         pit_open_after = await sync_to_async(
             lambda: cround.pitlane_open_after.total_seconds()
         )()
@@ -536,17 +541,29 @@ class Command(BaseCommand):
         )()
         required_changes = await sync_to_async(lambda: cround.required_changes)()
         race_type = await sync_to_async(lambda: active_race.race_type)()
+        change_lanes = await sync_to_async(lambda: cround.change_lanes)()
 
-        pit_open_at = pit_open_after
-        pit_close_at = race_duration_s - pit_close_before
+        is_qualifying = race_type in ("Q1", "Q2", "Q3", "PRACTICE")
+        if is_qualifying:
+            # Real pit_lane_open always returns True for non-MAIN races.
+            pit_open_at = 0.0
+            pit_close_at = float("inf")
+        else:
+            pit_open_at = pit_open_after
+            pit_close_at = round_duration_s - pit_close_before
 
         team_stats = await sync_to_async(self._init_team_stats)(
             cround, required_changes, race_type, avg_lap, pit_open_at, pit_close_at
         )
-        self.log(
-            f"[PitLane] {len(team_stats)} teams — "
-            f"pit open {pit_open_at/60:.0f}–{pit_close_at/60:.0f} race-min"
-        )
+        if is_qualifying:
+            self.log(
+                f"[PitLane] {len(team_stats)} teams — pit always open (qualifying)"
+            )
+        else:
+            self.log(
+                f"[PitLane] {len(team_stats)} teams — "
+                f"pit open {pit_open_at/60:.0f}–{pit_close_at/60:.0f} race-min"
+            )
 
         while not coord.all_done.is_set():
             await asyncio.sleep(0.25)
@@ -572,12 +589,8 @@ class Command(BaseCommand):
                         )
                         if resp.status_code == 200 and resp.data.get("status") == "ok":
                             stats["has_queued"] = True
-                            laps_wait = random.choices(
-                                [1, 2, 3, 4, 5], weights=[5, 30, 45, 15, 5]
-                            )[0]
-                            stats["change_race_time"] = (
-                                elapsed_race + avg_lap * laps_wait
-                            )
+                            stats["in_lane"] = False
+                            stats["change_race_time"] = float("inf")
                             self.log(
                                 f"[PitLane] Team {team.number}: queued {driver.member.nickname}"
                             )
@@ -587,8 +600,30 @@ class Command(BaseCommand):
                                     f"[PitLane] Team {team.number}: queue failed — {resp.data}"
                                 )
 
+                # ── Check lane promotion ──
+                # A driver physically enters the pit lane only when their session
+                # reaches a top change_lanes slot (first-registered pending sessions).
+                if stats["has_queued"] and not stats["in_lane"]:
+                    in_lane = await sync_to_async(self._check_in_lane)(
+                        cround, team, change_lanes
+                    )
+                    if in_lane:
+                        stats["in_lane"] = True
+                        laps_wait = random.choices(
+                            [1, 2, 3, 4, 5, 6], weights=[15, 30, 50, 3, 1, 1]
+                        )[0]
+                        stats["change_race_time"] = elapsed_race + avg_lap * laps_wait
+                        self.log(
+                            f"[PitLane] Team {team.number}: reached lane "
+                            f"— change in {laps_wait} lap(s)"
+                        )
+
                 # ── Perform driver change ──
-                if stats["has_queued"] and elapsed_race >= stats["change_race_time"]:
+                if (
+                    stats["has_queued"]
+                    and stats["in_lane"]
+                    and elapsed_race >= stats["change_race_time"]
+                ):
                     current = await sync_to_async(self._get_current_driver)(
                         cround, team
                     )
@@ -606,6 +641,7 @@ class Command(BaseCommand):
                         if resp.status_code == 200 and resp.data.get("status") == "ok":
                             stats["completed_changes"] += 1
                             stats["has_queued"] = False
+                            stats["in_lane"] = False
                             stats["next_queue_race_time"] = self._next_queue_time(
                                 elapsed_race, stats, pit_close_at, avg_lap
                             )
@@ -614,7 +650,8 @@ class Command(BaseCommand):
                                 f"change #{stats['completed_changes']} done"
                             )
                         else:
-                            stats["has_queued"] = False  # retry
+                            stats["has_queued"] = False
+                            stats["in_lane"] = False
                             if self.verbose:
                                 self.log(
                                     f"[PitLane] Team {team.number}: change failed — {resp.data}"
@@ -732,32 +769,47 @@ class Command(BaseCommand):
     def _init_team_stats(
         self, cround, required_changes, race_type, avg_lap, pit_open_at, pit_close_at
     ):
-        is_qualifying = race_type in ("Q1", "Q2", "Q3")
-        pit_window = pit_close_at - pit_open_at  # ≤ 0 means window never opens
+        is_qualifying = race_type in ("Q1", "Q2", "Q3", "PRACTICE")
         stats = {}
         for team in cround.round_team_set.select_related("team", "team__team").filter(
             retired=False
         ):
-            if is_qualifying or pit_window <= 0:
-                # No changes required; a small fraction might attempt one opportunistically.
+            if is_qualifying:
+                # Qualifying: pit always open but changes are rare — mostly nobody changes.
                 target = 1 if random.random() < 0.15 else 0
             else:
                 v = random.random()
                 target = required_changes + (
                     1 if v < 0.6 else random.randint(2, 4) if v < 0.8 else 0
                 )
+            window = max(pit_close_at - pit_open_at, avg_lap)
             initial_queue = pit_open_at + random.uniform(
-                0, min(avg_lap * 2, max(pit_window * 0.2, 1))
+                0, min(avg_lap * 2, window * 0.2)
             )
             stats[team.id] = {
                 "team": team,
                 "target_changes": target,
                 "completed_changes": 0,
                 "has_queued": False,
+                "in_lane": False,
                 "next_queue_race_time": initial_queue,
                 "change_race_time": float("inf"),
             }
         return stats
+
+    def _check_in_lane(self, cround, team, change_lanes):
+        """Return True if this team has a pending session in the top change_lanes slots."""
+        top_team_ids = list(
+            Session.objects.filter(
+                round=cround,
+                register__isnull=False,
+                start__isnull=True,
+                end__isnull=True,
+            )
+            .order_by("register")
+            .values_list("driver__team_id", flat=True)[:change_lanes]
+        )
+        return team.pk in top_team_ids
 
     def _next_queue_time(self, current_race, stats, pit_close_at, avg_lap):
         """Schedule the next queue attempt, spread evenly within the remaining pit window."""
