@@ -327,15 +327,19 @@ def racecontrol(request):
             .order_by("register")
         )  # Order by registration time
 
-        # For each session, get the team's completed sessions count
-        for session in pending_sessions:
-            completed_count = Session.objects.filter(
-                driver__team=session.driver.team, end__isnull=False
-            ).count()
-
-            # Add as property to the session object
-            session.team_completed_count = completed_count
         active_race = cround.active_race
+
+        # For each session, get the team's completed sessions count for the active race
+        for session in pending_sessions:
+            if active_race:
+                completed_count = Session.objects.filter(
+                    driver__team=session.driver.team,
+                    race=active_race,
+                    end__isnull=False,
+                ).count()
+            else:
+                completed_count = 0
+            session.team_completed_count = completed_count
         race_sequence = (
             list(cround.races.all()) if not cround.uses_legacy_session_model else []
         )
@@ -1325,18 +1329,23 @@ def pending_drivers(request):
         .order_by("register")
     )  # Order by registration time
 
-    # For each session, get the team's completed sessions count
-    for session in pending_sessions:
-        completed_count = Session.objects.filter(
-            driver__team=session.driver.team, end__isnull=False
-        ).count()
+    active_race = cround.active_race
 
-        # Add as property to the session object
+    # For each session, get the team's completed sessions count for the active race
+    for session in pending_sessions:
+        if active_race:
+            completed_count = Session.objects.filter(
+                driver__team=session.driver.team,
+                race=active_race,
+                end__isnull=False,
+            ).count()
+        else:
+            completed_count = 0
         session.team_completed_count = completed_count
 
     context = {
         "round": cround,
-        "active_race": cround.active_race,
+        "active_race": active_race,
         "pending_sessions": pending_sessions,
         "organiser_logo": get_organiser_logo(cround),
     }
@@ -1377,18 +1386,23 @@ def pending_drivers_with_nav(request):
         .order_by("register")
     )  # Order by registration time
 
-    # For each session, get the team's completed sessions count
-    for session in pending_sessions:
-        completed_count = Session.objects.filter(
-            driver__team=session.driver.team, end__isnull=False
-        ).count()
+    active_race = cround.active_race
 
-        # Add as property to the session object
+    # For each session, get the team's completed sessions count for the active race
+    for session in pending_sessions:
+        if active_race:
+            completed_count = Session.objects.filter(
+                driver__team=session.driver.team,
+                race=active_race,
+                end__isnull=False,
+            ).count()
+        else:
+            completed_count = 0
         session.team_completed_count = completed_count
 
     context = {
         "round": cround,
-        "active_race": cround.active_race,
+        "active_race": active_race,
         "pending_sessions": pending_sessions,
         "organiser_logo": get_organiser_logo(cround),
         "sponsors_logos": get_sponsor_logos(cround),
