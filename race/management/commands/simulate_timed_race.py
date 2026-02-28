@@ -233,7 +233,9 @@ class Command(BaseCommand):
         self.log("[Director] Race started ✓")
 
         race_start_wall = loop.time()
-        race_duration_s = await sync_to_async(lambda: cround.duration.total_seconds())()
+        race_duration_s = await sync_to_async(
+            lambda: active_race.duration.total_seconds()
+        )()
         race_wall_s = race_duration_s / speed
 
         penalty_wall_interval = 300.0 / speed  # check every 5 race-minutes
@@ -523,7 +525,9 @@ class Command(BaseCommand):
         await coord.race_started.wait()
         race_start_wall = loop.time()
 
-        race_duration_s = await sync_to_async(lambda: cround.duration.total_seconds())()
+        race_duration_s = await sync_to_async(
+            lambda: active_race.duration.total_seconds()
+        )()
         pit_open_after = await sync_to_async(
             lambda: cround.pitlane_open_after.total_seconds()
         )()
