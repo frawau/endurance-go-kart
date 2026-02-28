@@ -16,8 +16,11 @@ from django.core.management.base import BaseCommand, CommandError
 from faker import Faker
 from race.models import (
     Round,
+    Race,
     Team,
     Person,
+    Transponder,
+    RaceTransponderAssignment,
     championship_team,
     round_team,
     team_member,
@@ -64,6 +67,11 @@ class Command(BaseCommand):
             default=6,
             help="Maximum drivers per team (default: 6).",
         )
+        parser.add_argument(
+            "--transponders-only",
+            action="store_true",
+            help="Skip team/driver creation; only assign transponders to existing teams.",
+        )
 
     def handle(self, *args, **options):
         if options["list"]:
@@ -94,6 +102,10 @@ class Command(BaseCommand):
         self.stdout.write(
             f'Populating round "{cround.name}" (championship: {championship.name})'
         )
+
+        if options["transponders_only"]:
+            self._assign_transponders(cround)
+            return
 
         # ── People pool: exclude anyone already in this round ─────────────────
         already_in_round = set(
@@ -196,7 +208,90 @@ class Command(BaseCommand):
                 )
             )
 
+        # ── Transponders + race assignments ───────────────────────────────────
+        self._assign_transponders(cround)
+
         self.stdout.write(self.style.SUCCESS("Done."))
+
+    def _assign_transponders(self, cround):
+        """Assign transponders from the global 25-transponder pool to teams in the round.
+
+        Creates a RaceTransponderAssignment (confirmed=True) for the first unstarted
+        race only. The end-of-race signal clones assignments to subsequent races
+        automatically when each race ends.
+
+        Idempotent — skips teams that already have an assignment in the first race.
+        """
+        # ── Global pool of 25 transponders ───────────────────────────────────
+        POOL_SIZE = 25
+        pool = []
+        for i in range(1, POOL_SIZE + 1):
+            t, _ = Transponder.objects.get_or_create(transponder_id=f"{100000 + i:06d}")
+            pool.append(t)
+
+        # ── Find the first unstarted race ─────────────────────────────────────
+        first_race = (
+            Race.objects.filter(round=cround, started__isnull=True, ended__isnull=True)
+            .order_by("sequence_number")
+            .first()
+        )
+        if not first_race:
+            self.stdout.write("  No unstarted races — skipping transponder assignment.")
+            return
+
+        all_round_teams = list(round_team.objects.filter(round=cround))
+        if len(all_round_teams) > POOL_SIZE:
+            self.stdout.write(
+                self.style.WARNING(
+                    f"  {len(all_round_teams)} teams but only {POOL_SIZE} transponders — "
+                    f"first {POOL_SIZE} teams will be assigned."
+                )
+            )
+            all_round_teams = all_round_teams[:POOL_SIZE]
+
+        # Build map of already-assigned transponders in this race so we can
+        # reuse them (idempotent) and avoid double-assigning pool slots.
+        already = {
+            a.team_id: a.transponder
+            for a in RaceTransponderAssignment.objects.filter(
+                race=first_race, team__in=all_round_teams
+            ).select_related("transponder")
+        }
+        used_transponders = set(t.pk for t in already.values())
+        free_pool = [t for t in pool if t.pk not in used_transponders]
+        random.shuffle(free_pool)
+
+        n_created = 0
+        for rt in all_round_teams:
+            if rt.pk in already:
+                continue  # already has an assignment, leave it alone
+            if not free_pool:
+                self.stdout.write(
+                    self.style.WARNING("  Pool exhausted — remaining teams skipped.")
+                )
+                break
+            transponder = free_pool.pop()
+            RaceTransponderAssignment.objects.create(
+                race=first_race,
+                transponder=transponder,
+                team=rt,
+                kart_number=rt.number,
+                confirmed=True,
+            )
+            n_created += 1
+
+        # Lock the grid on the first race to match what the UI "Lock" button does.
+        if n_created and not first_race.grid_locked:
+            first_race.grid_locked = True
+            first_race.save(update_fields=["grid_locked"])
+
+        self.stdout.write(
+            self.style.SUCCESS(
+                f"  Transponder assignments: {n_created} created for "
+                f'race "{first_race.get_race_type_display()}" (id={first_race.pk}); '
+                f"subsequent races get assignments via end-of-race signal."
+            )
+        )
 
     def _list_rounds(self):
         rounds = Round.objects.select_related("championship").order_by("start")

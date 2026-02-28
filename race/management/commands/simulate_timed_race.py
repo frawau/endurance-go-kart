@@ -168,6 +168,7 @@ class Command(BaseCommand):
                 "Complete transponder matching first."
             )
         self.log(f"Transponder assignments: {len(transponder_map)} teams")
+        self._ensure_assignments_confirmed(active_race)
 
         queue_client, change_client = self._setup_scanner_clients()
         self._register_first_drivers(cround, active_race)
@@ -647,6 +648,24 @@ class Command(BaseCommand):
         if not race:
             raise CommandError("No unstarted race found in this round.")
         return race
+
+    def _ensure_assignments_confirmed(self, race):
+        """Confirm any unconfirmed transponder assignments and lock the grid.
+
+        If assignments were already confirmed manually, this is a no-op.
+        If the signal carried them over with confirmed=False (next race in chain),
+        we confirm them automatically so the rest of the system is in a consistent state.
+        """
+        qs = RaceTransponderAssignment.objects.filter(race=race)
+        unconfirmed = qs.filter(confirmed=False).count()
+        if unconfirmed == 0:
+            self.log("Transponder assignments already confirmed ✓")
+            return
+        qs.filter(confirmed=False).update(confirmed=True)
+        if not race.grid_locked:
+            race.grid_locked = True
+            race.save(update_fields=["grid_locked"])
+        self.log(f"Auto-confirmed {unconfirmed} transponder assignment(s) ✓")
 
     def _build_transponder_map(self, active_race):
         t_map = {}
