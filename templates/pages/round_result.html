@@ -62,10 +62,10 @@
                             <tr class="header-laps" style="display:none;">
                                 <th class="col-strip"></th>
                                 <th>Driver</th>
+                                <th class="pos-col">Pos</th>
                                 <th>Lap #</th>
                                 <th>Lap Time</th>
                                 <th>Diff</th>
-                                <th></th>
                                 <th></th>
                             </tr>
                         </thead>
@@ -200,6 +200,19 @@ const liveRaces = [
     .result-table tr.lap-even { background-color: rgba(80,80,90,0.7); }
     .result-table tr.lap-row  { opacity: 0; transition: opacity 0.2s ease-out; }
     .result-table tr.lap-row.show { opacity: 1; }
+
+    /* ── Position column in lap rows ── */
+    .pos-col { width: 42px; text-align: center; }
+    .pos-change {
+        display: inline-block;
+        background: rgba(255,210,80,0.18);
+        color: #ffd700;
+        font-weight: 700;
+        font-size: 0.85rem;
+        border-radius: 4px;
+        padding: 1px 6px;
+        border: 1px solid rgba(255,210,80,0.35);
+    }
 
     /* ── Expand arrow on team rows ── */
     .expand-icon {
@@ -342,13 +355,16 @@ document.addEventListener('DOMContentLoaded', function () {
                     tr.className = `lap-row ${i % 2 === 0 ? 'lap-odd' : 'lap-even'}`;
                     tr.dataset.teamId = teamId;
                     tr.style.display = 'table-row';
+                    const posHtml = lap.position !== null && lap.position !== undefined
+                        ? `<span class="pos-change">${lap.position}</span>`
+                        : '';
                     tr.innerHTML =
                         `<td class="col-strip"></td>` +
                         `<td style="color:rgba(220,200,240,0.9)">${escHtml(lap.driver)}</td>` +
+                        `<td class="pos-col">${posHtml}</td>` +
                         `<td>${lap.lap_number}</td>` +
                         `<td>${escHtml(lap.lap_time)}</td>` +
-                        `<td style="color:${diffColor(lap.diff)}">${escHtml(lap.diff)}</td>` +
-                        `<td></td>`;
+                        `<td style="color:${diffColor(lap.diff)}">${escHtml(lap.diff)}</td>`;
                     teamRow.insertAdjacentElement('afterend', tr);
                 }
 
@@ -385,53 +401,14 @@ document.addEventListener('DOMContentLoaded', function () {
             .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     }
 
-    /* ── WebSocket live updates ── */
+    /* ── WebSocket: live badge update only (no standings refresh) ── */
     liveRaces.forEach(function (raceId) {
         const wsScheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
         const ws = new WebSocket(`${wsScheme}://${window.location.host}/ws/leaderboard/${raceId}/`);
 
         ws.onmessage = function (event) {
             const data = JSON.parse(event.data);
-
-            if (data.type === 'standings_update') {
-                const table = document.querySelector(`.result-table[data-race-id="${raceId}"]`);
-                if (!table) return;
-                const tbody = table.querySelector('tbody');
-
-                /* Replace only team-row elements; keep any expanded lap rows */
-                tbody.querySelectorAll('.team-row').forEach(r => r.remove());
-
-                let odd = true;
-                const rows = data.standings.map(entry => {
-                    const tr = document.createElement('tr');
-                    let pos = '';
-                    if (entry.position === 1) pos = 'pos-gold';
-                    else if (entry.position === 2) pos = 'pos-silver';
-                    else if (entry.position === 3) pos = 'pos-bronze';
-                    tr.className = `team-row ${odd ? 'team-odd' : 'team-even'} ${pos}`;
-                    tr.dataset.teamId = entry.team_id;
-                    tr.dataset.raceId = raceId;
-                    tr.innerHTML =
-                        `<td class="col-strip"></td>` +
-                        `<td><span class="expand-icon">▶</span>${entry.position}</td>` +
-                        `<td>${entry.team_number}</td>` +
-                        `<td>${escHtml(entry.team_name)}</td>` +
-                        `<td>${entry.laps_completed ?? '—'}</td>` +
-                        `<td>${entry.best_lap_time_formatted ?? '—'}</td>` +
-                        `<td>${entry.gap_ahead ?? '—'}</td>`;
-                    odd = !odd;
-                    return tr;
-                });
-
-                /* Insert team rows before the first lap-row (if any), else prepend */
-                const firstLap = tbody.querySelector('.lap-row');
-                if (firstLap) {
-                    rows.forEach(r => tbody.insertBefore(r, firstLap));
-                } else {
-                    rows.forEach(r => tbody.appendChild(r));
-                }
-
-            } else if (data.type === 'race_ended') {
+            if (data.type === 'race_ended') {
                 const badge = document.querySelector(`#race-section-${raceId} .race-badge`);
                 if (badge) {
                     badge.textContent = 'FINISHED';

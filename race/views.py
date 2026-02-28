@@ -1649,9 +1649,10 @@ def round_result(request):
 
 
 def round_result_team_laps(request, race_id, team_id):
-    """Return all valid laps for a team in a race, annotated with driver and diff."""
+    """Return all valid laps for a team in a race, annotated with driver, diff, and position."""
     race = get_object_or_404(Race, id=race_id)
     team = get_object_or_404(round_team, id=team_id)
+    is_qualifying = race.race_type != "MAIN"
 
     laps = list(
         LapCrossing.objects.filter(race=race, team=team, is_valid=True).order_by(
@@ -1682,24 +1683,95 @@ def round_result_team_laps(request, race_id, team_id):
         m = total_s // 60
         return f"{m:02d}:{s:02d}.{ms:03d}"
 
+    # ── Position computation ──────────────────────────────────────────────
+    # Grid position for lap 1
+    grid_pos = None
+    try:
+        grid_pos = GridPosition.objects.get(race=race, team=team).position
+    except GridPosition.DoesNotExist:
+        pass
+
+    # Build per-team crossing data for position calculation
+    # team_id -> list of (crossing_time, lap_time) sorted by crossing_time
+    all_laps_qs = (
+        LapCrossing.objects.filter(race=race, is_valid=True)
+        .order_by("crossing_time")
+        .values("team_id", "crossing_time", "lap_time")
+    )
+    team_data = {}
+    for row in all_laps_qs:
+        team_data.setdefault(row["team_id"], []).append(
+            (row["crossing_time"], row["lap_time"])
+        )
+
+    def compute_position(our_idx, T):
+        """
+        Compute position at our_idx-th crossing (0-based) at time T.
+        MAIN: rank by crossings-count desc, then Kth-crossing-time asc.
+        Qualifying: rank by best lap time asc (no time = last).
+        """
+        our_count = our_idx + 1
+        ahead = 0
+
+        if not is_qualifying:
+            for tid, tdata in team_data.items():
+                if tid == team.id:
+                    continue
+                other_count = sum(1 for ct, _ in tdata if ct <= T)
+                if other_count > our_count:
+                    ahead += 1
+                elif other_count == our_count and len(tdata) >= our_count:
+                    if tdata[our_count - 1][0] < T:
+                        ahead += 1
+        else:
+            our_best = None
+            for _, lt in team_data.get(team.id, [])[:our_count]:
+                if lt is not None and (our_best is None or lt < our_best):
+                    our_best = lt
+            for tid, tdata in team_data.items():
+                if tid == team.id:
+                    continue
+                other_count = sum(1 for ct, _ in tdata if ct <= T)
+                other_best = None
+                for _, lt in tdata[:other_count]:
+                    if lt is not None and (other_best is None or lt < other_best):
+                        other_best = lt
+                if our_best is None:
+                    if other_best is not None:
+                        ahead += 1
+                elif other_best is not None and other_best < our_best:
+                    ahead += 1
+
+        return 1 + ahead
+
+    # ── Build result ──────────────────────────────────────────────────────
     result = []
     prev_lap_secs = None
     prev_driver = None
+    prev_position = None
 
-    for lap in laps:
+    for i, lap in enumerate(laps):
         driver = get_driver(lap.crossing_time)
         show_driver = driver != prev_driver
 
         if lap.lap_time is not None:
             lap_secs = lap.lap_time.total_seconds()
-            if prev_lap_secs is not None:
-                diff = lap_secs - prev_lap_secs
-                diff_str = f"+{diff:.3f}s" if diff >= 0 else f"{diff:.3f}s"
-            else:
-                diff_str = "\u2014"
+            diff_str = (
+                f"+{lap_secs - prev_lap_secs:.3f}s"
+                if prev_lap_secs is not None
+                else "\u2014"
+            )
             prev_lap_secs = lap_secs
         else:
             diff_str = "\u2014"
+
+        if i == 0:
+            pos = grid_pos
+        else:
+            pos = compute_position(i, lap.crossing_time)
+
+        show_pos = pos is not None and pos != prev_position
+        prev_position = pos
 
         result.append(
             {
@@ -1707,6 +1779,7 @@ def round_result_team_laps(request, race_id, team_id):
                 "driver": driver if show_driver else "",
                 "lap_time": fmt(lap.lap_time),
                 "diff": diff_str,
+                "position": pos if show_pos else None,
             }
         )
         prev_driver = driver
