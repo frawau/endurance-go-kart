@@ -1273,6 +1273,7 @@ def singleteam_view(request):
 
         context = {
             "round": cround,
+            "active_race": cround.active_race,
             "teams": teams,
             "selected_team": selected_team,
             "organiser_logo": get_organiser_logo(cround),

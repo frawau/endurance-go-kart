@@ -115,7 +115,7 @@ table, table th, table td {
         <div class="content-wrapper">
             <div class="row mb-4">
                 <div class="col-12 text-left">
-                    <h1>{{ round.name }}&nbsp;&nbsp;Remaining Time: {% timer_widget "race-countdown" "countdownDisplay" round %}</h1>
+                    <h1>{{ round.name }}&nbsp;&nbsp;Remaining Time: {% timer_widget "race-countdown" "countdownDisplay" active_race|default:round %}</h1>
                 </div>
             </div>
 
