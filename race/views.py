@@ -1774,11 +1774,11 @@ def round_result_team_laps(request, race_id, team_id):
 
         if lap.lap_time is not None:
             lap_secs = lap.lap_time.total_seconds()
-            diff_str = (
-                f"+{lap_secs - prev_lap_secs:.3f}s"
-                if prev_lap_secs is not None
-                else "\u2014"
-            )
+            if prev_lap_secs is not None:
+                diff = lap_secs - prev_lap_secs
+                diff_str = f"{diff:+.3f}s"
+            else:
+                diff_str = "\u2014"
             prev_lap_secs = lap_secs
         else:
             diff_str = "\u2014"
