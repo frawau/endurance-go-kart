@@ -3501,6 +3501,135 @@ def get_sponsor_logos(round_obj):
 
 @login_required
 @user_passes_test(is_admin_user)
+def race_grid_pdf(request, race_id):
+    """Generate a PDF of the starting grid using ReportLab."""
+    from io import BytesIO
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import cm
+    from reportlab.lib import colors
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.platypus import (
+        SimpleDocTemplate,
+        Table,
+        TableStyle,
+        Paragraph,
+        Spacer,
+        Image,
+    )
+    from reportlab.lib.enums import TA_CENTER
+
+    race = get_object_or_404(Race, id=race_id)
+    grid_positions = GridPosition.objects.filter(race=race).order_by("position")
+    organiser_logo = get_organiser_logo(race.round)
+
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        leftMargin=2 * cm,
+        rightMargin=2 * cm,
+        topMargin=2 * cm,
+        bottomMargin=2 * cm,
+    )
+
+    styles = getSampleStyleSheet()
+    centered = ParagraphStyle("centered", parent=styles["Normal"], alignment=TA_CENTER)
+    title_style = ParagraphStyle(
+        "title",
+        parent=styles["Title"],
+        fontSize=28,
+        leading=34,
+        alignment=TA_CENTER,
+    )
+    subtitle_style = ParagraphStyle(
+        "subtitle",
+        parent=styles["Normal"],
+        fontSize=13,
+        leading=18,
+        alignment=TA_CENTER,
+        textColor=colors.HexColor("#444444"),
+    )
+
+    story = []
+
+    # Logo
+    if organiser_logo and organiser_logo.image:
+        try:
+            img = Image(organiser_logo.image.path, width=6 * cm, height=3 * cm)
+            img.hAlign = "CENTER"
+            story.append(img)
+            story.append(Spacer(1, 0.4 * cm))
+        except Exception:
+            pass
+
+    story.append(Paragraph("Starting Grid", title_style))
+    story.append(Spacer(1, 0.2 * cm))
+    story.append(Paragraph(race.round.championship.name, subtitle_style))
+    story.append(
+        Paragraph(f"{race.round.name} — {race.get_race_type_display()}", subtitle_style)
+    )
+    story.append(Spacer(1, 0.8 * cm))
+
+    # Table
+    header = [
+        Paragraph("<b>Pos</b>", centered),
+        Paragraph("<b>#</b>", centered),
+        Paragraph("<b>Team</b>", styles["Normal"]),
+    ]
+    rows = [header]
+    for gp in grid_positions:
+        rows.append(
+            [
+                Paragraph(str(gp.position), centered),
+                Paragraph(str(gp.team.number), centered),
+                Paragraph(gp.team.name, styles["Normal"]),
+            ]
+        )
+
+    page_width = A4[0] - 4 * cm  # subtract margins
+    col_widths = [2 * cm, 2.5 * cm, page_width - 4.5 * cm]
+    table = Table(rows, colWidths=col_widths, repeatRows=1)
+    table.setStyle(
+        TableStyle(
+            [
+                # Header
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#222222")),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, 0), 11),
+                ("BOTTOMPADDING", (0, 0), (-1, 0), 8),
+                ("TOPPADDING", (0, 0), (-1, 0), 8),
+                # Data rows
+                ("FONTSIZE", (0, 1), (-1, -1), 11),
+                ("TOPPADDING", (0, 1), (-1, -1), 7),
+                ("BOTTOMPADDING", (0, 1), (-1, -1), 7),
+                (
+                    "ROWBACKGROUNDS",
+                    (0, 1),
+                    (-1, -1),
+                    [colors.white, colors.HexColor("#f5f5f5")],
+                ),
+                ("LINEBELOW", (0, 0), (-1, -1), 0.5, colors.HexColor("#cccccc")),
+                ("ALIGN", (0, 0), (1, -1), "CENTER"),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ]
+        )
+    )
+    story.append(table)
+
+    doc.build(story)
+    buffer.seek(0)
+
+    filename = f"grid_{race.round.name}_{race.get_race_type_display()}.pdf".replace(
+        " ", "_"
+    ).replace("/", "-")
+    response = HttpResponse(buffer, content_type="application/pdf")
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response
+
+
+@login_required
+@user_passes_test(is_admin_user)
 def race_grid_management(request, race_id):
     """Grid management view for race directors"""
     race = get_object_or_404(Race, id=race_id)

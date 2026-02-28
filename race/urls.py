@@ -172,6 +172,11 @@ urlpatterns = [
         name="race_grid_management",
     ),
     path(
+        "race/<int:race_id>/grid/pdf/",
+        views.race_grid_pdf,
+        name="race_grid_pdf",
+    ),
+    path(
         "api/race/<int:race_id>/grid/update/",
         views.update_grid_position,
         name="update_grid_position",

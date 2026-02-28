@@ -126,9 +126,9 @@
                                 <i class="fas fa-unlock"></i> Unlock Grid
                             </button>
                         </form>
-                        <button type="button" class="btn btn-secondary" onclick="window.print()">
-                            <i class="fas fa-print"></i> Print Starting Grid
-                        </button>
+                        <a href="{% url 'race_grid_pdf' race.id %}" class="btn btn-secondary">
+                            <i class="fas fa-file-pdf"></i> Download Grid PDF
+                        </a>
                         {% else %}
                         <form method="post" action="{% url 'lock_grid' race.id %}" style="display:inline;">
                             {% csrf_token %}
