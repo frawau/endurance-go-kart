@@ -610,8 +610,21 @@ class Round(models.Model):
 
                 # Check driver-level time_limit_min transgression
                 if penalties["time_limit_min"]:
+                    driver_time_spent = driver.time_spent
+                    min_limit = self.limit_time_min
                     transgression_count = driver.limit_time_min_transgression
+
+                    print(f"Driver {driver.member.nickname} (min time check):")
+                    print(
+                        f"  - Time spent: {driver_time_spent.total_seconds()/60:.1f} minutes"
+                    )
+                    print(
+                        f"  - Min time required: {min_limit.total_seconds()/60:.1f} minutes"
+                    )
+                    print(f"  - Transgression count: {transgression_count}")
+
                     if transgression_count > 0:
+                        print(f"  - ⚠️ MIN TIME VIOLATION - Creating penalty")
                         # Calculate penalty laps (ensure integer)
                         penalty_laps = (
                             penalties["time_limit_min"].value * transgression_count
@@ -620,6 +633,8 @@ class Round(models.Model):
                         # If penalty is per hour, multiply by race duration in hours
                         if penalties["time_limit_min"].option == "per_hour":
                             penalty_laps = penalty_laps * duration_hours
+
+                        print(f"  - Penalty laps: {penalty_laps}")
 
                         # Create RoundPenalty for the driver's team
                         round_penalty = RoundPenalty.objects.create(
@@ -631,6 +646,8 @@ class Round(models.Model):
                             imposed=penalty_timestamp,
                         )
                         penalties_created += 1
+                    else:
+                        print(f"  - ✅ No min time violation")
 
         # Mark post-race check as completed to prevent duplicates
         self.post_race_check_completed = True
