@@ -42,6 +42,8 @@ from race.models import (
     Round,
     RoundPenalty,
     Session,
+    Transponder,
+    round_team,
     team_member,
 )
 from race.utils import dataencode
@@ -163,10 +165,9 @@ class Command(BaseCommand):
 
         transponder_map, team_transponder = self._build_transponder_map(active_race)
         if not transponder_map:
-            raise CommandError(
-                "No transponder assignments found for this race. "
-                "Complete transponder matching first."
-            )
+            self.log("No transponder assignments found — creating random assignments…")
+            self._create_random_transponder_assignments(cround, active_race)
+            transponder_map, team_transponder = self._build_transponder_map(active_race)
         self.log(f"Transponder assignments: {len(transponder_map)} teams")
         self._ensure_assignments_confirmed(active_race)
 
@@ -690,6 +691,56 @@ class Command(BaseCommand):
         if not race:
             raise CommandError("No unstarted race found in this round.")
         return race
+
+    def _create_random_transponder_assignments(self, cround, race):
+        """Assign transponders from the global 25-transponder pool to all round teams.
+
+        Mirrors the logic in populate_round so the two commands are consistent.
+        """
+        POOL_SIZE = 25
+        pool = []
+        for i in range(1, POOL_SIZE + 1):
+            t, _ = Transponder.objects.get_or_create(transponder_id=f"{100000 + i:06d}")
+            pool.append(t)
+
+        already_assigned = set(
+            RaceTransponderAssignment.objects.filter(race=race).values_list(
+                "team_id", flat=True
+            )
+        )
+        used_transponder_ids = set(
+            RaceTransponderAssignment.objects.filter(race=race).values_list(
+                "transponder_id", flat=True
+            )
+        )
+        free_pool = [t for t in pool if t.pk not in used_transponder_ids]
+        random.shuffle(free_pool)
+
+        teams = list(
+            round_team.objects.filter(round=cround).exclude(pk__in=already_assigned)
+        )
+        if len(teams) > len(free_pool):
+            self.log(
+                f"  Warning: {len(teams)} teams but only {len(free_pool)} free transponders "
+                f"— first {len(free_pool)} teams will be assigned."
+            )
+            teams = teams[: len(free_pool)]
+
+        for rt in teams:
+            transponder = free_pool.pop()
+            RaceTransponderAssignment.objects.create(
+                race=race,
+                transponder=transponder,
+                team=rt,
+                kart_number=rt.number,
+                confirmed=True,
+            )
+
+        if not race.grid_locked:
+            race.grid_locked = True
+            race.save(update_fields=["grid_locked"])
+
+        self.log(f"  Created {len(teams)} transponder assignment(s) ✓")
 
     def _ensure_assignments_confirmed(self, race):
         """Confirm any unconfirmed transponder assignments and lock the grid.
