@@ -1807,8 +1807,12 @@ def round_result_team_laps(request, race_id, team_id):
         )
         prev_driver = driver
 
-    # Append penalty row if the team has lap penalties
+    # Append penalty / benefit rows for MAIN races
     if not is_qualifying:
+        standings = race.calculate_race_standings()
+        final_pos = next(
+            (s["position"] for s in standings if s["team_id"] == team.id), None
+        )
         total_penalty = (
             RoundPenalty.objects.filter(
                 round=race.round,
@@ -1818,11 +1822,6 @@ def round_result_team_laps(request, race_id, team_id):
             or 0
         )
         if total_penalty > 0:
-            standings = race.calculate_race_standings()
-            final_pos = next(
-                (s["position"] for s in standings if s["team_id"] == team.id),
-                None,
-            )
             label = f"Penalty {total_penalty} lap{'s' if total_penalty != 1 else ''}"
             result.append(
                 {
@@ -1832,6 +1831,22 @@ def round_result_team_laps(request, race_id, team_id):
                     "diff": "—",
                     "position": final_pos,
                     "is_penalty": True,
+                }
+            )
+        elif (
+            final_pos is not None
+            and prev_position is not None
+            and final_pos < prev_position
+        ):
+            # This team moved up because other teams received lap penalties
+            result.append(
+                {
+                    "lap_number": "",
+                    "driver": "Other teams penalties \U0001f3c6",
+                    "lap_time": "—",
+                    "diff": "—",
+                    "position": final_pos,
+                    "is_other_penalty": True,
                 }
             )
 

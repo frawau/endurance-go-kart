@@ -229,6 +229,21 @@ const liveRaces = [
         border-color: rgba(220,80,80,0.5);
     }
 
+    /* ── Other-teams-penalty benefit row ── */
+    .result-table tr.lap-other-penalty {
+        background-color: rgba(60,80,60,0.25) !important;
+        border-top: 1px solid rgba(120,180,120,0.4);
+    }
+    .result-table tr.lap-other-penalty td {
+        color: #ffffff !important;
+        font-style: italic;
+    }
+    .result-table tr.lap-other-penalty .pos-change {
+        background: rgba(80,140,80,0.3);
+        color: #ffffff;
+        border-color: rgba(120,180,120,0.5);
+    }
+
     /* ── Expand arrow on team rows ── */
     .expand-icon {
         display: inline-block;
@@ -367,17 +382,22 @@ document.addEventListener('DOMContentLoaded', function () {
                 for (let i = data.laps.length - 1; i >= 0; i--) {
                     const lap = data.laps[i];
                     const isPenalty = lap.is_penalty === true;
+                    const isOtherPenalty = lap.is_other_penalty === true;
                     const tr = document.createElement('tr');
-                    tr.className = `lap-row ${isPenalty ? 'lap-penalty' : (i % 2 === 0 ? 'lap-odd' : 'lap-even')}`;
+                    if (isPenalty) {
+                        tr.className = 'lap-row lap-penalty';
+                    } else if (isOtherPenalty) {
+                        tr.className = 'lap-row lap-other-penalty';
+                    } else {
+                        tr.className = `lap-row ${i % 2 === 0 ? 'lap-odd' : 'lap-even'}`;
+                    }
                     tr.dataset.teamId = teamId;
                     tr.style.display = 'table-row';
-                    const showPos = isPenalty
-                        ? lap.position !== null && lap.position !== undefined
-                        : lap.position !== null && lap.position !== undefined;
+                    const showPos = lap.position !== null && lap.position !== undefined;
                     const posHtml = showPos
                         ? `<span class="pos-change">${lap.position}</span>`
                         : '';
-                    const driverStyle = isPenalty ? '' : 'style="color:rgba(220,200,240,0.9)"';
+                    const driverStyle = (isPenalty || isOtherPenalty) ? '' : 'style="color:rgba(220,200,240,0.9)"';
                     tr.innerHTML =
                         `<td class="col-strip"></td>` +
                         `<td ${driverStyle}>${escHtml(lap.driver)}</td>` +
