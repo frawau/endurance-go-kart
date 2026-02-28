@@ -3397,6 +3397,7 @@ def race_grid_management(request, race_id):
         "grid_positions": grid_positions,
         "unassigned_teams": unassigned_teams,
         "is_locked": race.grid_locked,
+        "organiser_logo": get_organiser_logo(race.round),
     }
 
     return render(request, "pages/race_grid_management.html", context)
