@@ -550,7 +550,11 @@ class Command(BaseCommand):
             pit_open_at = 0.0
             pit_close_at = float("inf")
         else:
-            pit_open_at = pit_open_after
+            # pit_open_after and pit_close_before are real-world seconds from the
+            # model config, but elapsed_race is in simulated seconds (wall * speed).
+            # Multiply by speed so the simulator's gate aligns with the model's
+            # real-time pit_lane_open check (driver_register enforces this).
+            pit_open_at = pit_open_after * speed
             pit_close_at = round_duration_s - pit_close_before
 
         team_stats = await sync_to_async(self._init_team_stats)(
