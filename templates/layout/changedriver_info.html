@@ -6,19 +6,40 @@
 
 <script>
     const wsScheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
-    const socket = new WebSocket(`${wsScheme}://${window.location.host}/ws/changedriver/`);
+    let socket = null;
+    let reconnectAttempts = 0;
+    const reconnectDelay = 3000;
 
-    socket.onmessage = function (event) {
-        const data = JSON.parse(event.data);
-        document.getElementById('changedinfo').outerHTML = data.driverc_html;
-    };
-
-    socket.onclose = function(event) {
-        if (!event.wasClean) {
-            reloadTimer = setTimeout(() => {
-                location.reload();
-            }, 3000); // Reload after 3 seconds
+    function connectWebSocket() {
+        if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
+            socket.close();
         }
-    };
+
+        socket = new WebSocket(`${wsScheme}://${window.location.host}/ws/changedriver/`);
+
+        socket.onopen = function() {
+            reconnectAttempts = 0;
+        };
+
+        socket.onmessage = function(event) {
+            const data = JSON.parse(event.data);
+            document.getElementById('changedinfo').outerHTML = data.driverc_html;
+        };
+
+        socket.onclose = function(event) {
+            if (event.wasClean) return;
+            const delay = Math.min(reconnectDelay * Math.pow(1.5, reconnectAttempts), 30000);
+            reconnectAttempts++;
+            setTimeout(connectWebSocket, delay);
+        };
+
+        socket.onerror = function() {
+            const delay = Math.min(reconnectDelay * Math.pow(1.5, reconnectAttempts), 30000);
+            reconnectAttempts++;
+            setTimeout(connectWebSocket, delay);
+        };
+    }
+
+    connectWebSocket();
 </script>
 {% endblock %}

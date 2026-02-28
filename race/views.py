@@ -1766,7 +1766,12 @@ def round_result_team_laps(request, race_id, team_id):
             diff_str = "\u2014"
 
         if i == 0:
-            pos = grid_pos
+            if is_qualifying:
+                pos = None
+            elif grid_pos is not None:
+                pos = grid_pos
+            else:
+                pos = compute_position(0, lap.crossing_time)
         else:
             pos = compute_position(i, lap.crossing_time)
 
