@@ -208,7 +208,7 @@ def handle_race_change(sender, instance, **kwargs):
         if prev_ended:
             from django.urls import reverse
 
-            next_url = reverse("public_leaderboard", kwargs={"race_id": instance.id})
+            next_url = reverse("public_leaderboard")
             async_to_sync(channel_layer.group_send)(
                 f"leaderboard_{prev_ended.id}",
                 {"type": "race_ended", "next_race_url": next_url},

@@ -3544,26 +3544,14 @@ def auto_assign_from_championship(request, race_id):
 # ============================================================
 
 
-def public_leaderboard(request, race_id):
-    """Public full-screen leaderboard display"""
-    race = get_object_or_404(Race, id=race_id)
+def public_leaderboard(request):
+    """Public full-screen leaderboard — always shows the current round's active race."""
+    cround = Round.objects.filter(ended__isnull=True).order_by("start").first()
+    race = cround.active_race if cround else None
 
-    # If this race ended and the next race already has pre-race check, redirect there
-    if race.ended:
-        next_race = (
-            Race.objects.filter(
-                round=race.round,
-                sequence_number__gt=race.sequence_number,
-                ready=True,
-                ended__isnull=True,
-            )
-            .order_by("sequence_number")
-            .first()
-        )
-        if next_race:
-            return redirect("public_leaderboard", race_id=next_race.id)
+    if race is None:
+        return render(request, "pages/public_leaderboard.html", {"race": None})
 
-    # Get initial standings or pre-race team list
     standings = race.calculate_race_standings() if race.started else []
     teams = race.get_all_teams().order_by("team__number") if not race.started else []
 

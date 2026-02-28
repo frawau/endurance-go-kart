@@ -208,7 +208,7 @@ urlpatterns = [
     ),
     # Leaderboard (Phase 5 - Leaderboard & Displays)
     path(
-        "leaderboard/<int:race_id>/",
+        "leaderboard/",
         views.public_leaderboard,
         name="public_leaderboard",
     ),
