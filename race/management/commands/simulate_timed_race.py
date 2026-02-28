@@ -685,9 +685,9 @@ class Command(BaseCommand):
         change_user = self._ensure_scanner_user("sim_driver_scanner", change_group)
         qt, _ = Token.objects.get_or_create(user=queue_user)
         ct, _ = Token.objects.get_or_create(user=change_user)
-        qc = APIClient()
+        qc = APIClient(SERVER_NAME="localhost")
         qc.credentials(HTTP_AUTHORIZATION=f"Token {qt.key}")
-        cc = APIClient()
+        cc = APIClient(SERVER_NAME="localhost")
         cc.credentials(HTTP_AUTHORIZATION=f"Token {ct.key}")
         return qc, cc
 
