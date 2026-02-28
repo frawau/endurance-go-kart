@@ -735,7 +735,9 @@ class Command(BaseCommand):
         is_qualifying = race_type in ("Q1", "Q2", "Q3")
         pit_window = pit_close_at - pit_open_at  # ≤ 0 means window never opens
         stats = {}
-        for team in cround.round_team_set.filter(retired=False):
+        for team in cround.round_team_set.select_related("team", "team__team").filter(
+            retired=False
+        ):
             if is_qualifying or pit_window <= 0:
                 # No changes required; a small fraction might attempt one opportunistically.
                 target = 1 if random.random() < 0.15 else 0
@@ -783,8 +785,10 @@ class Command(BaseCommand):
             start__isnull=True,
             end__isnull=True,
         ).values_list("driver_id", flat=True)
-        available = team.team_member_set.filter(driver=True).exclude(
-            id__in=list(active_ids) + list(queued_ids)
+        available = (
+            team.team_member_set.select_related("member")
+            .filter(driver=True)
+            .exclude(id__in=list(active_ids) + list(queued_ids))
         )
         if not available.exists():
             return None
@@ -796,13 +800,17 @@ class Command(BaseCommand):
         return (undriven if undriven.exists() else available).order_by("?").first()
 
     def _get_current_driver(self, cround, team):
-        s = Session.objects.filter(
-            round=cround,
-            driver__team=team,
-            register__isnull=False,
-            start__isnull=False,
-            end__isnull=True,
-        ).first()
+        s = (
+            Session.objects.select_related("driver__member")
+            .filter(
+                round=cround,
+                driver__team=team,
+                register__isnull=False,
+                start__isnull=False,
+                end__isnull=True,
+            )
+            .first()
+        )
         return s.driver if s else None
 
     def log(self, message):
