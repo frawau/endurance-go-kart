@@ -3,14 +3,20 @@
 
 {% block extra_style %}
 @media print {
-    /* Hide everything except the print area */
-    body > *:not(#print-area) { display: none !important; }
+    /* Hide everything, then reveal only the print area */
+    body * { visibility: hidden; }
     #print-area {
+        visibility: visible;
         display: block !important;
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
         margin: 0;
         padding: 20px;
         font-family: Arial, sans-serif;
     }
+    #print-area * { visibility: visible; }
     .print-header {
         text-align: center;
         margin-bottom: 24px;
