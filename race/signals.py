@@ -264,6 +264,7 @@ def handle_session_change(sender, instance, **kwargs):
             "driver id": driver.id,
             "driver status": dstatus,
             "completed sessions": completed_sessions_count,
+            "team number": round_team.team.number,
         },
     )
 
@@ -332,5 +333,6 @@ def handle_session_delete(sender, instance, **kwargs):
             "driver id": driver.id,
             "driver status": dstatus,
             "completed sessions": completed_sessions_count,
+            "team number": driver.team.team.number,
         },
     )

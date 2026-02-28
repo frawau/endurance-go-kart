@@ -329,17 +329,23 @@ def racecontrol(request):
 
         active_race = cround.active_race
 
-        # For each session, get the team's completed sessions count for the active race
-        for session in pending_sessions:
+        # For each session, compute completed changes + position in same-team queue
+        pending_list = list(pending_sessions)
+        for idx, session in enumerate(pending_list):
             if active_race:
-                completed_count = Session.objects.filter(
+                ended_count = Session.objects.filter(
                     driver__team=session.driver.team,
                     race=active_race,
                     end__isnull=False,
                 ).count()
+                preceding_same_team = sum(
+                    1
+                    for s in pending_list[:idx]
+                    if s.driver.team_id == session.driver.team_id
+                )
+                session.team_completed_count = ended_count + preceding_same_team
             else:
-                completed_count = 0
-            session.team_completed_count = completed_count
+                session.team_completed_count = 0
         race_sequence = (
             list(cround.races.all()) if not cround.uses_legacy_session_model else []
         )
@@ -1331,22 +1337,28 @@ def pending_drivers(request):
 
     active_race = cround.active_race
 
-    # For each session, get the team's completed sessions count for the active race
-    for session in pending_sessions:
+    # For each session, compute completed changes + position in same-team queue
+    pending_list = list(pending_sessions)
+    for idx, session in enumerate(pending_list):
         if active_race:
-            completed_count = Session.objects.filter(
+            ended_count = Session.objects.filter(
                 driver__team=session.driver.team,
                 race=active_race,
                 end__isnull=False,
             ).count()
+            preceding_same_team = sum(
+                1
+                for s in pending_list[:idx]
+                if s.driver.team_id == session.driver.team_id
+            )
+            session.team_completed_count = ended_count + preceding_same_team
         else:
-            completed_count = 0
-        session.team_completed_count = completed_count
+            session.team_completed_count = 0
 
     context = {
         "round": cround,
         "active_race": active_race,
-        "pending_sessions": pending_sessions,
+        "pending_sessions": pending_list,
         "organiser_logo": get_organiser_logo(cround),
     }
 
@@ -1388,22 +1400,28 @@ def pending_drivers_with_nav(request):
 
     active_race = cround.active_race
 
-    # For each session, get the team's completed sessions count for the active race
-    for session in pending_sessions:
+    # For each session, compute completed changes + position in same-team queue
+    pending_list = list(pending_sessions)
+    for idx, session in enumerate(pending_list):
         if active_race:
-            completed_count = Session.objects.filter(
+            ended_count = Session.objects.filter(
                 driver__team=session.driver.team,
                 race=active_race,
                 end__isnull=False,
             ).count()
+            preceding_same_team = sum(
+                1
+                for s in pending_list[:idx]
+                if s.driver.team_id == session.driver.team_id
+            )
+            session.team_completed_count = ended_count + preceding_same_team
         else:
-            completed_count = 0
-        session.team_completed_count = completed_count
+            session.team_completed_count = 0
 
     context = {
         "round": cround,
         "active_race": active_race,
-        "pending_sessions": pending_sessions,
+        "pending_sessions": pending_list,
         "organiser_logo": get_organiser_logo(cround),
         "sponsors_logos": get_sponsor_logos(cround),
     }

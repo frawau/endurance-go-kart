@@ -543,17 +543,16 @@ document.addEventListener('DOMContentLoaded', function() {
                         const driverId = data.driver_id;
                         const status = data.driver_status;
                         const completedSessions = data.completed_sessions;
+                        const teamNumber = data.team_number ? data.team_number.toString() : null;
 
-                        // Update the next change number in the pending drivers table
-                        const rows = document.querySelectorAll('.pending-row');
-                        rows.forEach(row => {
-                            if (row.getAttribute('data-driver-id') === driverId.toString()) {
-                                const nextChangeCell = row.querySelector('.next-change-number');
-                                if (nextChangeCell) {
-                                    nextChangeCell.textContent = completedSessions + 1;
-                                }
-                            }
-                        });
+                        function updateTeamRows(tNum, completed) {
+                            if (!tNum) return;
+                            const teamRows = document.querySelectorAll(`[data-team-number="${tNum}"].pending-row`);
+                            teamRows.forEach((row, idx) => {
+                                const cell = row.querySelector('.next-change-number');
+                                if (cell) cell.textContent = completed + idx + 1;
+                            });
+                        }
 
                         if (status === "register") {
                             // Add new row if it doesn't exist
@@ -573,14 +572,16 @@ document.addEventListener('DOMContentLoaded', function() {
                                         newRow.id = rowId;
                                         newRow.className = 'pending-row';
                                         newRow.setAttribute('data-driver-id', driverId);
+                                        newRow.setAttribute('data-team-number', driverInfo.team_number);
 
                                         newRow.innerHTML = `
                                             <td>${driverInfo.team_number}</td>
                                             <td>${driverInfo.nickname}</td>
-                                            <td class="next-change-number">${completedSessions + 1}</td>
+                                            <td class="next-change-number">…</td>
                                         `;
 
                                         tbody.appendChild(newRow);
+                                        updateTeamRows(driverInfo.team_number.toString(), completedSessions);
                                     })
                                     .catch(error => {
                                         console.error('Error fetching driver info:', error);
@@ -603,6 +604,10 @@ document.addEventListener('DOMContentLoaded', function() {
                                 noSessionsRow.innerHTML = '<td colspan="3">No waiting driver.</td>';
                                 tbody.appendChild(noSessionsRow);
                             }
+                            updateTeamRows(teamNumber, completedSessions);
+                        } else {
+                            // Driver ended or other update — renumber same-team pending rows
+                            updateTeamRows(teamNumber, completedSessions);
                         }
                     }
                 } catch (err) {
