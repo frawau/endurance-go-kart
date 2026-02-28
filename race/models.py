@@ -718,6 +718,7 @@ class Round(models.Model):
                 driver=driver,
                 round=self,
                 register=now,
+                race=self.active_race,
             )
             retval = {
                 "message": f"Driver {driver.member.nickname} from team {driver.team.number} registered.",
@@ -777,6 +778,7 @@ class Round(models.Model):
                 current_session.end = now
                 current_session.save()
                 next_session.start = now
+                next_session.race = self.active_race
                 next_session.save()
 
                 retval = {
@@ -1726,8 +1728,14 @@ class team_member(models.Model):
 
     @property
     def time_spent(self):
+        active_race = self.team.round.active_race
+        if active_race is not None:
+            race_filter = Q(race=active_race)
+        else:
+            # Round finished or legacy — show MAIN (or null for legacy rounds)
+            race_filter = Q(race__race_type="MAIN") | Q(race__isnull=True)
         sessions = self.session_set.filter(driver=self, start__isnull=False).filter(
-            Q(race__race_type="MAIN") | Q(race__isnull=True)
+            race_filter
         )
         total_time = dt.timedelta(0)
         now = dt.datetime.now()
