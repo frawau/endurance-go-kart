@@ -6,19 +6,33 @@
     <h1>Round Information</h1>
 
     <form method="get" id="round-form">
-        <div class="form-group">
-            <label for="round-select">Select Round:</label>
-            <select class="form-control" id="round-select" name="round_id" onchange="this.form.submit()">
-                {% for championship_name, championship_rounds in rounds_by_championship.items %}
-                    <optgroup label="{{ championship_name }}">
-                        {% for round in championship_rounds %}
-                            <option value="{{ round.id }}" {% if round.id == selected_round_id %}selected{% endif %}>
-                                {{ round.name }} ({{ round.start|date:"Y-m-d" }})
-                            </option>
-                        {% endfor %}
-                    </optgroup>
-                {% endfor %}
-            </select>
+        <div class="d-flex flex-wrap gap-3 align-items-end">
+            <div class="form-group mb-0">
+                <label for="round-select">Round:</label>
+                <select class="form-control" id="round-select" name="round_id" onchange="this.form.submit()">
+                    {% for championship_name, championship_rounds in rounds_by_championship.items %}
+                        <optgroup label="{{ championship_name }}">
+                            {% for round in championship_rounds %}
+                                <option value="{{ round.id }}" {% if round.id == selected_round_id %}selected{% endif %}>
+                                    {{ round.name }} ({{ round.start|date:"Y-m-d" }})
+                                </option>
+                            {% endfor %}
+                        </optgroup>
+                    {% endfor %}
+                </select>
+            </div>
+            {% if round_races %}
+            <div class="form-group mb-0">
+                <label for="race-select">Race:</label>
+                <select class="form-control" id="race-select" name="race_id" onchange="this.form.submit()">
+                    {% for race in round_races %}
+                        <option value="{{ race.id }}" {% if race.id == selected_race.id %}selected{% endif %}>
+                            {{ race.get_race_type_display }}{% if race.ended %} ✓{% elif race.started %} ▶{% endif %}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+            {% endif %}
         </div>
     </form>
 

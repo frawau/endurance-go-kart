@@ -1518,39 +1518,55 @@ def round_info(request):
         selected_round_id = closest_round.id if closest_round else None
 
     selected_round = None
+    selected_race = None
+    round_races = []
     round_teams = []
 
     if selected_round_id:
         selected_round = Round.objects.get(id=selected_round_id)
+        round_races = list(selected_round.races.order_by("sequence_number"))
+
+        # Race selector: default to MAIN, fall back to first race
+        selected_race_id = request.GET.get("race_id")
+        if selected_race_id:
+            selected_race = next(
+                (r for r in round_races if str(r.id) == selected_race_id), None
+            )
+        if selected_race is None:
+            selected_race = next(
+                (r for r in round_races if r.race_type == "MAIN"), None
+            ) or (round_races[0] if round_races else None)
+
         round_teams = round_team.objects.filter(round=selected_round)
 
-        # For each team, preload related members and their sessions
-        # Restrict to MAIN race sessions only (null race = legacy rounds)
-        _main_q = Q(race__isnull=True) | Q(race__race_type="MAIN")
+        # For each team, preload related members and their sessions for the selected race
+        if selected_race:
+            race_q = Q(race=selected_race)
+        else:
+            # Legacy round: no race objects — include sessions with null race
+            race_q = Q(race__isnull=True)
+
         for rt in round_teams:
-            # Get the completed sessions count
             rt.completed_sessions_count = (
                 Session.objects.filter(
                     round=selected_round, driver__team=rt, end__isnull=False
                 )
-                .filter(_main_q)
+                .filter(race_q)
                 .count()
             )
 
-            # Get all team members
             rt.members = team_member.objects.filter(team=rt)
 
-            # For each member, preload their sessions
             for member in rt.members:
                 member.sessions_count = (
                     Session.objects.filter(driver=member, end__isnull=False)
-                    .filter(_main_q)
+                    .filter(race_q)
                     .count()
                 )
 
                 member.all_sessions = (
                     Session.objects.filter(driver=member)
-                    .filter(_main_q)
+                    .filter(race_q)
                     .order_by("start")
                 )
 
@@ -1559,6 +1575,8 @@ def round_info(request):
         "rounds_by_championship": rounds_by_championship,
         "selected_round": selected_round,
         "selected_round_id": int(selected_round_id) if selected_round_id else None,
+        "round_races": round_races,
+        "selected_race": selected_race,
         "round_teams": round_teams,
         "organiser_logo": get_organiser_logo(selected_round),
         "sponsors_logos": get_sponsor_logos(selected_round),

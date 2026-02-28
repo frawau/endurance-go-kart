@@ -241,11 +241,15 @@ def handle_session_change(sender, instance, **kwargs):
     # Get the round_team for this driver
     round_team = driver.team
 
-    # Count completed sessions for this team
+    # Count completed sessions for this team in the current race only
     if round_instance.started:
-        completed_sessions_count = Session.objects.filter(
-            driver__team=round_team, end__isnull=False
-        ).count()
+        race = instance.race or round_instance.active_race
+        if race:
+            completed_sessions_count = Session.objects.filter(
+                driver__team=round_team, race=race, end__isnull=False
+            ).count()
+        else:
+            completed_sessions_count = 0
     else:
         completed_sessions_count = -1
 
@@ -303,12 +307,16 @@ def handle_session_delete(sender, instance, **kwargs):
     round_instance = instance.round
     driver = instance.driver
     dstatus = "reset"
-    # Count completed sessions for this team
+    # Count completed sessions for this team in the current race only
     if round_instance.started:
         try:
-            completed_sessions_count = Session.objects.filter(
-                driver__team=driver.team, end__isnull=False
-            ).count()
+            race = instance.race or round_instance.active_race
+            if race:
+                completed_sessions_count = Session.objects.filter(
+                    driver__team=driver.team, race=race, end__isnull=False
+                ).count()
+            else:
+                completed_sessions_count = 0
         except:
             return
     else:
