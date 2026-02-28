@@ -3552,15 +3552,20 @@ def race_grid_pdf(request, race_id):
 
     story = []
 
-    # Logo
+    # Logo — use organiser logo if set, else fall back to app logo
+    from django.conf import settings as django_settings
+
     if organiser_logo and organiser_logo.image:
-        try:
-            img = Image(organiser_logo.image.path, width=6 * cm, height=3 * cm)
-            img.hAlign = "CENTER"
-            story.append(img)
-            story.append(Spacer(1, 0.4 * cm))
-        except Exception:
-            pass
+        logo_path = organiser_logo.image.path
+    else:
+        logo_path = str(django_settings.STATIC_ROOT / "logos" / "gokartrace-logo.png")
+    try:
+        img = Image(logo_path, width=6 * cm, height=3 * cm)
+        img.hAlign = "CENTER"
+        story.append(img)
+        story.append(Spacer(1, 0.4 * cm))
+    except Exception:
+        pass
 
     story.append(Paragraph("Starting Grid", title_style))
     story.append(Spacer(1, 0.2 * cm))
