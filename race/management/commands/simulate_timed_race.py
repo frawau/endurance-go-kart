@@ -535,12 +535,13 @@ class Command(BaseCommand):
             lambda: cround.pitlane_close_before.total_seconds()
         )()
         required_changes = await sync_to_async(lambda: cround.required_changes)()
+        race_type = await sync_to_async(lambda: active_race.race_type)()
 
         pit_open_at = pit_open_after
         pit_close_at = race_duration_s - pit_close_before
 
         team_stats = await sync_to_async(self._init_team_stats)(
-            cround, required_changes, avg_lap, race_duration_s, pit_open_at
+            cround, required_changes, race_type, avg_lap, pit_open_at, pit_close_at
         )
         self.log(
             f"[PitLane] {len(team_stats)} teams — "
@@ -606,7 +607,7 @@ class Command(BaseCommand):
                             stats["completed_changes"] += 1
                             stats["has_queued"] = False
                             stats["next_queue_race_time"] = self._next_queue_time(
-                                elapsed_race, stats, race_duration_s, avg_lap
+                                elapsed_race, stats, pit_close_at, avg_lap
                             )
                             self.log(
                                 f"[PitLane] Team {team.number}: "
@@ -721,15 +722,23 @@ class Command(BaseCommand):
                 )
 
     def _init_team_stats(
-        self, cround, required_changes, avg_lap, race_duration_s, pit_open_at
+        self, cround, required_changes, race_type, avg_lap, pit_open_at, pit_close_at
     ):
+        is_qualifying = race_type in ("Q1", "Q2", "Q3")
+        pit_window = pit_close_at - pit_open_at  # ≤ 0 means window never opens
         stats = {}
         for team in cround.round_team_set.filter(retired=False):
-            v = random.random()
-            target = required_changes + (
-                1 if v < 0.6 else random.randint(2, 4) if v < 0.8 else 0
+            if is_qualifying or pit_window <= 0:
+                # No changes required; a small fraction might attempt one opportunistically.
+                target = 1 if random.random() < 0.15 else 0
+            else:
+                v = random.random()
+                target = required_changes + (
+                    1 if v < 0.6 else random.randint(2, 4) if v < 0.8 else 0
+                )
+            initial_queue = pit_open_at + random.uniform(
+                0, min(avg_lap * 2, max(pit_window * 0.2, 1))
             )
-            initial_queue = pit_open_at + random.uniform(0, avg_lap * 2)
             stats[team.id] = {
                 "team": team,
                 "target_changes": target,
@@ -740,14 +749,15 @@ class Command(BaseCommand):
             }
         return stats
 
-    def _next_queue_time(self, current_race, stats, race_duration_s, avg_lap):
+    def _next_queue_time(self, current_race, stats, pit_close_at, avg_lap):
+        """Schedule the next queue attempt, spread evenly within the remaining pit window."""
         remaining = stats["target_changes"] - stats["completed_changes"]
         if remaining <= 0:
             return float("inf")
-        remaining_race = race_duration_s - current_race - 10 * 60
-        if remaining_race <= 0:
+        remaining_window = pit_close_at - current_race
+        if remaining_window <= avg_lap:  # not enough time for another change
             return float("inf")
-        optimal = remaining_race / remaining
+        optimal = remaining_window / remaining
         return current_race + optimal * random.uniform(0.85, 1.15)
 
     def _pick_next_driver(self, cround, team):
