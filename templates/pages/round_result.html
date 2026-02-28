@@ -214,6 +214,21 @@ const liveRaces = [
         border: 1px solid rgba(255,210,80,0.35);
     }
 
+    /* ── Penalty row ── */
+    .result-table tr.lap-penalty {
+        background-color: rgba(180,50,50,0.25) !important;
+        border-top: 1px solid rgba(220,80,80,0.4);
+    }
+    .result-table tr.lap-penalty td {
+        color: #ff8080 !important;
+        font-style: italic;
+    }
+    .result-table tr.lap-penalty .pos-change {
+        background: rgba(220,80,80,0.25);
+        color: #ff8080;
+        border-color: rgba(220,80,80,0.5);
+    }
+
     /* ── Expand arrow on team rows ── */
     .expand-icon {
         display: inline-block;
@@ -351,18 +366,23 @@ document.addEventListener('DOMContentLoaded', function () {
                    in reverse so the final order is ascending lap number. */
                 for (let i = data.laps.length - 1; i >= 0; i--) {
                     const lap = data.laps[i];
+                    const isPenalty = lap.is_penalty === true;
                     const tr = document.createElement('tr');
-                    tr.className = `lap-row ${i % 2 === 0 ? 'lap-odd' : 'lap-even'}`;
+                    tr.className = `lap-row ${isPenalty ? 'lap-penalty' : (i % 2 === 0 ? 'lap-odd' : 'lap-even')}`;
                     tr.dataset.teamId = teamId;
                     tr.style.display = 'table-row';
-                    const posHtml = lap.position !== null && lap.position !== undefined
+                    const showPos = isPenalty
+                        ? lap.position !== null && lap.position !== undefined
+                        : lap.position !== null && lap.position !== undefined;
+                    const posHtml = showPos
                         ? `<span class="pos-change">${lap.position}</span>`
                         : '';
+                    const driverStyle = isPenalty ? '' : 'style="color:rgba(220,200,240,0.9)"';
                     tr.innerHTML =
                         `<td class="col-strip"></td>` +
-                        `<td style="color:rgba(220,200,240,0.9)">${escHtml(lap.driver)}</td>` +
+                        `<td ${driverStyle}>${escHtml(lap.driver)}</td>` +
                         `<td class="pos-col">${posHtml}</td>` +
-                        `<td>${lap.lap_number}</td>` +
+                        `<td>${escHtml(String(lap.lap_number))}</td>` +
                         `<td>${escHtml(lap.lap_time)}</td>` +
                         `<td style="color:${diffColor(lap.diff)}">${escHtml(lap.diff)}</td>`;
                     teamRow.insertAdjacentElement('afterend', tr);

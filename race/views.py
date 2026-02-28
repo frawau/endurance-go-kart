@@ -30,7 +30,7 @@ from rest_framework.decorators import (
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework import status
 from django.db import IntegrityError
-from django.db.models import Q
+from django.db.models import Q, Sum
 from django.views.decorators.csrf import csrf_exempt
 import json
 from .models import (
@@ -1788,6 +1788,34 @@ def round_result_team_laps(request, race_id, team_id):
             }
         )
         prev_driver = driver
+
+    # Append penalty row if the team has lap penalties
+    if not is_qualifying:
+        total_penalty = (
+            RoundPenalty.objects.filter(
+                round=race.round,
+                offender=team,
+                penalty__sanction__in=["L", "P"],
+            ).aggregate(total=Sum("value"))["total"]
+            or 0
+        )
+        if total_penalty > 0:
+            standings = race.calculate_race_standings()
+            final_pos = next(
+                (s["position"] for s in standings if s["team_id"] == team.id),
+                None,
+            )
+            label = f"Penalty {total_penalty} lap{'s' if total_penalty != 1 else ''}"
+            result.append(
+                {
+                    "lap_number": "",
+                    "driver": label,
+                    "lap_time": "—",
+                    "diff": "—",
+                    "position": final_pos,
+                    "is_penalty": True,
+                }
+            )
 
     return JsonResponse({"laps": result})
 

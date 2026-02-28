@@ -1,7 +1,7 @@
 import uuid
 
 from django.db import models
-from django.db.models import Q, UniqueConstraint
+from django.db.models import Q, Sum, UniqueConstraint
 from django_countries.fields import CountryField
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.core.exceptions import (
@@ -1538,6 +1538,20 @@ class Race(models.Model):
                 last_lap_time = None
                 best_lap_time = None
 
+            # Deduct lap penalties (L = Laps, P = Post Race Laps)
+            if not is_qualifying:
+                penalty_laps = (
+                    RoundPenalty.objects.filter(
+                        round=self.round,
+                        offender=team,
+                        penalty__sanction__in=["L", "P"],
+                    ).aggregate(total=Sum("value"))["total"]
+                    or 0
+                )
+                laps_completed = max(0, laps_completed - penalty_laps)
+            else:
+                penalty_laps = 0
+
             # Get grid position if available
             try:
                 grid_pos = GridPosition.objects.get(race=self, team=team)
@@ -1552,6 +1566,7 @@ class Race(models.Model):
                     "team_name": team.name,
                     "retired": team.retired,
                     "laps_completed": laps_completed,
+                    "penalty_laps": penalty_laps,
                     "total_time": total_time.total_seconds() if total_time else None,
                     "total_time_formatted": fmt_time(total_time),
                     "last_lap_time": last_lap_time.total_seconds()
