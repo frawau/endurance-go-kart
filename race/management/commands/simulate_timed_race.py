@@ -711,7 +711,15 @@ class Command(BaseCommand):
     def _register_first_drivers(self, cround, active_race):
         now = dt.datetime.now()
         for team in cround.round_team_set.filter(retired=False):
-            already = Session.objects.filter(round=cround, driver__team=team).exists()
+            # A pending session is registered but not yet started and not ended.
+            # Previous races leave behind ended sessions — those don't count.
+            already = Session.objects.filter(
+                round=cround,
+                driver__team=team,
+                register__isnull=False,
+                start__isnull=True,
+                end__isnull=True,
+            ).exists()
             if already:
                 continue
             driver = team.team_member_set.filter(driver=True).order_by("?").first()
