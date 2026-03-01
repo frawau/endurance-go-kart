@@ -22,6 +22,27 @@
         </div>
     </form>
 
+    {% if finished_teams %}
+    <div class="d-flex align-items-center gap-3 mt-3 mb-2">
+        <select id="csv-team-select" class="form-control" style="width: auto;">
+            <option value="all">All Teams</option>
+            {% for team in finished_teams %}
+            <option value="{{ team.id }}">{{ team.number }} — {{ team.name }}</option>
+            {% endfor %}
+        </select>
+        <a id="csv-download-btn" href="{% url 'round_result_csv' %}?round_id={{ selected_round_id }}&team_id=all"
+           class="btn btn-outline-success btn-sm">
+            <i class="fas fa-download me-1"></i> Export CSV
+        </a>
+    </div>
+    <script>
+    document.getElementById('csv-team-select').addEventListener('change', function() {
+        const btn = document.getElementById('csv-download-btn');
+        btn.href = "{% url 'round_result_csv' %}?round_id={{ selected_round_id }}&team_id=" + this.value;
+    });
+    </script>
+    {% endif %}
+
     {% if races_data %}
     <div class="races-container mt-4">
         {% for race_data in races_data %}

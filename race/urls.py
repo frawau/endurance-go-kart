@@ -57,6 +57,7 @@ urlpatterns = [
     ),
     path("round_info/", views.round_info, name="round_info"),
     path("round_result/", views.round_result, name="round_result"),
+    path("round_result/csv/", views.round_result_csv, name="round_result_csv"),
     path(
         "api/race/<int:race_id>/team/<int:team_id>/laps/",
         views.round_result_team_laps,

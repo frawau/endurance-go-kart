@@ -8,6 +8,8 @@ import re
 import socket
 import ipaddress
 import netifaces
+import csv
+
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth import authenticate
@@ -1656,6 +1658,23 @@ def round_result(request):
                 }
             )
 
+    # Collect unique teams across all finished races for the CSV selector
+    finished_teams = []
+    seen_ids = set()
+    for rd in races_data:
+        if rd["is_finished"]:
+            for s in rd["standings"]:
+                if s["team_id"] not in seen_ids:
+                    seen_ids.add(s["team_id"])
+                    finished_teams.append(
+                        {
+                            "id": s["team_id"],
+                            "number": s["team_number"],
+                            "name": s["team_name"],
+                        }
+                    )
+    finished_teams.sort(key=lambda t: t["number"])
+
     return render(
         request,
         "pages/round_result.html",
@@ -1664,6 +1683,7 @@ def round_result(request):
             "selected_round": selected_round,
             "selected_round_id": int(selected_round_id) if selected_round_id else None,
             "races_data": races_data,
+            "finished_teams": finished_teams,
             "organiser_logo": get_organiser_logo(selected_round),
             "sponsors_logos": get_sponsor_logos(selected_round),
         },
@@ -1855,6 +1875,163 @@ def round_result_team_laps(request, race_id, team_id):
             )
 
     return JsonResponse({"laps": result})
+
+
+def round_result_csv(request):
+    """CSV export of lap-by-lap data for all finished races in a round."""
+    round_id = request.GET.get("round_id")
+    team_filter_id = request.GET.get("team_id")  # "all" or a team pk
+
+    selected_round = get_object_or_404(Round, id=int(round_id)) if round_id else None
+    if not selected_round:
+        return HttpResponse("round_id required", status=400)
+
+    finished_races = selected_round.races.filter(ended__isnull=False).order_by(
+        "sequence_number"
+    )
+
+    # Determine teams to export
+    all_teams = list(round_team.objects.filter(round=selected_round))
+    if team_filter_id and team_filter_id != "all":
+        teams = [t for t in all_teams if str(t.id) == team_filter_id]
+    else:
+        teams = all_teams
+
+    def fmt(td):
+        if td is None:
+            return ""
+        total_ms = int(td.total_seconds() * 1000)
+        ms = total_ms % 1000
+        total_s = total_ms // 1000
+        s = total_s % 60
+        m = total_s // 60
+        return f"{m:02d}:{s:02d}.{ms:03d}"
+
+    def get_driver_at(sessions, crossing_time):
+        for s in sessions:
+            if s.start and crossing_time >= s.start:
+                if s.end is None or crossing_time <= s.end:
+                    return s.driver.member.nickname
+        return ""
+
+    response = HttpResponse(content_type="text/csv")
+    filename = f"{selected_round.name.replace(' ', '_')}_laps.csv"
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+
+    writer = csv.writer(response)
+    writer.writerow(["Race", "Team", "Driver", "Position", "Lap Time", "Diff"])
+
+    for race in finished_races:
+        is_qualifying = race.race_type != "MAIN"
+
+        # Preload all valid crossings for position computation
+        all_laps_qs = (
+            LapCrossing.objects.filter(race=race, is_valid=True)
+            .order_by("crossing_time")
+            .values("team_id", "crossing_time", "lap_time")
+        )
+        team_data = {}
+        for row in all_laps_qs:
+            team_data.setdefault(row["team_id"], []).append(
+                (row["crossing_time"], row["lap_time"])
+            )
+
+        def compute_position(team_id, our_idx, T):
+            our_count = our_idx + 1
+            ahead = 0
+            if not is_qualifying:
+                for tid, tdata in team_data.items():
+                    if tid == team_id:
+                        continue
+                    other_count = sum(1 for ct, _ in tdata if ct <= T)
+                    if other_count > our_count:
+                        ahead += 1
+                    elif other_count == our_count and len(tdata) >= our_count:
+                        if tdata[our_count - 1][0] < T:
+                            ahead += 1
+            else:
+                our_best = None
+                for _, lt in team_data.get(team_id, [])[:our_count]:
+                    if lt is not None and (our_best is None or lt < our_best):
+                        our_best = lt
+                for tid, tdata in team_data.items():
+                    if tid == team_id:
+                        continue
+                    other_count = sum(1 for ct, _ in tdata if ct <= T)
+                    other_best = None
+                    for _, lt in tdata[:other_count]:
+                        if lt is not None and (other_best is None or lt < other_best):
+                            other_best = lt
+                    if our_best is None:
+                        if other_best is not None:
+                            ahead += 1
+                    elif other_best is not None and other_best < our_best:
+                        ahead += 1
+            return 1 + ahead
+
+        race_label = race.get_race_type_display()
+
+        for team in teams:
+            laps = list(
+                LapCrossing.objects.filter(
+                    race=race, team=team, is_valid=True
+                ).order_by("lap_number")
+            )
+            if not laps:
+                continue
+
+            sessions = list(
+                Session.objects.filter(round=race.round, driver__team=team)
+                .select_related("driver__member")
+                .order_by("start")
+            )
+
+            try:
+                grid_pos = GridPosition.objects.get(race=race, team=team).position
+            except GridPosition.DoesNotExist:
+                grid_pos = None
+
+            prev_lap_secs = None
+
+            for i, lap in enumerate(laps):
+                driver = get_driver_at(sessions, lap.crossing_time)
+
+                if lap.lap_time is not None:
+                    lap_secs = lap.lap_time.total_seconds()
+                    diff = (
+                        f"{lap_secs - prev_lap_secs:+.3f}s"
+                        if prev_lap_secs is not None
+                        else ""
+                    )
+                    prev_lap_secs = lap_secs
+                else:
+                    diff = ""
+
+                if i == 0:
+                    pos = (
+                        grid_pos
+                        if (not is_qualifying and grid_pos)
+                        else (
+                            None
+                            if is_qualifying
+                            else compute_position(team.id, 0, lap.crossing_time)
+                        )
+                    )
+                else:
+                    pos = compute_position(team.id, i, lap.crossing_time)
+
+                writer.writerow(
+                    [
+                        race_label,
+                        team.name,
+                        driver,
+                        pos if pos is not None else "",
+                        fmt(lap.lap_time),
+                        diff,
+                    ]
+                )
+
+    return response
 
 
 def round_penalties(request):
