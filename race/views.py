@@ -1919,7 +1919,9 @@ def round_result_csv(request):
     response["Content-Disposition"] = f'attachment; filename="{filename}"'
 
     writer = csv.writer(response)
-    writer.writerow(["Race", "#", "Team", "Driver", "Position", "Lap Time", "Diff"])
+    writer.writerow(
+        ["Race", "#", "Team", "Driver", "Position", "Lap #", "Lap Time", "Diff"]
+    )
 
     for race in finished_races:
         is_qualifying = race.race_type != "MAIN"
@@ -2027,6 +2029,7 @@ def round_result_csv(request):
                         team.name,
                         driver,
                         pos if pos is not None else "",
+                        lap.lap_number,
                         fmt(lap.lap_time),
                         diff,
                     ]
