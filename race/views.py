@@ -222,7 +222,12 @@ def changelane_info(request, lane_number):
     return render(
         request,
         "layout/changelane_info.html",
-        {"change_lane": change_lane, "round": cround, "lane_number": lane_number},
+        {
+            "change_lane": change_lane,
+            "round": cround,
+            "lane_number": lane_number,
+            "organiser_logo": get_organiser_logo(cround),
+        },
     )
 
 
