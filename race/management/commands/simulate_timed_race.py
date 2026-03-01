@@ -362,8 +362,8 @@ class Command(BaseCommand):
                 stop_wall = float(penalty.value) / speed
                 coord.stopped_teams[team.id] = loop.time() + stop_wall
                 # Schedule auto-serve
-                asyncio.get_event_loop().create_task(
-                    self._serve_penalty_after(rp.id, stop_wall)
+                asyncio.run_coroutine_threadsafe(
+                    self._serve_penalty_after(rp.id, stop_wall), loop
                 )
 
     async def _serve_penalty_after(self, penalty_id, delay_wall):
