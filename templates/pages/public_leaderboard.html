@@ -166,12 +166,12 @@
     {% else %}
     <div class="container-fluid">
         <div class="leaderboard-header">
-            <span id="wsStatus" class="ws-status ws-disconnected"><i class="fas fa-circle"></i> Disconnected</span>
+            <span id="wsStatus" class="ws-status ws-disconnected" style="display:inline-block;width:120px;"><i class="fas fa-circle"></i> Disconnected</span>
             <div class="leaderboard-title">
                 {{ race.round.name }} — {{ race.get_race_type_display }}
                 &nbsp;&nbsp;<span id="raceCountdown" class="timer">--:--</span>
             </div>
-            <span style="width:90px;"></span><!-- balance the ws-status on the left -->
+            <span style="display:inline-block;width:120px;"></span>
         </div>
 
         {% if race.started %}
@@ -245,11 +245,13 @@
         const wsStatus = document.getElementById('wsStatus');
         let socket;
         let reconnectAttempts = 0;
+        let disconnectTimer = null;
         function connect() {
             socket = new WebSocket(wsUrl);
 
             socket.onopen = function() {
                 console.log('Leaderboard WebSocket connected');
+                if (disconnectTimer) { clearTimeout(disconnectTimer); disconnectTimer = null; }
                 reconnectAttempts = 0;
                 wsStatus.className = 'ws-status ws-connected';
                 wsStatus.innerHTML = '<i class="fas fa-circle"></i> Live';
@@ -274,11 +276,17 @@
             };
 
             socket.onclose = function() {
-                wsStatus.className = 'ws-status ws-disconnected';
-                wsStatus.innerHTML = '<i class="fas fa-circle"></i> Disconnected';
                 reconnectAttempts++;
                 // Back off up to 30s, then retry indefinitely at 30s
                 const delay = Math.min(1000 * reconnectAttempts, 30000);
+                // Only show "Disconnected" if still not back after 3s
+                if (!disconnectTimer) {
+                    disconnectTimer = setTimeout(() => {
+                        disconnectTimer = null;
+                        wsStatus.className = 'ws-status ws-disconnected';
+                        wsStatus.innerHTML = '<i class="fas fa-circle"></i> Disconnected';
+                    }, 3000);
+                }
                 setTimeout(connect, delay);
             };
 
