@@ -182,6 +182,7 @@
                         <th style="width: 70px;">Pos</th>
                         <th style="width: 90px;">#</th>
                         <th>Team</th>
+                        <th>Driver</th>
                         <th style="width: 90px;">Laps</th>
                         <th style="width: 140px;">Last Lap</th>
                         <th style="width: 140px;">Best Lap</th>
@@ -195,6 +196,7 @@
                         <td><span class="position-badge">{{ s.position }}</span></td>
                         <td><strong>{{ s.team_number }}</strong></td>
                         <td>{{ s.team_name }}{% if s.retired %}<span class="retired-badge">RET</span>{% endif %}</td>
+                        <td>{% if s.current_driver_nickname %}<img src="{% static 'flags/' %}{{ s.current_driver_country }}.gif" style="height:16px;margin-right:5px;" alt="{{ s.current_driver_country }}">{{ s.current_driver_nickname }}{% endif %}</td>
                         <td><strong>{{ s.laps_completed }}</strong></td>
                         <td>{{ s.last_lap_time_formatted }}</td>
                         <td>{{ s.best_lap_time_formatted }}</td>
@@ -204,7 +206,7 @@
                     </tr>
                     {% empty %}
                     <tr>
-                        <td colspan="7" style="text-align: center;">No standings data yet</td>
+                        <td colspan="8" style="text-align: center;">No standings data yet</td>
                     </tr>
                     {% endfor %}
                 </tbody>
@@ -328,6 +330,9 @@
                 row.dataset.teamNumber = s.team_number;
 
                 const retiredBadge = s.retired ? '<span class="retired-badge">RET</span>' : '';
+                const driverCell = s.current_driver_nickname
+                    ? `<img src="{% static 'flags/' %}${s.current_driver_country}.gif" style="height:16px;margin-right:5px;" alt="${s.current_driver_country}">${s.current_driver_nickname}`
+                    : '';
                 const gapClass = s.gap_ahead && s.gap_ahead.includes('-') ? 'gap-laps' : 'gap-time';
                 const bestLapClass = (s.best_lap_time !== null && s.best_lap_time === overallBest) ? 'best-lap-overall' : '';
 
@@ -335,6 +340,7 @@
                     <td><span class="position-badge">${s.position}</span></td>
                     <td><strong>${s.team_number}</strong></td>
                     <td>${s.team_name}${retiredBadge}</td>
+                    <td>${driverCell}</td>
                     <td><strong>${s.laps_completed}</strong></td>
                     <td>${s.last_lap_time_formatted}</td>
                     <td class="${bestLapClass}">${s.best_lap_time_formatted}</td>

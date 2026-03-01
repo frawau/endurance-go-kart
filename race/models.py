@@ -1640,12 +1640,33 @@ class Race(models.Model):
             except GridPosition.DoesNotExist:
                 starting_position = None
 
+            # Current driver: active session (started, not ended) for this team/race
+            current_session = (
+                Session.objects.filter(
+                    race=self,
+                    driver__team=team,
+                    start__isnull=False,
+                    end__isnull=True,
+                )
+                .select_related("driver__member")
+                .first()
+            )
+            if current_session:
+                person = current_session.driver.member
+                current_driver_nickname = person.nickname
+                current_driver_country = str(person.country).lower()
+            else:
+                current_driver_nickname = None
+                current_driver_country = ""
+
             standings.append(
                 {
                     "team_id": team.id,
                     "team_number": team.number,
                     "team_name": team.name,
                     "retired": team.retired,
+                    "current_driver_nickname": current_driver_nickname,
+                    "current_driver_country": current_driver_country,
                     "laps_completed": laps_completed,
                     "penalty_laps": penalty_laps,
                     "total_time": total_time.total_seconds() if total_time else None,
