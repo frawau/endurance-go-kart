@@ -131,31 +131,12 @@
             vertical-align: middle;
         }
 
-        /* ── Change indicators ── */
-        @keyframes indicator-appear {
-            0%   { opacity: 0; transform: translateY(-5px); }
-            25%  { opacity: 1; transform: translateY(0); }
-            100% { opacity: 1; }
-        }
-
-        .pos-indicator {
-            display: inline-block;
-            font-size: 1rem;
-            font-weight: bold;
-            margin-left: 6px;
-            vertical-align: middle;
-            animation: indicator-appear 0.3s ease-out;
-        }
-        .pos-up   { color: #4cff84; }
-        .pos-down { color: #ff5252; }
-
-        .driver-arrow {
-            display: inline-block;
-            color: #7ec8ff;
-            font-weight: bold;
-            margin-right: 6px;
-            vertical-align: middle;
-            animation: indicator-appear 0.3s ease-out;
+        /* ── Event indicator column ── */
+        .col-event {
+            width: 46px;
+            text-align: center;
+            font-size: 1.3rem;
+            padding: 9px 4px !important;
         }
 
         /* Highlight row that triggered the event */
@@ -203,8 +184,6 @@
         <button class="ctrl-btn" id="speed2s"  data-speed="2000">2s</button>
         <button class="ctrl-btn active" id="speed1s"  data-speed="1000">1s</button>
         <button class="ctrl-btn" id="speedHalf" data-speed="500">½s</button>
-        <span class="ctrl-sep">|</span>
-        <span id="eventLabel" class="event-label" style="display:none;"></span>
         <span class="event-counter" id="eventCounter">— / {{ event_count }}</span>
     </div>
 
@@ -214,6 +193,7 @@
             <thead>
                 <tr>
                     <th style="width:80px;">Pos</th>
+                    <th class="col-event"></th>
                     <th style="width:70px;">#</th>
                     <th style="width:28%;">Team</th>
                     <th style="width:20%;">Driver</th>
@@ -223,7 +203,7 @@
                 </tr>
             </thead>
             <tbody id="replayBody">
-                <tr><td colspan="7" class="no-events">Press play to start the replay</td></tr>
+                <tr><td colspan="8" class="no-events">Press play to start the replay</td></tr>
             </tbody>
         </table>
         {% else %}
@@ -249,7 +229,6 @@
     const progressFill = document.getElementById('progressFill');
     const playIcon     = document.getElementById('playIcon');
     const eventCounter = document.getElementById('eventCounter');
-    const eventLabel   = document.getElementById('eventLabel');
 
     function renderEvent(idx) {
         if (totalEvents === 0 || idx < 0 || idx >= totalEvents) return;
@@ -259,19 +238,6 @@
         progressFill.style.width = ((idx + 1) / totalEvents * 100) + '%';
         eventCounter.textContent = `${idx + 1} / ${totalEvents}`;
 
-        // Event label
-        eventLabel.style.display = '';
-        if (ev.driver_changed && ev.position_changed) {
-            eventLabel.className = 'event-label event-label-both';
-            eventLabel.textContent = 'Driver change + Overtake';
-        } else if (ev.driver_changed) {
-            eventLabel.className = 'event-label event-label-driver';
-            eventLabel.textContent = 'Driver change';
-        } else {
-            eventLabel.className = 'event-label event-label-position';
-            eventLabel.textContent = 'Overtake';
-        }
-
         tbody.innerHTML = '';
         ev.standings.forEach(s => {
             const row = document.createElement('tr');
@@ -280,24 +246,24 @@
             else if (s.position === 2) row.classList.add('position-2');
             else if (s.position === 3) row.classList.add('position-3');
 
-            // Position indicator arrow (show on all teams that moved)
-            let posIndicator = '';
-            if (s.position_delta > 0) {
-                posIndicator = '<span class="pos-indicator pos-up">↑</span>';
+            // Event indicator: driver change takes priority over position arrows
+            const isDriverChange = ev.driver_changed && s.team_id === ev.trigger_team_id;
+            let indicator = '';
+            if (isDriverChange) {
+                indicator = '➡️';
+            } else if (s.position_delta > 0) {
+                indicator = '⬆️';
             } else if (s.position_delta < 0) {
-                posIndicator = '<span class="pos-indicator pos-down">↓</span>';
+                indicator = '⬇️';
             }
 
-            // Driver change arrow (only on the trigger team)
-            const isDriverChange = ev.driver_changed && s.team_id === ev.trigger_team_id;
-            const driverArrow = isDriverChange ? '<span class="driver-arrow">→</span>' : '';
-
             const driverHtml = s.driver_nickname
-                ? `${driverArrow}<img src="/static/flags/${s.driver_country}.png" style="height:15px;margin-right:5px;vertical-align:middle;" alt="${s.driver_country}">${s.driver_nickname}`
-                : `${driverArrow}<span style="color:rgba(200,200,220,0.4);">—</span>`;
+                ? `<img src="/static/flags/${s.driver_country}.png" style="height:15px;margin-right:5px;vertical-align:middle;" alt="${s.driver_country}">${s.driver_nickname}`
+                : '<span style="color:rgba(200,200,220,0.4);">—</span>';
 
             row.innerHTML = `
-                <td><span class="position-badge">${s.position}</span>${posIndicator}</td>
+                <td><span class="position-badge">${s.position}</span></td>
+                <td class="col-event">${indicator}</td>
                 <td><strong>${s.team_number}</strong></td>
                 <td>${s.team_name}</td>
                 <td>${driverHtml}</td>
