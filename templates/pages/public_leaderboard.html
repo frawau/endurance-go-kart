@@ -43,6 +43,14 @@
         .standings-table {
             width: 100%;
             font-size: 1.3rem;
+            table-layout: fixed;
+        }
+
+        .standings-table th,
+        .standings-table td {
+            overflow: hidden;
+            white-space: nowrap;
+            text-overflow: ellipsis;
         }
 
         .standings-table thead {
@@ -180,13 +188,13 @@
                 <thead>
                     <tr>
                         <th style="width: 70px;">Pos</th>
-                        <th style="width: 90px;">#</th>
-                        <th>Team</th>
-                        <th>Driver</th>
-                        <th style="width: 90px;">Laps</th>
-                        <th style="width: 140px;">Last Lap</th>
-                        <th style="width: 140px;">Best Lap</th>
-                        <th style="width: 140px;">Gap</th>
+                        <th style="width: 80px;">#</th>
+                        <th style="width: 28%;">Team</th>
+                        <th style="width: 20%;">Driver</th>
+                        <th style="width: 70px;">Laps</th>
+                        <th style="width: 130px;">Last Lap</th>
+                        <th style="width: 130px;">Best Lap</th>
+                        <th style="width: 130px;">Gap</th>
                     </tr>
                 </thead>
                 <tbody id="standingsBody">
