@@ -18,14 +18,14 @@
         </div>
     </div>
     {% else %}
-    <div id="lane-{{ change_lane.id }}" class="row w-100 m-0" style="flex-grow: 1;">
+    <div id="lane-{{ change_lane.id }}" class="row w-100 m-0" style="flex: 1;">
         <div class="d-flex align-items-center justify-content-center h-100" style="background-color: green;">
             <h1 class="text-dark" style="font-size: 3rem; font-weight: bold;">Open</h1>
         </div>
     </div>
     {% endif %}
 {% else %}
-    <div id="lane-{{ change_lane.id }}" class="row w-100 m-0" style="flex-grow: 1;">
+    <div id="lane-{{ change_lane.id }}" class="row w-100 m-0" style="flex: 1;">
         <div class="col-12 d-flex align-items-center justify-content-center h-100" style="background-color: red;">
             <h1 class="text-warning" style="font-size: 3rem; font-weight: bold;">Closed</h1>
         </div>

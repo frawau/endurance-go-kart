@@ -353,8 +353,8 @@
                     <div class="card-header">
                         <h5 class="mb-0">Pit Lane {{ forloop.counter }}</h5>
                     </div>
-                    <div class="card-body">
-                        <div class="text-center text-muted">Loading...</div>
+                    <div class="card-body p-0 d-flex flex-column">
+                        <div class="text-center text-muted align-self-center mt-auto mb-auto">Loading...</div>
                     </div>
                 </div>
             {% endfor %}
@@ -632,7 +632,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         console.log(`Pit Lane ${i} WS received:`, data);
                         // Handle pit lane updates
                         const laneElement = document.getElementById(`lane-${i}`);
-                        if (laneElement && (data.type === 'rclane.update' || data.type === 'lane.update')) {
+                        if (laneElement && data.type === 'rclane.update') {
                             // Update lane card-body content
                             const cardBody = laneElement.querySelector('.card-body');
                             if (cardBody) {
