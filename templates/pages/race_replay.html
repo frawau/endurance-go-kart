@@ -336,7 +336,7 @@
         else if (e.key === 'ArrowRight' || e.key === 'l') document.getElementById('btnNext').click();
     });
 
-    if (totalEvents > 0) showEvent(0);
+    if (totalEvents > 0) { showEvent(0); setPlaying(true); }
     </script>
 </body>
 </html>
