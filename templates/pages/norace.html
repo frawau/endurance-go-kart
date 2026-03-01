@@ -1,9 +1,4 @@
-{# your_app/templates/nopage.html #}
 {% extends "layout/fscontent.html" %}
 {% block main_content %}
-<div class="section container d-flex justify-content-center align-items-center" style="min-height: 70vh;">
-    <div>
-        <h1 class="text-dark text-center" style="font-size: 10rem;">No race today!</h1>
-    </div>
-</div>
+{% include 'layout/no_race_today.html' %}
 {% endblock main_content %}
