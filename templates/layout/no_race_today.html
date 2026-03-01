@@ -1,0 +1,27 @@
+{% load static %}
+{# Full-viewport "No Race Today" overlay — included by display pages. #}
+{# Uses position:fixed so it covers any base template (nav bars, background images, etc.). #}
+{# Expects `organiser_logo` in context (may be None). #}
+<div id="no-race-today"
+     style="position:fixed;top:0;left:0;width:100%;height:100%;z-index:9000;
+            background:#0a0e1a;
+            display:flex;flex-direction:column;align-items:center;justify-content:center;
+            text-align:center;gap:1.5rem;">
+    <div style="font-size:5rem;">🏁</div>
+    <div style="font-size:2.5rem;font-weight:bold;color:#ffd700;letter-spacing:2px;">NO RACE TODAY</div>
+    <div style="font-size:1.2rem;color:#a0a0b0;">The karts are napping. The timers are bored. Even the marshals went home.</div>
+    <div style="font-size:1rem;color:#606080;margin-top:1rem;">Check back when someone decides to go fast.</div>
+    <div style="margin-top:3rem;">
+        {% if organiser_logo %}
+        <img src="{{ organiser_logo.image.url }}" alt="{{ organiser_logo.name }}"
+             style="max-height:80px;width:auto;opacity:0.85;">
+        {% else %}
+        <img src="{% static 'logos/gokartrace-logo.svg' %}" alt="GoKartRace"
+             style="max-height:80px;width:auto;opacity:0.85;">
+        {% endif %}
+    </div>
+</div>
+<script>
+/* Reload every 30 s so the display automatically shows a race when one starts. */
+setTimeout(function () { location.reload(); }, 30000);
+</script>

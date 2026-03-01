@@ -162,12 +162,7 @@
 </head>
 <body>
     {% if not race %}
-    <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;text-align:center;gap:1.5rem;">
-        <div style="font-size:5rem;">🏁</div>
-        <div style="font-size:2.5rem;font-weight:bold;color:#ffd700;letter-spacing:2px;">NO RACE IN PROGRESS</div>
-        <div style="font-size:1.2rem;color:#a0a0b0;">The karts are napping. The timers are bored. Even the marshals went home.</div>
-        <div style="font-size:1rem;color:#606080;margin-top:1rem;">Check back when someone decides to go fast.</div>
-    </div>
+    {% include 'layout/no_race_today.html' %}
     {% else %}
     <div class="container-fluid">
         <div class="leaderboard-header">

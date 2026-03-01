@@ -291,6 +291,7 @@ def all_pitlanes(request):
             "change_lanes": change_lanes,
             "round": cround,
             "active_race": cround.active_race if cround else None,
+            "organiser_logo": get_organiser_logo(cround),
         },
     )
 
@@ -1293,11 +1294,8 @@ def singleteam_view(request):
     else:
         return render(
             request,
-            "pages/norace.html",
-            {
-                "organiser_logo": get_organiser_logo(None),
-                "sponsors_logos": get_sponsor_logos(None),
-            },
+            "pages/singleteam.html",
+            {"round": None, "organiser_logo": get_organiser_logo(None)},
         )
 
 
@@ -3889,7 +3887,11 @@ def public_leaderboard(request):
     race = cround.active_race if cround else None
 
     if race is None:
-        return render(request, "pages/public_leaderboard.html", {"race": None})
+        return render(
+            request,
+            "pages/public_leaderboard.html",
+            {"race": None, "organiser_logo": get_organiser_logo(cround)},
+        )
 
     standings = race.calculate_race_standings() if race.started else []
     teams = race.get_all_teams().order_by("team__number") if not race.started else []

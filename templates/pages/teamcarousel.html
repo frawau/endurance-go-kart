@@ -31,18 +31,7 @@
 {% block main_content %}
 <div class="container-fluid">
     {% if round is None %}
-        <h2>Hu?</h2>
-        <div id="teamCarousel" class="carousel slide" data-ride="carousel">
-            <div class="carousel-inner">
-                <div class="carousel-item active">
-                    <div class="card" style="background-color: transparent;">
-                        <div class="card-body">
-                            <h1>No race today</h1>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
+        {% include 'layout/no_race_today.html' %}
     {% else %}
         <div class="row mb-4">
             <div class="col-12 text-left">
@@ -102,7 +91,6 @@ document.addEventListener('DOMContentLoaded', function() {
     const roundId = {{ round.id }};
     let socket = null;
     let reconnectAttempts = 0;
-    const maxReconnectAttempts = 50;
     const reconnectDelay = 3000;
 
     function connectWebSocket() {
@@ -191,26 +179,17 @@ document.addEventListener('DOMContentLoaded', function() {
                 return;
             }
             console.warn('WebSocket connection lost, attempting to reconnect...');
-            if (reconnectAttempts < maxReconnectAttempts) {
-                const delay = Math.min(reconnectDelay * Math.pow(1.5, reconnectAttempts), 30000);
-                reconnectAttempts++;
-                console.log(`Reconnecting in ${delay/1000} seconds... (attempt ${reconnectAttempts}/${maxReconnectAttempts})`);
-                setTimeout(connectWebSocket, delay);
-            } else {
-                console.error('Maximum reconnection attempts reached. Please refresh the page.');
-            }
+            const delay = Math.min(reconnectDelay * Math.pow(1.5, reconnectAttempts), 30000);
+            reconnectAttempts++;
+            console.log(`Reconnecting in ${delay/1000} seconds... (attempt ${reconnectAttempts})`);
+            setTimeout(connectWebSocket, delay);
         };
 
         socket.onerror = function(error) {
             console.error('WebSocket error:', error);
-            if (reconnectAttempts < maxReconnectAttempts) {
-                const delay = Math.min(reconnectDelay * Math.pow(1.5, reconnectAttempts), 30000);
-                reconnectAttempts++;
-                console.log(`Reconnecting in ${delay/1000} seconds... (attempt ${reconnectAttempts}/${maxReconnectAttempts})`);
-                setTimeout(connectWebSocket, delay);
-            } else {
-                console.error('Maximum reconnection attempts reached after error. Please refresh the page.');
-            }
+            const delay = Math.min(reconnectDelay * Math.pow(1.5, reconnectAttempts), 30000);
+            reconnectAttempts++;
+            setTimeout(connectWebSocket, delay);
         };
     }
 
