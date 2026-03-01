@@ -2180,7 +2180,15 @@ def _build_race_events(race):
                     "driver_changed": driver_changed,
                     "position_changed": position_changed,
                     "standings": [
-                        {k: v for k, v in s.items() if not k.startswith("_")}
+                        {
+                            **{k: v for k, v in s.items() if not k.startswith("_")},
+                            # delta > 0 means moved up, < 0 moved down, None = first appearance
+                            "position_delta": (
+                                (prev_positions[s["team_id"]] - s["position"])
+                                if prev_positions[s["team_id"]] is not None
+                                else 0
+                            ),
+                        }
                         for s in standings
                     ],
                 }
