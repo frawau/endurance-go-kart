@@ -857,7 +857,11 @@ def round_list_update(request):
             # Update organiser logo to selected round
             context["organiser_logo"] = get_organiser_logo(selected_round)
             existing_race = selected_round.races.first()
-            context["ending_mode_choices"] = Championship.ENDING_MODES
+            context["ending_mode_choices"] = [
+                c
+                for c in Championship.ENDING_MODES
+                if c[0] not in ("QUALIFYING", "QUALIFYING_PLUS")
+            ]
             context["current_ending_mode"] = getattr(
                 existing_race, "ending_mode", "CROSS_AFTER_TIME"
             )
@@ -906,7 +910,11 @@ def round_form(request):
         qual_info = _get_qualifying_info(cround)
         context = {
             "round": cround,
-            "ending_mode_choices": Championship.ENDING_MODES,
+            "ending_mode_choices": [
+                c
+                for c in Championship.ENDING_MODES
+                if c[0] not in ("QUALIFYING", "QUALIFYING_PLUS")
+            ],
             "current_ending_mode": getattr(
                 existing_race, "ending_mode", "CROSS_AFTER_TIME"
             ),
