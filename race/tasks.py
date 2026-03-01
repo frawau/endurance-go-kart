@@ -4,12 +4,56 @@ import asyncio as aio
 import datetime as dt
 from django.db.models import Q
 from asgiref.sync import sync_to_async
+from django.template.loader import render_to_string
+from channels.layers import get_channel_layer
 from .signals import race_end_requested
 
 
 class RaceTasks:
 
     _lock = aio.Semaphore(1)
+
+    @classmethod
+    async def _set_lane_open(cls, alane, open_value):
+        """Update ChangeLane.open and send WS lane/rclane notifications.
+
+        Bypasses the post_save signal to avoid async_to_sync inside aio.run().
+        Call _send_changedriver_update() after processing all lanes in a batch.
+        """
+        alane.open = open_value
+        await sync_to_async(
+            lambda: alane.__class__.objects.filter(pk=alane.pk).update(open=open_value)
+        )()
+        channel_layer = get_channel_layer()
+        lane_html = await sync_to_async(render_to_string)(
+            "layout/changelane_detail.html", {"change_lane": alane}
+        )
+        await channel_layer.group_send(
+            f"lane_{alane.lane}", {"type": "lane.update", "lane_html": lane_html}
+        )
+        lane_html = await sync_to_async(render_to_string)(
+            "layout/changelane_small_detail.html", {"change_lane": alane}
+        )
+        await channel_layer.group_send(
+            f"lane_{alane.lane}", {"type": "rclane.update", "lane_html": lane_html}
+        )
+
+    @classmethod
+    async def _send_changedriver_update(cls):
+        """Broadcast the changedriver panel with all currently-open lanes."""
+        from .models import ChangeLane
+
+        channel_layer = get_channel_layer()
+        open_lanes = await sync_to_async(list)(
+            ChangeLane.objects.filter(open=True).order_by("lane")
+        )
+        driverc_html = await sync_to_async(render_to_string)(
+            "layout/changedriver_detail.html", {"change_lanes": open_lanes}
+        )
+        await channel_layer.group_send(
+            "changedriver",
+            {"type": "changedriver.update", "driverc_html": driverc_html},
+        )
 
     @classmethod
     async def race_events(cls):
@@ -52,8 +96,9 @@ class RaceTasks:
                         ChangeLane.objects.filter(round=cround, open=False)
                     )
                     for alane in change_lanes:
-                        alane.open = True
-                        await alane.asave()
+                        await cls._set_lane_open(alane, True)
+                    if change_lanes:
+                        await cls._send_changedriver_update()
                     return
 
                 elapsed = await cround.async_time_elapsed()
@@ -73,8 +118,9 @@ class RaceTasks:
                             ChangeLane.objects.filter(round=cround, open=False)
                         )
                         for alane in change_lanes:
-                            alane.open = True
-                            await alane.asave()
+                            await cls._set_lane_open(alane, True)
+                        if change_lanes:
+                            await cls._send_changedriver_update()
                 elif cround.duration - elapsed < dt.timedelta(seconds=65):
                     # Check for end before check for close pit lane. Would not be reached otherwise
                     dowait = (cround.duration - elapsed).total_seconds()
@@ -106,8 +152,9 @@ class RaceTasks:
                         )
                     )
                     for alane in change_lanes:
-                        alane.open = False
-                        await alane.asave()
+                        await cls._set_lane_open(alane, False)
+                    if change_lanes:
+                        await cls._send_changedriver_update()
 
         else:
             # bail out

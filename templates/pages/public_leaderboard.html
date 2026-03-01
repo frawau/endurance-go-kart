@@ -263,6 +263,13 @@
                     if (data.next_race_url) {
                         window.location.href = data.next_race_url;
                     }
+                } else if (data.type === 'pause_update' || data.type === 'round_update') {
+                    if (raceTimer && data.is_paused !== undefined) {
+                        raceTimer.updatePauseState(data.is_paused);
+                        if (data.remaining_seconds !== undefined) {
+                            raceTimer.updateRemainingTime(data.remaining_seconds);
+                        }
+                    }
                 }
             };
 
@@ -339,18 +346,20 @@
         }
 
         // Countdown timer — reuse the existing TimerWidget
+        let raceTimer = null;
         {
             const startedEpoch = {{ race_started_epoch|default:"null" }};
             const timeLimitSeconds = {{ race_time_limit_seconds }};
+            const isPaused = {{ race_is_paused|yesno:"true,false" }};
             const raceStarted = startedEpoch !== null;
             const elapsed = raceStarted ? (Date.now() / 1000) - startedEpoch : 0;
             const remaining = Math.max(0, timeLimitSeconds - elapsed);
-            new TimerWidget({
+            raceTimer = new TimerWidget({
                 elementId: 'raceCountdown',
                 startValue: remaining,
                 countDirection: 'down',
                 timerType: 'countdownDisplay',
-                initialPaused: !raceStarted,
+                initialPaused: !raceStarted || isPaused,
                 showHours: timeLimitSeconds >= 3600,
                 limit: 300,
             });

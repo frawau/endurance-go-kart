@@ -3910,6 +3910,7 @@ def public_leaderboard(request):
         "effective_lap_count": race.get_effective_lap_count(),
         "race_time_limit_seconds": int(race.get_effective_time_limit().total_seconds()),
         "race_started_epoch": int(race.started.timestamp()) if race.started else None,
+        "race_is_paused": cround.is_paused if cround else False,
     }
 
     return render(request, "pages/public_leaderboard.html", context)

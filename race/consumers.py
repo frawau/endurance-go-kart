@@ -1233,6 +1233,11 @@ class LeaderboardConsumer(AsyncWebsocketConsumer):
         # Join race leaderboard group
         await self.channel_layer.group_add(self.race_group_name, self.channel_name)
 
+        # Also subscribe to the round group to receive pause/round updates
+        race = await database_sync_to_async(Race.objects.get)(id=self.race_id)
+        self.round_group_name = f"round_{race.round_id}"
+        await self.channel_layer.group_add(self.round_group_name, self.channel_name)
+
         await self.accept()
 
         # Send initial standings
@@ -1244,6 +1249,10 @@ class LeaderboardConsumer(AsyncWebsocketConsumer):
     async def disconnect(self, close_code):
         # Leave race leaderboard group
         await self.channel_layer.group_discard(self.race_group_name, self.channel_name)
+        if hasattr(self, "round_group_name"):
+            await self.channel_layer.group_discard(
+                self.round_group_name, self.channel_name
+            )
 
     async def receive(self, text_data):
         """Handle incoming messages — supports reload requests"""
@@ -1294,6 +1303,32 @@ class LeaderboardConsumer(AsyncWebsocketConsumer):
                 {
                     "type": "race_ended",
                     "next_race_url": event.get("next_race_url"),
+                }
+            )
+        )
+
+    async def pause_update(self, event):
+        """Forward pause state changes to the leaderboard client."""
+        await self.send(
+            text_data=json.dumps(
+                {
+                    "type": "pause_update",
+                    "is_paused": event["is paused"],
+                    "remaining_seconds": event["remaining seconds"],
+                }
+            )
+        )
+
+    async def round_update(self, event):
+        """Forward round state changes (started, ended) to the leaderboard client."""
+        await self.send(
+            text_data=json.dumps(
+                {
+                    "type": "round_update",
+                    "is_paused": event["is paused"],
+                    "remaining_seconds": event["remaining seconds"],
+                    "started": event["started"],
+                    "ended": event["ended"],
                 }
             )
         )
