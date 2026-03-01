@@ -2,7 +2,11 @@
 
 {% block content %}
 
+{% if not round %}
+    {% include 'layout/no_race_today.html' %}
+{% else %}
 {% include 'layout/changedriver_detail.html' with change_lanes=change_lanes %}
+{% endif %}
 
 <script>
     const wsScheme = window.location.protocol === 'https:' ? 'wss' : 'ws';

@@ -260,21 +260,23 @@ def update_change_lane(request, lane_number):
 def changedriver_info(request):
     try:
         cround = current_round()
-        change_lanes = ChangeLane.objects.filter(round=cround, open=True).order_by(
-            "lane"
-        )
-        return render(
-            request, "layout/changedriver_info.html", {"change_lanes": change_lanes}
-        )
     except:
-        return render(
-            request,
-            "pages/norace.html",
-            {
-                "organiser_logo": get_organiser_logo(None),
-                "sponsors_logos": get_sponsor_logos(None),
-            },
-        )
+        cround = None
+
+    change_lanes = (
+        ChangeLane.objects.filter(round=cround, open=True).order_by("lane")
+        if cround
+        else []
+    )
+    return render(
+        request,
+        "layout/changedriver_info.html",
+        {
+            "change_lanes": change_lanes,
+            "round": cround,
+            "organiser_logo": get_organiser_logo(cround),
+        },
+    )
 
 
 @xframe_options_exempt

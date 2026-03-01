@@ -6,10 +6,12 @@
         {% if round is None %}
         {% load static %}
         <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;
-                    padding:4rem 1rem;text-align:center;gap:1rem;">
-            <div style="font-size:4rem;">🏁</div>
-            <div style="font-size:2.5rem;font-weight:bold;color:#b8860b;letter-spacing:1px;">Thank you for visiting</div>
-            <div style="font-size:1.2rem;color:#333;margin-top:0.5rem;">There is no championship race today. Come back another day.</div>
+                    padding:4rem 1rem;text-align:center;gap:1.5rem;">
+            <div style="font-size:5rem;">🏁</div>
+            <div style="font-size:1.6rem;font-weight:bold;color:#555;letter-spacing:1px;">Thank you for visiting</div>
+            <div style="font-size:2.5rem;font-weight:bold;color:#b8860b;letter-spacing:2px;">NO RACE TODAY</div>
+            <div style="font-size:1.2rem;color:#555;">The karts are napping. The timers are bored. Even the marshals went home.</div>
+            <div style="font-size:1rem;color:#777;margin-top:0.5rem;">Check back when someone decides to go fast.</div>
             <div style="margin-top:2rem;">
                 {% if organiser_logo %}
                 <img src="{{ organiser_logo.image.url }}" alt="{{ organiser_logo.name }}"
