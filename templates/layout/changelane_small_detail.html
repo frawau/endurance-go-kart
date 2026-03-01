@@ -1,9 +1,9 @@
 {% load driver_tags %}
 {% if change_lane.open %}
     {% if change_lane.driver %}
-    <div id="lane-{{ change_lane.id }}" class="row w-100 m-0" style="flex;">
+    <div id="lane-{{ change_lane.id }}" class="row w-100 m-0" style="flex: 1;">
         <div class="col-3 d-flex align-items-center justify-content-center"
-            style="font-size: 6rem; font-weight: bold; height: 100%; background-color: #f0fff0; left-padding: 20px;">
+            style="font-size: 6rem; font-weight: bold; height: 100%; background-color: #f0fff0; padding-left: 20px;">
                 {{ change_lane.driver.team.team.number }}
         </div>
         <div class="col-9 p-5 d-flex align-items-center justify-content-center flex-column" style="font-size: 2rem; height: 100%; background-color: #f0fff0; position: relative;">

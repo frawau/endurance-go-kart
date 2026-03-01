@@ -633,16 +633,10 @@ document.addEventListener('DOMContentLoaded', function() {
                         // Handle pit lane updates
                         const laneElement = document.getElementById(`lane-${i}`);
                         if (laneElement && (data.type === 'rclane.update' || data.type === 'lane.update')) {
-                            // Fix CSS syntax errors in the HTML
-                            const fixedHtml = data.lane_html
-                                .replace('style="flex;"', 'style="flex: 1;"')
-                                .replace('left-padding:', 'padding-left:')
-                                .replace('/div>', '</div>'); // Fix malformed closing div tags
-                            
-                            // Update lane card-body content with the fixed HTML
+                            // Update lane card-body content
                             const cardBody = laneElement.querySelector('.card-body');
                             if (cardBody) {
-                                cardBody.innerHTML = fixedHtml;
+                                cardBody.innerHTML = data.lane_html;
                             } else {
                                 console.warn(`Card body not found for lane ${i}`);
                             }
