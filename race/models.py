@@ -200,6 +200,11 @@ class Round(models.Model):
     )
     pitlane_open_after = models.DurationField(default=dt.timedelta(minutes=10))
     pitlane_close_before = models.DurationField(default=dt.timedelta(minutes=10))
+    allow_quali_changes = models.BooleanField(
+        default=True,
+        verbose_name="Allow Driver Changes During Qualifying",
+        help_text="If enabled, pit lanes open immediately during qualifier races.",
+    )
     limit_time = models.CharField(
         max_length=16,
         choices=LIMIT,
@@ -300,14 +305,50 @@ class Round(models.Model):
         return self.time_elapsed
 
     @property
+    def pit_elapsed(self):
+        """Elapsed time for pit-lane open/close calculations.
+
+        For multi-race rounds (Q + MAIN) uses the active MAIN race's own
+        elapsed time so pitlane_open_after is relative to the MAIN race
+        start, not the qualifying race(s) that preceded it.
+        """
+        active = self.active_race
+        if active and active.race_type == "MAIN":
+            return active.time_elapsed
+        return self.time_elapsed
+
+    @property
+    def pit_duration(self):
+        """Duration for pit-lane close calculation.
+
+        For multi-race rounds uses the active MAIN race's effective time
+        limit rather than the round-level duration.
+        """
+        active = self.active_race
+        if active and active.race_type == "MAIN":
+            return active.get_effective_time_limit()
+        return self.duration
+
+    @sync_to_async
+    def async_pit_elapsed(self):
+        return self.pit_elapsed
+
+    @property
     def pit_lane_open(self):
         active = self.active_race
         if active is not None and active.race_type != "MAIN":
-            return True
-        elapsed = self.time_elapsed
+            return self.allow_quali_changes
+        # MAIN race or legacy round: apply timing rules.
+        # Reuse the already-loaded active to avoid a second DB hit.
+        if active and active.race_type == "MAIN":
+            elapsed = active.time_elapsed
+            duration = active.get_effective_time_limit()
+        else:
+            elapsed = self.time_elapsed
+            duration = self.duration
         if elapsed < self.pitlane_open_after:
             return False
-        if elapsed > self.duration - self.pitlane_close_before:
+        if elapsed > duration - self.pitlane_close_before:
             return False
         return True
 

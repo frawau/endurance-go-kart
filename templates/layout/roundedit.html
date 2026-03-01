@@ -70,6 +70,20 @@
             <div id="qualifying-config-container"
                  {% if round.uses_legacy_session_model %}style="display: none;"{% endif %}>
                 <div class="form-group mb-3">
+                    <div class="form-check">
+                        <input type="checkbox" class="form-check-input" id="id_allow_quali_changes"
+                               name="allow_quali_changes"
+                               {% if round.allow_quali_changes %}checked{% endif %}>
+                        <label class="form-check-label" for="id_allow_quali_changes">
+                            Allow Driver Changes During Qualifying
+                        </label>
+                        <small class="form-text text-muted d-block">
+                            If enabled, pit lanes open immediately during qualifier races.
+                            Disable to keep pit lanes closed throughout qualifying.
+                        </small>
+                    </div>
+                </div>
+                <div class="form-group mb-3">
                     <label for="id_qualifying_count">Number of Qualifying Sessions</label>
                     <select class="form-control" id="id_qualifying_count" name="qualifying_count">
                         <option value="0" {% if qualifying_count == 0 %}selected{% endif %}>0 (No Qualifying)</option>

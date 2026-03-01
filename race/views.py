@@ -1087,6 +1087,7 @@ def update_round(request, round_id):
             cround.pitlane_close_before = parse_duration(
                 request.POST.get("pitlane_close_before")
             )
+            cround.allow_quali_changes = request.POST.get("allow_quali_changes") == "on"
             cround.limit_time_min = parse_duration(request.POST.get("limit_time_min"))
 
             # Update other fields
@@ -2453,6 +2454,9 @@ def edit_round_view(request):
             )
             round_obj.pitlane_close_before = parse_duration(
                 request.POST.get("pitlane_close_before")
+            )
+            round_obj.allow_quali_changes = (
+                request.POST.get("allow_quali_changes") == "on"
             )
 
             # Update other fields
