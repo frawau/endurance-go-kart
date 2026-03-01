@@ -2034,6 +2034,185 @@ def round_result_csv(request):
     return response
 
 
+def _build_race_events(race):
+    """Pre-compute replay events for a finished race.
+
+    An event is emitted for each crossing that causes a position change or a
+    driver handover.  Returns a list of dicts, each with a full standings
+    snapshot at that moment.
+    """
+    if not race.started:
+        return []
+
+    is_qualifying = race.race_type != "MAIN"
+
+    def fmt_time(td):
+        if td is None:
+            return "—"
+        total_ms = int(td.total_seconds() * 1000)
+        ms = total_ms % 1000
+        total_s = total_ms // 1000
+        return f"{total_s // 60:02d}:{total_s % 60:02d}.{ms:03d}"
+
+    # All valid crossings after the race started, in chronological order
+    crossings = list(
+        LapCrossing.objects.filter(
+            race=race, is_valid=True, crossing_time__gt=race.started
+        )
+        .order_by("crossing_time")
+        .select_related("team")
+    )
+
+    # Sessions for driver lookup — keyed by team_id
+    all_sessions = list(
+        Session.objects.filter(race=race)
+        .select_related("driver__member", "driver__team")
+        .order_by("start")
+    )
+    sessions_by_team = {}
+    for s in all_sessions:
+        sessions_by_team.setdefault(s.driver.team_id, []).append(s)
+
+    all_teams = list(race.get_all_teams())
+
+    def get_driver(team_id, crossing_time):
+        for s in sessions_by_team.get(team_id, []):
+            if s.start and crossing_time >= s.start:
+                if s.end is None or crossing_time <= s.end:
+                    return (
+                        s.driver.member.nickname,
+                        str(s.driver.member.country).lower(),
+                    )
+        return None, ""
+
+    # Per-team running state
+    state = {
+        t.id: {"laps": [], "driver_nick": None, "driver_country": ""} for t in all_teams
+    }
+    team_map = {t.id: t for t in all_teams}
+
+    def compute_standings():
+        rows = []
+        for team in all_teams:
+            st = state[team.id]
+            laps = st["laps"]
+            if laps:
+                last_ct, last_lt = laps[-1]
+                total_secs = (last_ct - race.started).total_seconds()
+                best_lt = min((lt for _, lt in laps if lt is not None), default=None)
+                best_secs = best_lt.total_seconds() if best_lt else None
+            else:
+                total_secs = None
+                last_lt = None
+                best_lt = None
+                best_secs = None
+            rows.append(
+                {
+                    "team_id": team.id,
+                    "team_number": team.number,
+                    "team_name": team.name,
+                    "driver_nickname": st["driver_nick"],
+                    "driver_country": st["driver_country"],
+                    "laps_completed": len(laps),
+                    "_total_secs": total_secs,
+                    "_best_secs": best_secs,
+                    "last_lap_time_formatted": fmt_time(last_lt),
+                    "best_lap_time_formatted": fmt_time(best_lt),
+                }
+            )
+        if is_qualifying:
+            rows.sort(
+                key=lambda x: (
+                    x["_best_secs"] if x["_best_secs"] is not None else float("inf"),
+                )
+            )
+        else:
+            rows.sort(
+                key=lambda x: (
+                    -x["laps_completed"],
+                    x["_total_secs"] if x["_total_secs"] is not None else float("inf"),
+                )
+            )
+        for idx, row in enumerate(rows, 1):
+            row["position"] = idx
+        return rows
+
+    # Previous state for change detection (None = not yet seen)
+    prev_positions = {t.id: None for t in all_teams}
+    prev_drivers = {t.id: None for t in all_teams}
+
+    events = []
+
+    for crossing in crossings:
+        team_id = crossing.team_id
+        if team_id not in state:
+            continue
+
+        nick, country = get_driver(team_id, crossing.crossing_time)
+
+        # Driver changed = actual handover (not the first assignment)
+        driver_changed = (
+            prev_drivers[team_id] is not None and nick != prev_drivers[team_id]
+        )
+
+        # Update state
+        state[team_id]["laps"].append((crossing.crossing_time, crossing.lap_time))
+        state[team_id]["driver_nick"] = nick
+        state[team_id]["driver_country"] = country
+
+        standings = compute_standings()
+
+        new_pos = next(
+            (s["position"] for s in standings if s["team_id"] == team_id), None
+        )
+        position_changed = (
+            prev_positions[team_id] is not None and new_pos != prev_positions[team_id]
+        )
+
+        if driver_changed or position_changed:
+            race_secs = (crossing.crossing_time - race.started).total_seconds()
+            total_s = int(race_secs)
+            events.append(
+                {
+                    "race_time_secs": race_secs,
+                    "race_time_formatted": f"{total_s // 60:02d}:{total_s % 60:02d}",
+                    "trigger_team_id": team_id,
+                    "driver_changed": driver_changed,
+                    "position_changed": position_changed,
+                    "standings": [
+                        {k: v for k, v in s.items() if not k.startswith("_")}
+                        for s in standings
+                    ],
+                }
+            )
+
+        # Keep prev_positions current for ALL teams after each crossing
+        for s in standings:
+            prev_positions[s["team_id"]] = s["position"]
+        prev_drivers[team_id] = nick
+
+    return events
+
+
+def race_replay(request, race_id):
+    """Animated replay of a finished race, one event per position/driver change."""
+    race = get_object_or_404(Race, id=race_id)
+    if not race.ended:
+        return HttpResponse("Race not finished yet", status=400)
+
+    events = _build_race_events(race)
+
+    return render(
+        request,
+        "pages/race_replay.html",
+        {
+            "race": race,
+            "events_json": json.dumps(events),
+            "event_count": len(events),
+        },
+    )
+
+
 def round_penalties(request):
     """View to display penalties for a selected round with dropdown similar to round_info."""
     # Get all rounds sorted by date

@@ -56,14 +56,23 @@
                     <span class="collapse-arrow {% if forloop.first %}open{% endif %}">▶</span>
                     <span class="race-title">{{ race_data.race.get_race_type_display }}</span>
                 </div>
-                <span class="race-badge
-                    {% if race_data.is_live %}badge-live
-                    {% elif race_data.is_finished %}badge-finished
-                    {% else %}badge-pending{% endif %}">
-                    {% if race_data.is_live %}LIVE
-                    {% elif race_data.is_finished %}FINISHED
-                    {% else %}NOT STARTED{% endif %}
-                </span>
+                <div class="d-flex align-items-center gap-2">
+                    {% if race_data.is_finished %}
+                    <a href="{% url 'race_replay' race_data.race.id %}"
+                       class="btn btn-replay btn-sm"
+                       onclick="event.stopPropagation()">
+                        <i class="fas fa-play-circle me-1"></i>Replay
+                    </a>
+                    {% endif %}
+                    <span class="race-badge
+                        {% if race_data.is_live %}badge-live
+                        {% elif race_data.is_finished %}badge-finished
+                        {% else %}badge-pending{% endif %}">
+                        {% if race_data.is_live %}LIVE
+                        {% elif race_data.is_finished %}FINISHED
+                        {% else %}NOT STARTED{% endif %}
+                    </span>
+                </div>
             </div>
 
             <div class="collapse {% if forloop.first %}show{% endif %}" id="race-body-{{ race_data.race.id }}">
@@ -183,6 +192,15 @@ const liveRaces = [
     .badge-live     { background-color: #ff5252; color: #fff; }
     .badge-finished { background-color: #4caf50; color: #fff; }
     .badge-pending  { background-color: rgba(120,120,140,0.7); color: #e6e6fa; }
+
+    .btn-replay {
+        font-size: 0.75rem; font-weight: 600; padding: 3px 10px;
+        border: 1px solid rgba(100,180,255,0.5);
+        color: #7ec8ff; background: rgba(30,60,100,0.6);
+        border-radius: 12px; letter-spacing: 0.3px;
+        text-decoration: none;
+    }
+    .btn-replay:hover { background: rgba(50,90,140,0.8); color: #b0d8ff; }
 
     /* ── Table ── */
     .race-body { background-color: rgba(40,40,50,0.85); }
