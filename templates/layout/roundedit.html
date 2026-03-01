@@ -56,6 +56,15 @@
                 </div>
             </div>
 
+            <div class="form-group mb-3" id="race-start-mode-container"
+                 {% if round.uses_legacy_session_model %}style="display: none;"{% endif %}>
+                <label for="id_race_start_mode">Race Start Mode</label>
+                <select class="form-control" id="id_race_start_mode" name="race_start_mode">
+                    <option value="IMMEDIATE" {% if round.race_start_mode == "IMMEDIATE" %}selected{% endif %}>Immediate countdown</option>
+                    <option value="FIRST_CROSSING" {% if round.race_start_mode == "FIRST_CROSSING" %}selected{% endif %}>Start on first passage</option>
+                </select>
+            </div>
+
             <div class="form-group mb-3" id="ending-mode-container"
                  {% if round.uses_legacy_session_model %}style="display: none;"{% endif %}>
                 <label for="id_ending_mode">Race Ending Mode</label>
@@ -83,6 +92,14 @@
                         </small>
                     </div>
                 </div>
+                <div class="form-group mb-3">
+                    <label for="id_quali_start_mode">Qualifying Start Mode</label>
+                    <select class="form-control" id="id_quali_start_mode" name="quali_start_mode">
+                        <option value="IMMEDIATE" {% if round.quali_start_mode == "IMMEDIATE" or not round.quali_start_mode %}selected{% endif %}>Immediate countdown</option>
+                        <option value="FIRST_CROSSING" {% if round.quali_start_mode == "FIRST_CROSSING" %}selected{% endif %}>Start on first passage</option>
+                    </select>
+                </div>
+
                 <div class="form-group mb-3">
                     <label for="id_qualifying_count">Number of Qualifying Sessions</label>
                     <select class="form-control" id="id_qualifying_count" name="qualifying_count">
@@ -206,11 +223,13 @@ document.addEventListener('DOMContentLoaded', function() {
     const lapBasedCheckbox = document.getElementById('id_lap_based');
     const endingModeContainer = document.getElementById('ending-mode-container');
     const qualifyingConfigContainer = document.getElementById('qualifying-config-container');
+    const raceStartModeContainer = document.getElementById('race-start-mode-container');
     if (lapBasedCheckbox) {
         lapBasedCheckbox.addEventListener('change', function() {
             const show = this.checked;
             if (endingModeContainer) endingModeContainer.style.display = show ? '' : 'none';
             if (qualifyingConfigContainer) qualifyingConfigContainer.style.display = show ? '' : 'none';
+            if (raceStartModeContainer) raceStartModeContainer.style.display = show ? '' : 'none';
         });
     }
 

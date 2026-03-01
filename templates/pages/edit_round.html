@@ -120,6 +120,28 @@
                     </div>
                 </div>
 
+                <!-- Race Start Mode (lap-based only) -->
+                <div class="row" id="race-start-mode-container" style="display: none;">
+                    <div class="col-md-6">
+                        <div class="form-group mb-3">
+                            <label for="race_start_mode">Race Start Mode:</label>
+                            <select class="form-control" id="race_start_mode" name="race_start_mode">
+                                <option value="IMMEDIATE">Immediate countdown</option>
+                                <option value="FIRST_CROSSING">Start on first passage</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="form-group mb-3">
+                            <label for="quali_start_mode">Qualifying Start Mode:</label>
+                            <select class="form-control" id="quali_start_mode" name="quali_start_mode">
+                                <option value="IMMEDIATE">Immediate countdown</option>
+                                <option value="FIRST_CROSSING">Start on first passage</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Qualifying Configuration -->
                 <div id="qualifying-config-container" style="display: none;">
                     <div class="row">
@@ -298,7 +320,10 @@ document.addEventListener('DOMContentLoaded', function() {
                             data-qualifying-ending-mode="${round.qualifying_ending_mode || 'QUALIFYING'}"
                             data-qualifying-grid-method="${round.qualifying_grid_method || 'best_time'}"
                             data-qualifying-durations='${JSON.stringify(round.qualifying_durations || {})}'
-                            data-qualifying-cutoffs='${JSON.stringify(round.qualifying_cutoffs || {})}'>
+                            data-qualifying-cutoffs='${JSON.stringify(round.qualifying_cutoffs || {})}'
+                            data-quali-start-mode="${round.quali_start_mode || 'IMMEDIATE'}"
+                            data-race-start-mode="${round.race_start_mode || 'FIRST_CROSSING'}"
+                            data-allow-quali-changes="${round.allow_quali_changes !== false}">
                             ${round.name}
                         </option>`);
                     });
@@ -343,10 +368,14 @@ document.addEventListener('DOMContentLoaded', function() {
             if (lapBased) {
                 $('#ending-mode-container').show();
                 $('#qualifying-config-container').show();
+                $('#race-start-mode-container').show();
                 $('#ending_mode').val(selectedOption.data('ending-mode') || 'CROSS_AFTER_TIME');
+                $('#race_start_mode').val(selectedOption.data('race-start-mode') || 'FIRST_CROSSING');
+                $('#quali_start_mode').val(selectedOption.data('quali-start-mode') || 'IMMEDIATE');
             } else {
                 $('#ending-mode-container').hide();
                 $('#qualifying-config-container').hide();
+                $('#race-start-mode-container').hide();
             }
 
             // Qualifying config
@@ -416,9 +445,11 @@ document.addEventListener('DOMContentLoaded', function() {
         if ($(this).is(':checked')) {
             $('#ending-mode-container').show();
             $('#qualifying-config-container').show();
+            $('#race-start-mode-container').show();
         } else {
             $('#ending-mode-container').hide();
             $('#qualifying-config-container').hide();
+            $('#race-start-mode-container').hide();
         }
     });
 

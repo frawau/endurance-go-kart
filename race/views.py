@@ -1013,6 +1013,7 @@ def _create_qualifying_races(cround, post_data, ending_mode):
             ending_mode=qualifying_ending_mode,
             time_limit_override=q_duration,
             depends_on_race=prev_race,
+            start_mode=cround.quali_start_mode,
         )
         q_races.append(q_race)
         prev_race = q_race
@@ -1026,6 +1027,7 @@ def _create_qualifying_races(cround, post_data, ending_mode):
         ending_mode=ending_mode,
         time_limit_override=cround.duration,
         depends_on_race=prev_race,
+        start_mode=cround.race_start_mode,
     )
 
     # Create knockout rules for elimination mode
@@ -1088,6 +1090,10 @@ def update_round(request, round_id):
                 request.POST.get("pitlane_close_before")
             )
             cround.allow_quali_changes = request.POST.get("allow_quali_changes") == "on"
+            cround.quali_start_mode = request.POST.get("quali_start_mode", "IMMEDIATE")
+            cround.race_start_mode = request.POST.get(
+                "race_start_mode", "FIRST_CROSSING"
+            )
             cround.limit_time_min = parse_duration(request.POST.get("limit_time_min"))
 
             # Update other fields
@@ -2458,6 +2464,12 @@ def edit_round_view(request):
             round_obj.allow_quali_changes = (
                 request.POST.get("allow_quali_changes") == "on"
             )
+            round_obj.quali_start_mode = request.POST.get(
+                "quali_start_mode", "IMMEDIATE"
+            )
+            round_obj.race_start_mode = request.POST.get(
+                "race_start_mode", "FIRST_CROSSING"
+            )
 
             # Update other fields
             round_obj.change_lanes = int(request.POST.get("change_lanes"))
@@ -2573,6 +2585,9 @@ def get_championship_rounds(request, championship_id):
                     "ready": round_obj.ready,
                     "uses_legacy_session_model": round_obj.uses_legacy_session_model,
                     "ending_mode": getattr(round_obj.races.first(), "ending_mode", ""),
+                    "quali_start_mode": round_obj.quali_start_mode,
+                    "race_start_mode": round_obj.race_start_mode,
+                    "allow_quali_changes": round_obj.allow_quali_changes,
                     **_get_qualifying_info(round_obj),
                 }
             )

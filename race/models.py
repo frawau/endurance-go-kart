@@ -205,6 +205,24 @@ class Round(models.Model):
         verbose_name="Allow Driver Changes During Qualifying",
         help_text="If enabled, pit lanes open immediately during qualifier races.",
     )
+    quali_start_mode = models.CharField(
+        max_length=20,
+        choices=[
+            ("IMMEDIATE", "Immediate countdown"),
+            ("FIRST_CROSSING", "Start on first passage"),
+        ],
+        default="IMMEDIATE",
+        verbose_name="Qualifying Start Mode",
+    )
+    race_start_mode = models.CharField(
+        max_length=20,
+        choices=[
+            ("IMMEDIATE", "Immediate countdown"),
+            ("FIRST_CROSSING", "Start on first passage"),
+        ],
+        default="FIRST_CROSSING",
+        verbose_name="Race Start Mode",
+    )
     limit_time = models.CharField(
         max_length=16,
         choices=LIMIT,
