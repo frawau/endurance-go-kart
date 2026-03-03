@@ -57,7 +57,12 @@ CSRF_TRUSTED_ORIGINS = [
 
 EXTRA_ALLOWED_HOSTS = os.environ.get("EXTRA_ALLOWED_HOSTS")
 if EXTRA_ALLOWED_HOSTS:
-    ALLOWED_HOSTS.extend([h.strip() for h in EXTRA_ALLOWED_HOSTS.split(",")])
+    for _h in [h.strip() for h in EXTRA_ALLOWED_HOSTS.split(",")]:
+        ALLOWED_HOSTS.append(_h)
+        CSRF_TRUSTED_ORIGINS.append(f"http://{_h}")
+        CSRF_TRUSTED_ORIGINS.append(f"http://{_h}:{APP_PORT}")
+        CSRF_TRUSTED_ORIGINS.append(f"https://{_h}")
+        CSRF_TRUSTED_ORIGINS.append(f"https://{_h}:{APP_PORT}")
 
 RENDER_EXTERNAL_HOSTNAME = os.environ.get("RENDER_EXTERNAL_HOSTNAME")
 if RENDER_EXTERNAL_HOSTNAME:
