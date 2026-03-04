@@ -15,8 +15,7 @@
                         <strong>Round:</strong> {{ race.round.name }}<br>
                         <strong>Race Type:</strong> {{ race.get_race_type_display }}<br>
                         <p class="mt-2 mb-0">
-                            <strong>Instructions:</strong> Select a team, optionally set a kart number (defaults to team number),
-                            choose or scan a transponder, then click "Assign".
+                            <strong>Instructions:</strong> Select a team, choose or scan a transponder, then click "Assign".
                         </p>
                     </div>
 
@@ -27,7 +26,7 @@
                         </div>
                         <div class="card-body">
                             <div class="row">
-                                <div class="col-md-3">
+                                <div class="col-md-4">
                                     <label for="teamSelect" class="form-label">Select Team:</label>
                                     <select id="teamSelect" class="form-select">
                                         <option value="">-- Select Team --</option>
@@ -36,11 +35,7 @@
                                         {% endfor %}
                                     </select>
                                 </div>
-                                <div class="col-md-2">
-                                    <label for="kartNumberInput" class="form-label">Kart Number:</label>
-                                    <input type="number" id="kartNumberInput" class="form-control" min="1" placeholder="Auto">
-                                </div>
-                                <div class="col-md-4">
+                                <div class="col-md-5">
                                     <label for="transponderSelect" class="form-label">Transponder:</label>
                                     <div class="input-group">
                                         <select id="transponderSelect" class="form-select">
@@ -87,7 +82,6 @@
                                 <tr>
                                     <th>Team #</th>
                                     <th>Team Name</th>
-                                    <th>Kart #</th>
                                     <th>Transponder ID</th>
                                     <th>Status</th>
                                     <th>Actions</th>
@@ -177,16 +171,6 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('refreshBtn').addEventListener('click', loadAssignments);
     document.getElementById('lockAllBtn').addEventListener('click', lockAllAssignments);
 
-    // Auto-fill kart number when team is selected
-    document.getElementById('teamSelect').addEventListener('change', function() {
-        const selected = this.options[this.selectedIndex];
-        const kartInput = document.getElementById('kartNumberInput');
-        if (selected.value && selected.dataset.number) {
-            kartInput.value = selected.dataset.number;
-        } else {
-            kartInput.value = '';
-        }
-    });
 });
 
 // --- Transponder Scan ---
@@ -267,7 +251,7 @@ function renderAssignments() {
     const tbody = document.getElementById('assignmentsTable');
 
     if (assignments.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" class="text-center">No transponders assigned yet</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center">No transponders assigned yet</td></tr>';
         return;
     }
 
@@ -280,8 +264,6 @@ function renderAssignments() {
             ? '<span class="badge bg-success">Confirmed</span>'
             : '<span class="badge bg-warning">Pending</span>';
 
-        const kartDisplay = assignment.kart_number || '-';
-
         const replaceBtn = assignment.confirmed
             ? `<button class="btn btn-sm btn-warning me-1" onclick="openReplaceModal(${assignment.id}, '${assignment.team_name}', '${assignment.transponder_id}')">
                    <i class="fas fa-exchange-alt"></i> Replace
@@ -291,7 +273,6 @@ function renderAssignments() {
         row.innerHTML = `
             <td><strong>${assignment.team_number}</strong></td>
             <td>${assignment.team_name}</td>
-            <td><strong>${kartDisplay}</strong></td>
             <td><code>${assignment.transponder_id}</code></td>
             <td>${statusBadge}</td>
             <td>
@@ -348,7 +329,6 @@ function updateAvailableTransponders() {
 
 function assignTransponder() {
     const teamId = document.getElementById('teamSelect').value;
-    const kartNumber = document.getElementById('kartNumberInput').value;
     const transponderId = document.getElementById('transponderSelect').value;
 
     if (!teamId) { alert('Please select a team'); return; }
@@ -362,8 +342,6 @@ function assignTransponder() {
         team_id: teamId,
         transponder_id: transponderId,
     };
-    // Only send kart_number if explicitly set
-    if (kartNumber) payload.kart_number = kartNumber;
 
     fetch(`/api/race/${raceId}/assign-transponder/`, {
         method: 'POST',
@@ -378,7 +356,6 @@ function assignTransponder() {
         if (data.success) {
             alert(data.message);
             document.getElementById('teamSelect').value = '';
-            document.getElementById('kartNumberInput').value = '';
             document.getElementById('transponderSelect').value = '';
             loadAssignments();
         } else {
