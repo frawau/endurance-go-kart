@@ -4531,7 +4531,6 @@ def get_transponder_assignments(request, race_id):
                 "team_id": assignment.team.id,
                 "team_number": assignment.team.number,
                 "team_name": assignment.team.name,
-                "kart_number": assignment.kart_number,
                 "transponder_id": assignment.transponder.transponder_id,
                 "confirmed": assignment.confirmed,
             }
@@ -4552,23 +4551,14 @@ def assign_transponder(request, race_id):
 
         team_id = data.get("team_id")
         transponder_id = data.get("transponder_id")
-        kart_number = data.get("kart_number")
 
         team = get_object_or_404(round_team, id=team_id)
         transponder = get_object_or_404(Transponder, transponder_id=transponder_id)
-
-        # Default kart_number: inherit from existing assignment, else use team number
-        if not kart_number:
-            existing = RaceTransponderAssignment.objects.filter(
-                race=race, team=team
-            ).first()
-            kart_number = existing.kart_number if existing else team.number
 
         assignment = RaceTransponderAssignment.objects.create(
             race=race,
             team=team,
             transponder=transponder,
-            kart_number=kart_number,
             confirmed=True,
         )
 

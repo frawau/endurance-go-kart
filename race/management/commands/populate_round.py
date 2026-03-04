@@ -275,7 +275,6 @@ class Command(BaseCommand):
                 race=first_race,
                 transponder=transponder,
                 team=rt,
-                kart_number=rt.number,
                 confirmed=True,
             )
             n_created += 1

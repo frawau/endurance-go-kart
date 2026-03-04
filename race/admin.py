@@ -158,10 +158,10 @@ class GridPositionAdmin(admin.ModelAdmin):
 
 @admin.register(RaceTransponderAssignment)
 class RaceTransponderAssignmentAdmin(admin.ModelAdmin):
-    list_display = ("race", "team", "transponder", "kart_number", "confirmed")
+    list_display = ("race", "team", "transponder", "confirmed")
     list_filter = ("confirmed", "race__round__championship")
     search_fields = ("team__team__name", "transponder__transponder_id")
-    ordering = ("race", "kart_number")
+    ordering = ("race", "team")
 
 
 @admin.register(QualifyingKnockoutRule)

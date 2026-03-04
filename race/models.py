@@ -1501,7 +1501,6 @@ class Race(models.Model):
                     race=self,
                     transponder=a.transponder,
                     team=a.team,
-                    kart_number=a.kart_number,
                     confirmed=False,
                 )
             )
@@ -2074,12 +2073,6 @@ class RaceTransponderAssignment(models.Model):
     )
     transponder = models.ForeignKey(Transponder, on_delete=models.CASCADE)
     team = models.ForeignKey("round_team", on_delete=models.CASCADE)
-    kart_number = models.IntegerField(
-        null=True,
-        blank=True,
-        validators=[MinValueValidator(1), MaxValueValidator(99)],
-        verbose_name="Kart Number",
-    )
     confirmed = models.BooleanField(default=False, verbose_name="Confirmed")
     assigned_at = models.DateTimeField(auto_now_add=True, verbose_name="Assigned At")
 
@@ -2091,7 +2084,7 @@ class RaceTransponderAssignment(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.transponder.transponder_id} → Team {self.team} (Kart #{self.kart_number})"
+        return f"{self.transponder.transponder_id} → Team {self.team}"
 
 
 class LapCrossing(models.Model):

@@ -736,7 +736,6 @@ class Command(BaseCommand):
                 race=race,
                 transponder=transponder,
                 team=rt,
-                kart_number=rt.number,
                 confirmed=True,
             )
 

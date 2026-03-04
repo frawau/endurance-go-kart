@@ -81,11 +81,6 @@ class Command(BaseCommand):
                 END $$;
                 """
             )
-            # Named kart_number partial unique constraint also removed
-            cursor.execute(
-                "ALTER TABLE race_racetransponderassignment "
-                "DROP CONSTRAINT IF EXISTS unique_race_kart_number_when_set"
-            )
         self.stdout.write(
             "Checked/removed obsolete transponder assignment constraints."
         )
