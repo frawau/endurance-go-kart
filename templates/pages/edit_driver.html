@@ -191,10 +191,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
             }
         })
-        .then(response => response.text().then(text => {
-            console.log('Response status:', response.status, 'body:', text.substring(0, 300));
-            return JSON.parse(text);
-        }))
+        .then(response => response.json())
         .then(data => {
             if (data.success) {
                 alert('Driver updated successfully!');
