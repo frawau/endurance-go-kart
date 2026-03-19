@@ -8,14 +8,28 @@ Downstream: sends frames to pre-registered client addresses, expects
 ACK back before advancing. Per-client buffering in SQLite (WAL) so
 frames survive restarts and slow clients catch up quickly.
 
+Two modes for downstream clients, chosen automatically by IP:
+
+  Remote clients (non-loopback): The timing station software always sends
+  ACKs to proxy_ip:client_port (its configured decoder port), regardless
+  of the source port of the received frame.  The proxy therefore binds a
+  dedicated socket to each unique client port so ACKs arrive there.
+
+  Local clients (loopback, 127.x.x.x): The proxy and timing station share
+  the same machine, so the proxy cannot also bind to the client's port.
+  Instead a single listen_port socket is used for all loopback clients;
+  the local timing station sends ACKs back to the source of the received
+  frame, which is proxy_ip:listen_port.
+
 Usage:
     ./nettag-proxy -c nettag-proxy.toml
     ./nettag-proxy --decoder-host 192.168.0.11 --client 10.0.0.5:2009
-    ./nettag-proxy -c nettag-proxy.toml --listen-port 2020  # CLI overrides config
+    ./nettag-proxy -c nettag-proxy.toml --listen-port 2020
 """
 
 import argparse
 import asyncio
+import ipaddress
 import logging
 import signal
 import sqlite3
@@ -34,6 +48,13 @@ except ImportError:
 ACK_BYTES = b"\x1b\x11"
 
 log = logging.getLogger("nettag-proxy")
+
+
+def is_loopback(ip: str) -> bool:
+    try:
+        return ipaddress.ip_address(ip).is_loopback
+    except ValueError:
+        return False
 
 
 # ── SQLite buffer ────────────────────────────────────────────────
@@ -76,20 +97,13 @@ class FrameBuffer:
         return row[0] or 0
 
     def register_client(self, addr: str):
-        """Register a new client starting from the current max seq.
-
-        If the client already exists with a pointer that is behind the oldest
-        available frame (stale from a previous run where frames were cleaned
-        up), advance it to the current max so it starts receiving new frames.
-        """
+        """Register a new client starting from the current max seq."""
         now = time.time()
         current_max = self.max_seq()
         self.conn.execute(
             "INSERT OR IGNORE INTO clients (addr, last_acked_seq, last_seen) VALUES (?, ?, ?)",
             (addr, current_max, now),
         )
-        # Detect and fix stale pointer: if the next frame the client expects
-        # no longer exists in the buffer, it will never make progress.
         row = self.conn.execute(
             "SELECT last_acked_seq FROM clients WHERE addr = ?", (addr,)
         ).fetchone()
@@ -177,6 +191,9 @@ class FrameBuffer:
 
 # ── Proxy ────────────────────────────────────────────────────────
 
+# Sentinel used in the ACK queue to identify the listen_port socket.
+_LOCAL_SOCKET = object()
+
 
 class NetTagProxy:
     def __init__(self, config: dict):
@@ -194,8 +211,20 @@ class NetTagProxy:
         for c in config.get("client", []):
             ip = c["host"]
             port = c["port"]
-            addr_str = f"{ip}:{port}"
-            self.clients[addr_str] = (ip, port)
+            self.clients[f"{ip}:{port}"] = (ip, port)
+
+        # Split into local (loopback) and remote clients.
+        self.local_clients = {
+            a: v for a, v in self.clients.items() if is_loopback(v[0])
+        }
+        self.remote_clients = {
+            a: v for a, v in self.clients.items() if not is_loopback(v[0])
+        }
+
+        # Remote clients grouped by port for per-port socket binding.
+        self.remote_port_to_clients = {}  # port -> [addr_str]
+        for addr_str, (ip, port) in self.remote_clients.items():
+            self.remote_port_to_clients.setdefault(port, []).append(addr_str)
 
         db_path = buffer_cfg.get("db", "nettag_buffer.db")
         self.buffer = FrameBuffer(db_path)
@@ -204,17 +233,23 @@ class NetTagProxy:
 
         self.running = False
         self.upstream_transport = None
-        self.downstream_transport = None
-        self.new_frame_event = asyncio.Event()
+        self.local_transport = None  # shared socket for loopback clients
+        self.port_transports = {}  # port -> transport (remote clients)
+        self.client_transports = {}  # addr_str -> transport
 
-        # Track last send time per client for resend logic
+        self.new_frame_event = asyncio.Event()
+        # ACK queue entries: (socket_key, data, src_addr)
+        # socket_key is _LOCAL_SOCKET for the loopback socket,
+        # or the integer port number for per-port remote sockets.
+        self.ack_queue = asyncio.Queue()
+
         self.last_sent = {}  # addr_str -> timestamp
 
     async def start(self):
         self.running = True
         loop = asyncio.get_event_loop()
 
-        # Upstream UDP endpoint (receives from decoder)
+        # ── Upstream ──────────────────────────────────────────────
         class UpstreamProtocol(asyncio.DatagramProtocol):
             def __init__(self, proxy):
                 self.proxy = proxy
@@ -236,30 +271,58 @@ class NetTagProxy:
             self.decoder_port,
         )
 
-        # Downstream UDP endpoint (sends to clients, receives ACKs)
-        class DownstreamProtocol(asyncio.DatagramProtocol):
-            def __init__(self, proxy):
-                self.proxy = proxy
-                self.queue = asyncio.Queue()
+        # ── Downstream: local (loopback) clients ──────────────────
+        # A single listen_port socket handles all loopback clients.
+        # The local timing station sends ACKs to the source of the frame
+        # it received, which is proxy_ip:listen_port.
+        if self.local_clients:
+
+            class LocalProtocol(asyncio.DatagramProtocol):
+                def __init__(self, ack_queue):
+                    self._queue = ack_queue
+
+                def datagram_received(self, data, addr):
+                    self._queue.put_nowait((_LOCAL_SOCKET, data, addr))
+
+            local_transport, _ = await loop.create_datagram_endpoint(
+                lambda: LocalProtocol(self.ack_queue),
+                local_addr=("0.0.0.0", self.listen_port),
+            )
+            self.local_transport = local_transport
+            for addr_str in self.local_clients:
+                self.client_transports[addr_str] = local_transport
+            log.info(
+                "Downstream (local): socket on 0.0.0.0:%d for local client(s) %s",
+                self.listen_port,
+                ", ".join(self.local_clients),
+            )
+
+        # ── Downstream: remote clients ────────────────────────────
+        # One socket per unique client port.  The remote timing station
+        # always sends ACKs to proxy_ip:client_port, so the proxy must
+        # own that port to receive them.
+        class PortProtocol(asyncio.DatagramProtocol):
+            def __init__(self, local_port, ack_queue):
+                self._port = local_port
+                self._queue = ack_queue
 
             def datagram_received(self, data, addr):
-                self.queue.put_nowait((data, addr))
+                self._queue.put_nowait((self._port, data, addr))
 
-        downstream_transport, downstream_protocol = await loop.create_datagram_endpoint(
-            lambda: DownstreamProtocol(self),
-            local_addr=("0.0.0.0", self.listen_port),
-        )
-        self.downstream_transport = downstream_transport
-        self.downstream_protocol = downstream_protocol
-        log.info(
-            "Downstream: listening on 0.0.0.0:%d (%d clients registered)",
-            self.listen_port,
-            len(self.clients),
-        )
-        for addr, (ip, port) in self.clients.items():
-            log.info("  Client: %s:%d", ip, port)
+        for port in self.remote_port_to_clients:
+            transport, _ = await loop.create_datagram_endpoint(
+                lambda p=port: PortProtocol(p, self.ack_queue),
+                local_addr=("0.0.0.0", port),
+            )
+            self.port_transports[port] = transport
+            for addr_str in self.remote_port_to_clients[port]:
+                self.client_transports[addr_str] = transport
+            log.info(
+                "Downstream (remote): socket on 0.0.0.0:%d for client(s) %s",
+                port,
+                ", ".join(self.remote_port_to_clients[port]),
+            )
 
-        # Run all loops concurrently
         tasks = [
             asyncio.create_task(self.upstream_loop()),
             asyncio.create_task(self.downstream_ack_loop()),
@@ -272,7 +335,10 @@ class NetTagProxy:
             pass
         finally:
             upstream_transport.close()
-            downstream_transport.close()
+            if self.local_transport:
+                self.local_transport.close()
+            for t in self.port_transports.values():
+                t.close()
             self.buffer.close()
 
     async def upstream_loop(self):
@@ -287,22 +353,17 @@ class NetTagProxy:
             except asyncio.CancelledError:
                 break
 
-            # ACK the decoder immediately
             self.upstream_transport.sendto(ACK_BYTES, addr)
-
-            # Store frame
             seq = self.buffer.store_frame(data)
             log.info("Upstream: frame seq=%d (%dB) from %s", seq, len(data), addr)
-
-            # Notify send loop
             self.new_frame_event.set()
 
     async def downstream_ack_loop(self):
         """Receive ACKs from downstream clients."""
         while self.running:
             try:
-                data, addr = await asyncio.wait_for(
-                    self.downstream_protocol.queue.get(), timeout=1.0
+                socket_key, data, src_addr = await asyncio.wait_for(
+                    self.ack_queue.get(), timeout=1.0
                 )
             except asyncio.TimeoutError:
                 continue
@@ -312,15 +373,31 @@ class NetTagProxy:
             if data != ACK_BYTES:
                 continue
 
-            # Match by IP — find client entry for this source IP
+            src_ip = src_addr[0]
             client_addr = None
-            for addr_str, (ip, port) in self.clients.items():
-                if addr[0] == ip:
-                    client_addr = addr_str
-                    break
+
+            if socket_key is _LOCAL_SOCKET:
+                # Local clients: match by source IP among loopback clients.
+                for addr_str, (ip, _) in self.local_clients.items():
+                    if src_ip == ip:
+                        client_addr = addr_str
+                        break
+            else:
+                # Remote clients: match by source IP within the port group.
+                # ACK source port is ephemeral — only the socket it arrived
+                # on (socket_key = local_port = client_port) is meaningful.
+                for addr_str in self.remote_port_to_clients.get(socket_key, []):
+                    ip, _ = self.remote_clients[addr_str]
+                    if src_ip == ip:
+                        client_addr = addr_str
+                        break
 
             if not client_addr:
-                log.debug("ACK from unknown source %s, ignoring", addr)
+                log.debug(
+                    "ACK from %s (key=%s) — no matching client, ignoring",
+                    src_addr,
+                    socket_key,
+                )
                 continue
 
             new_seq = self.buffer.ack_client(client_addr)
@@ -332,7 +409,6 @@ class NetTagProxy:
                 pending,
             )
 
-            # Immediately send next frame if available (fast catchup)
             await self.send_to_client(client_addr)
 
     async def send_to_client(self, addr_str: str):
@@ -342,14 +418,13 @@ class NetTagProxy:
             return
         seq, data = frame
         ip, port = self.clients[addr_str]
-        self.downstream_transport.sendto(data, (ip, port))
+        self.client_transports[addr_str].sendto(data, (ip, port))
         self.last_sent[addr_str] = time.time()
         log.debug("Sent seq=%d to %s", seq, addr_str)
 
     async def send_loop(self):
         """Send new frames to caught-up clients, resend to unresponsive ones."""
         while self.running:
-            # Wait for new frame or wake up at resend interval
             try:
                 await asyncio.wait_for(
                     self.new_frame_event.wait(), timeout=self.resend_interval
@@ -394,43 +469,33 @@ def load_config(config_path: str) -> dict:
 
 
 def build_config(args) -> dict:
-    """Build final config by merging config file with CLI overrides.
-
-    CLI arguments take precedence over config file values.
-    --client args are added to any clients defined in the config file.
-    """
+    """Build final config by merging config file with CLI overrides."""
     config = load_config(args.config) if args.config else {}
 
-    # Ensure nested dicts exist
     config.setdefault("upstream", {})
     config.setdefault("downstream", {})
     config.setdefault("buffer", {})
     config.setdefault("logging", {})
     config.setdefault("client", [])
 
-    # CLI overrides for upstream
     if args.decoder_host is not None:
         config["upstream"]["decoder_host"] = args.decoder_host
     if args.decoder_port is not None:
         config["upstream"]["decoder_port"] = args.decoder_port
 
-    # CLI overrides for downstream
     if args.listen_port is not None:
         config["downstream"]["listen_port"] = args.listen_port
     if args.resend_interval is not None:
         config["downstream"]["resend_interval"] = args.resend_interval
 
-    # CLI overrides for buffer
     if args.db is not None:
         config["buffer"]["db"] = args.db
     if args.cleanup_interval is not None:
         config["buffer"]["cleanup_interval"] = args.cleanup_interval
 
-    # CLI overrides for logging
     if args.log_level is not None:
         config["logging"]["level"] = args.log_level
 
-    # CLI --client entries are added to config file clients
     if args.client:
         for c in args.client:
             if ":" in c:
@@ -447,10 +512,7 @@ async def main():
         description="NetTag UDP proxy — fan-out decoder to multiple clients"
     )
     parser.add_argument(
-        "-c",
-        "--config",
-        default=None,
-        help="Path to TOML configuration file",
+        "-c", "--config", default=None, help="Path to TOML configuration file"
     )
     parser.add_argument(
         "--decoder-host",
@@ -467,23 +529,19 @@ async def main():
         "--listen-port",
         type=int,
         default=None,
-        help="Downstream UDP port for clients (default: 2010)",
+        help="Port for loopback clients' ACKs (default: 2010)",
     )
     parser.add_argument(
-        "--db",
-        default=None,
-        help="SQLite buffer path (default: nettag_buffer.db)",
+        "--db", default=None, help="SQLite buffer path (default: nettag_buffer.db)"
     )
     parser.add_argument(
-        "--client",
-        action="append",
-        help="Client address as ip or ip:port (port defaults to 2009, repeatable)",
+        "--client", action="append", help="Client address as ip or ip:port (repeatable)"
     )
     parser.add_argument(
         "--resend-interval",
         type=float,
         default=None,
-        help="Seconds before resending unACK'd frame to client (default: 1.0)",
+        help="Seconds before resending unACK'd frame (default: 1.0)",
     )
     parser.add_argument(
         "--cleanup-interval",
@@ -506,14 +564,10 @@ async def main():
 
     config = build_config(args)
 
-    # Setup logging
     log_cfg = config.get("logging", {})
     level_name = log_cfg.get("level", "INFO")
     level = getattr(logging, level_name, logging.INFO)
-    logging.basicConfig(
-        level=level,
-        format="%(asctime)s [%(levelname)s] %(message)s",
-    )
+    logging.basicConfig(level=level, format="%(asctime)s [%(levelname)s] %(message)s")
 
     if args.clear_db:
         db_path = config.get("buffer", {}).get("db", "nettag_buffer.db")
