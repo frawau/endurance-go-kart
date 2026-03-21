@@ -201,7 +201,7 @@ function addSystemMessage(message, tag) {
  * Show a persistent warning alert for a suspicious (possibly double) lap.
  * The race director can split the lap at the midpoint or dismiss the alert.
  */
-function showSuspiciousLapAlert(teamNumber, lapNumber, crossingId, suggestedSplit) {
+function showSuspiciousLapAlert(teamNumber, lapNumber, crossingId, suggestedSplit, maxSplit) {
   const alertId = `suspicious-lap-${crossingId}`;
   if (document.getElementById(alertId)) return; // already shown
 
@@ -209,7 +209,9 @@ function showSuspiciousLapAlert(teamNumber, lapNumber, crossingId, suggestedSpli
   if (!messagesContainer) return;
 
   const count = suggestedSplit && suggestedSplit > 1 ? suggestedSplit : 2;
+  const max = maxSplit && maxSplit > 1 ? maxSplit : count;
   const countId = `split-count-${crossingId}`;
+  const maxAttr = `data-max="${max}"`;
 
   const alertDiv = document.createElement("div");
   alertDiv.id = alertId;
@@ -220,7 +222,7 @@ function showSuspiciousLapAlert(teamNumber, lapNumber, crossingId, suggestedSpli
     `possible missed crossing(s). ` +
     `<span class="ms-2">Split into: ` +
     `<button class="btn btn-sm btn-outline-secondary py-0" onclick="adjustSplitCount('${countId}', -1)">−</button>` +
-    `<span id="${countId}" class="mx-2 fw-bold">${count}</span>` +
+    `<span id="${countId}" ${maxAttr} class="mx-2 fw-bold">${count}</span>` +
     `<button class="btn btn-sm btn-outline-secondary py-0" onclick="adjustSplitCount('${countId}', +1)">+</button>` +
     `</span>` +
     `<button class="btn btn-sm btn-warning ms-2" onclick="splitSuspiciousLap(${crossingId}, '${alertId}', '${countId}')">` +
@@ -234,7 +236,8 @@ function adjustSplitCount(countId, delta) {
   const el = document.getElementById(countId);
   if (!el) return;
   const current = parseInt(el.textContent, 10) || 2;
-  el.textContent = Math.max(2, Math.min(current + delta, 10));
+  const max = parseInt(el.dataset.max, 10) || 10;
+  el.textContent = Math.max(2, Math.min(current + delta, max));
 }
 
 function splitSuspiciousLap(crossingId, alertId, countId) {

@@ -427,7 +427,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
                     // Handle suspicious lap (possible missed double-transponder crossing)
                     if (data.type === 'race_lap_update' && data.is_suspicious && data.crossing_id) {
-                        showSuspiciousLapAlert(data.team_number, data.lap_number, data.crossing_id, data.suggested_split);
+                        showSuspiciousLapAlert(data.team_number, data.lap_number, data.crossing_id, data.suggested_split, data.max_split);
                         return;
                     }
 

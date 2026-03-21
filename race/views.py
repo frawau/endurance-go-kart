@@ -4375,7 +4375,26 @@ def split_lap(request, crossing_id):
             count = int(body.get("count", 2))
         except (ValueError, AttributeError):
             count = 2
-        count = max(2, min(count, 10))
+
+        # Compute physical upper bound from median lap time
+        valid_laps = LapCrossing.objects.filter(
+            race=crossing.race,
+            team=crossing.team,
+            is_valid=True,
+            is_suspicious=False,
+            lap_time__isnull=False,
+        )
+        lap_times = sorted(l.lap_time.total_seconds() for l in valid_laps)
+        if len(lap_times) >= 3 and crossing.lap_time:
+            median_time = lap_times[len(lap_times) // 2]
+            max_count = (
+                int(crossing.lap_time.total_seconds() / median_time) + 1
+                if median_time > 0
+                else 10
+            )
+        else:
+            max_count = 10
+        count = max(2, min(count, max_count))
 
         # Find previous crossing
         prev_crossing = (
