@@ -316,6 +316,7 @@ class RoundConsumer(AsyncWebsocketConsumer):
                     "team_number": event["team_number"],
                     "lap_number": event["lap_number"],
                     "is_suspicious": event.get("is_suspicious", False),
+                    "suggested_split": event.get("suggested_split", 2),
                     "crossing_id": event.get("crossing_id"),
                 }
             )
@@ -574,6 +575,7 @@ class StopAndGoConsumer(AsyncWebsocketConsumer):
                     "team_number": event["team_number"],
                     "lap_number": event["lap_number"],
                     "is_suspicious": event.get("is_suspicious", False),
+                    "suggested_split": event.get("suggested_split", 2),
                     "crossing_id": event.get("crossing_id"),
                 }
             )
@@ -883,6 +885,7 @@ class TimingConsumer(AsyncWebsocketConsumer):
         lap_number = result["lap_number"]
         lap_time = result["lap_time"]
         is_suspicious = result["is_suspicious"]
+        suggested_split = result.get("suggested_split", 1)
 
         await self.channel_layer.group_send(
             f"leaderboard_{race_id}",
@@ -904,6 +907,7 @@ class TimingConsumer(AsyncWebsocketConsumer):
                 "team_number": team_number,
                 "lap_number": lap_number,
                 "is_suspicious": is_suspicious,
+                "suggested_split": suggested_split,
                 "crossing_id": result.get("crossing_id"),
             },
         )
@@ -1094,13 +1098,16 @@ class TimingConsumer(AsyncWebsocketConsumer):
             team_number = team.team.number
 
             # Check for suspicious lap time
+            suggested_split = 1
             if lap_time and should_count:
-                if self.is_lap_suspicious(race, lap_time, team):
+                suggested_split = self.estimate_lap_count(race, lap_time, team)
+                if suggested_split > 1:
                     crossing.is_suspicious = True
                     crossing.save(update_fields=["is_suspicious"])
                     print(
                         f"Suspicious lap: Team {team_number}, "
-                        f"Lap {lap_number}, Time {lap_time}"
+                        f"Lap {lap_number}, Time {lap_time}, "
+                        f"suggested split: {suggested_split}"
                     )
 
             print(
@@ -1152,6 +1159,7 @@ class TimingConsumer(AsyncWebsocketConsumer):
                 "lap_number": lap_number,
                 "lap_time": lap_time,
                 "is_suspicious": crossing.is_suspicious,
+                "suggested_split": suggested_split if crossing.is_suspicious else 1,
                 "crossing_id": crossing.id,
                 "race_finished": race_finished,
                 "race_type": race.race_type if race_finished else None,
@@ -1190,28 +1198,38 @@ class TimingConsumer(AsyncWebsocketConsumer):
             print(f"Timing: Error handling lap crossing: {e}")
             return None
 
-    def is_lap_suspicious(self, race, lap_time, team=None):
+    def estimate_lap_count(self, race, lap_time, team=None):
         """
-        Check if lap time is suspicious (>2x median).
+        Estimate how many laps a crossing represents.
+        Returns 1 if normal, 2+ if the lap time suggests missed crossings.
+        Uses round(lap_time / median) capped at a sensible maximum.
         """
         try:
-            filters = {"race": race, "is_valid": True, "lap_time__isnull": False}
+            filters = {
+                "race": race,
+                "is_valid": True,
+                "lap_time__isnull": False,
+                "is_suspicious": False,
+            }
             if team:
                 filters["team"] = team
 
             valid_laps = LapCrossing.objects.filter(**filters)
 
             if valid_laps.count() < 3:
-                return False
+                return 1
 
-            lap_times = [lap.lap_time.total_seconds() for lap in valid_laps]
-            lap_times.sort()
+            lap_times = sorted(lap.lap_time.total_seconds() for lap in valid_laps)
             median_time = lap_times[len(lap_times) // 2]
 
-            return lap_time.total_seconds() > (median_time * 2)
+            if median_time <= 0:
+                return 1
+
+            count = round(lap_time.total_seconds() / median_time)
+            return max(1, min(count, 10))
 
         except Exception:
-            return False
+            return 1
 
     async def send_command(self, command_type, **kwargs):
         """Send command to timing daemon"""

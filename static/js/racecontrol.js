@@ -201,12 +201,15 @@ function addSystemMessage(message, tag) {
  * Show a persistent warning alert for a suspicious (possibly double) lap.
  * The race director can split the lap at the midpoint or dismiss the alert.
  */
-function showSuspiciousLapAlert(teamNumber, lapNumber, crossingId) {
+function showSuspiciousLapAlert(teamNumber, lapNumber, crossingId, suggestedSplit) {
   const alertId = `suspicious-lap-${crossingId}`;
   if (document.getElementById(alertId)) return; // already shown
 
   const messagesContainer = document.getElementById("messagesContainer");
   if (!messagesContainer) return;
+
+  const count = suggestedSplit && suggestedSplit > 1 ? suggestedSplit : 2;
+  const countId = `split-count-${crossingId}`;
 
   const alertDiv = document.createElement("div");
   alertDiv.id = alertId;
@@ -214,26 +217,40 @@ function showSuspiciousLapAlert(teamNumber, lapNumber, crossingId) {
   alertDiv.setAttribute("role", "alert");
   alertDiv.innerHTML =
     `<strong>Suspicious lap:</strong> Team #${teamNumber}, Lap ${lapNumber} — ` +
-    `possible missed crossing (both transponders?). ` +
-    `<button class="btn btn-sm btn-warning ms-2" onclick="splitSuspiciousLap(${crossingId}, '${alertId}')">` +
-    `<i class="fas fa-cut"></i> Split Lap</button>` +
+    `possible missed crossing(s). ` +
+    `<span class="ms-2">Split into: ` +
+    `<button class="btn btn-sm btn-outline-secondary py-0" onclick="adjustSplitCount('${countId}', -1)">−</button>` +
+    `<span id="${countId}" class="mx-2 fw-bold">${count}</span>` +
+    `<button class="btn btn-sm btn-outline-secondary py-0" onclick="adjustSplitCount('${countId}', +1)">+</button>` +
+    `</span>` +
+    `<button class="btn btn-sm btn-warning ms-2" onclick="splitSuspiciousLap(${crossingId}, '${alertId}', '${countId}')">` +
+    `<i class="fas fa-cut"></i> Split</button>` +
     `<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>`;
 
-  // Insert at top of messages area and leave it until dismissed or split
   messagesContainer.insertBefore(alertDiv, messagesContainer.firstChild);
 }
 
-function splitSuspiciousLap(crossingId, alertId) {
+function adjustSplitCount(countId, delta) {
+  const el = document.getElementById(countId);
+  if (!el) return;
+  const current = parseInt(el.textContent, 10) || 2;
+  el.textContent = Math.max(2, Math.min(current + delta, 10));
+}
+
+function splitSuspiciousLap(crossingId, alertId, countId) {
+  const countEl = document.getElementById(countId);
+  const count = countEl ? (parseInt(countEl.textContent, 10) || 2) : 2;
   fetch(`/api/lap/${crossingId}/split/`, {
     method: "POST",
-    headers: { "X-CSRFToken": getCookie("csrftoken") },
+    headers: { "X-CSRFToken": getCookie("csrftoken"), "Content-Type": "application/json" },
+    body: JSON.stringify({ count }),
   })
     .then((r) => r.json())
     .then((data) => {
       if (data.success) {
         const el = document.getElementById(alertId);
         if (el) el.remove();
-        addSystemMessage(`Lap split successfully for crossing #${crossingId}`, "success");
+        addSystemMessage(data.message, "success");
       } else {
         addSystemMessage("Error splitting lap: " + (data.error || "unknown error"), "danger");
       }

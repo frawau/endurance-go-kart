@@ -4366,9 +4366,16 @@ def get_race_laps(request, race_id):
 @csrf_exempt
 @require_POST
 def split_lap(request, crossing_id):
-    """Split a suspicious lap into two laps"""
+    """Split a suspicious lap into n equal laps"""
     try:
         crossing = get_object_or_404(LapCrossing, id=crossing_id)
+
+        try:
+            body = json.loads(request.body)
+            count = int(body.get("count", 2))
+        except (ValueError, AttributeError):
+            count = 2
+        count = max(2, min(count, 10))
 
         # Find previous crossing
         prev_crossing = (
@@ -4386,49 +4393,39 @@ def split_lap(request, crossing_id):
                 {"success": False, "error": "No previous crossing found"}, status=400
             )
 
-        # Calculate mid-point time
         time_delta = crossing.crossing_time - prev_crossing.crossing_time
-        mid_time = prev_crossing.crossing_time + (time_delta / 2)
-        half_lap_time = time_delta / 2
+        slice_duration = time_delta / count
+        base_lap_number = crossing.lap_number
 
-        # Create first split lap (replace current lap number)
-        first_lap = LapCrossing.objects.create(
-            race=crossing.race,
-            team=crossing.team,
-            transponder=crossing.transponder,
-            lap_number=crossing.lap_number,
-            crossing_time=mid_time,
-            lap_time=half_lap_time,
-            is_valid=True,
-            is_suspicious=False,
-            was_split=True,
-            split_from=crossing,
-            counted_during_suspension=crossing.counted_during_suspension,
-            session=crossing.session,
-        )
-
-        # Increment all subsequent lap numbers first
+        # Shift all subsequent laps up by (count - 1) to make room
         LapCrossing.objects.filter(
             race=crossing.race,
             team=crossing.team,
-            lap_number__gt=crossing.lap_number,
-        ).update(lap_number=models.F("lap_number") + 1)
+            lap_number__gt=base_lap_number,
+        ).update(lap_number=models.F("lap_number") + (count - 1))
 
-        # Create second split lap (at incremented position)
-        second_lap = LapCrossing.objects.create(
-            race=crossing.race,
-            team=crossing.team,
-            transponder=crossing.transponder,
-            lap_number=crossing.lap_number + 1,
-            crossing_time=crossing.crossing_time,
-            lap_time=half_lap_time,
-            is_valid=True,
-            is_suspicious=False,
-            was_split=True,
-            split_from=crossing,
-            counted_during_suspension=crossing.counted_during_suspension,
-            session=crossing.session,
-        )
+        # Create n evenly-spaced laps; the last one lands on the actual crossing time
+        created_ids = []
+        for i in range(count):
+            if i < count - 1:
+                ct = prev_crossing.crossing_time + slice_duration * (i + 1)
+            else:
+                ct = crossing.crossing_time
+            lap = LapCrossing.objects.create(
+                race=crossing.race,
+                team=crossing.team,
+                transponder=crossing.transponder,
+                lap_number=base_lap_number + i,
+                crossing_time=ct,
+                lap_time=slice_duration,
+                is_valid=True,
+                is_suspicious=False,
+                was_split=True,
+                split_from=crossing,
+                counted_during_suspension=crossing.counted_during_suspension,
+                session=crossing.session,
+            )
+            created_ids.append(lap.id)
 
         # Mark original as invalid
         crossing.is_valid = False
@@ -4437,9 +4434,8 @@ def split_lap(request, crossing_id):
         return JsonResponse(
             {
                 "success": True,
-                "message": f"Lap {crossing.lap_number} split successfully",
-                "first_lap_id": first_lap.id,
-                "second_lap_id": second_lap.id,
+                "message": f"Lap {base_lap_number} split into {count} laps",
+                "lap_ids": created_ids,
             }
         )
 
