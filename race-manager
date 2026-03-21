@@ -304,8 +304,11 @@ install_cert() {
         exit 1
     fi
 
-    # Copy certificates to docker volume
-    docker run --rm -v "$(pwd)/ssl:/source" -v "ssl_certs:/dest" alpine \
+    # Copy certificates to docker volume (use compose project-qualified name)
+    local project_name
+    project_name=$(docker compose config --format json 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('name',''))" 2>/dev/null || basename "$(pwd)")
+    local vol_name="${project_name}_ssl_certs"
+    docker run --rm -v "$(pwd)/ssl:/source" -v "${vol_name}:/dest" alpine \
         sh -c "cp /source/*.pem /dest/"
 
     log_success "SSL certificates installed!"
