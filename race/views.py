@@ -4388,7 +4388,7 @@ def split_lap(request, crossing_id):
         if len(lap_times) >= 3 and crossing.lap_time:
             median_time = lap_times[len(lap_times) // 2]
             max_count = (
-                int(crossing.lap_time.total_seconds() / median_time) + 1
+                round(crossing.lap_time.total_seconds() / median_time) + 1
                 if median_time > 0
                 else 10
             )
