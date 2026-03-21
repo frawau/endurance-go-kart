@@ -1235,9 +1235,9 @@ class TimingConsumer(AsyncWebsocketConsumer):
             if median_time <= 0:
                 return 1, 1
 
-            ratio = lap_time.total_seconds() / median_time
-            suggested = max(1, round(ratio))
-            max_count = int(ratio) + 1
+            lap_secs = lap_time.total_seconds()
+            suggested = max(1, round(lap_secs / median_time))
+            max_count = int(lap_secs // median_time) + 1
             return suggested, max_count
 
         except Exception:
