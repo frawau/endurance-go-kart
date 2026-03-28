@@ -38,11 +38,13 @@ stopbits = 1
 endian = "normal"  # or "bitrev" for bit-reversed serial
 
 # Simulator plugin configuration (for testing without hardware)
+# Stays idle until Race Control pushes "Start Race".
 [plugin.simulator]
-num_transponders = 10
-lap_time_min = 45.0       # seconds
-lap_time_max = 75.0       # seconds
-lap_time_variance = 5.0   # seconds random variation
+num_transponders = 30       # transponders to auto-create in DB if none exist
+min_time = 45.0             # absolute minimum lap time (seconds)
+lap_sigma = 0.5             # std deviation of Gaussian lap-time model (seconds)
+miss_probability = 0.00005  # chance a crossing is not reported (1 in 20 000)
+post_race_duration = 120.0  # seconds to keep firing after race ends
 
 [logging]
 level = "INFO"  # DEBUG, INFO, WARNING, ERROR

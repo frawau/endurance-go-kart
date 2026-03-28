@@ -287,4 +287,10 @@ urlpatterns = [
         views.retire_team,
         name="retire_team",
     ),
+    # Simulator support (unauthenticated, dev/test only)
+    path(
+        "api/timing/sim-transponders/",
+        views.sim_transponders,
+        name="sim_transponders",
+    ),
 ]

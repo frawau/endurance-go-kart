@@ -429,6 +429,41 @@ def preracecheck(request):
     return JsonResponse({"result": True})
 
 
+def _notify_timing_race_started(active_race, cround):
+    """Push race_started command to the timing station channel group."""
+    try:
+        from channels.layers import get_channel_layer
+        from asgiref.sync import async_to_sync
+
+        assignments_qs = RaceTransponderAssignment.objects.filter(
+            race=active_race
+        ).select_related("transponder")
+        grid_pos_map = {
+            gp.team_id: gp.position
+            for gp in GridPosition.objects.filter(race=active_race)
+        }
+        assignments_data = [
+            {
+                "transponder_id": a.transponder.transponder_id,
+                "team_id": a.team_id,
+                "grid_position": grid_pos_map.get(a.team_id),
+            }
+            for a in assignments_qs
+        ]
+        channel_layer = get_channel_layer()
+        async_to_sync(channel_layer.group_send)(
+            "timing",
+            {
+                "type": "timing_race_started",
+                "race_id": active_race.id,
+                "round_id": cround.id,
+                "assignments": assignments_data,
+            },
+        )
+    except Exception as e:
+        print(f"Warning: could not notify timing station of race start: {e}")
+
+
 @login_required
 @user_passes_test(is_race_director)
 def race_start(request):
@@ -474,6 +509,8 @@ def race_start(request):
             session.start = now
             session.race = active_race
             session.save()
+
+        _notify_timing_race_started(active_race, cround)
     else:
         # ---- Legacy path ----
         cround.start_race()
@@ -4718,6 +4755,57 @@ def get_available_transponders(request, race_id):
         )
 
     return JsonResponse({"transponders": data})
+
+
+@require_http_methods(["GET", "POST"])
+def sim_transponders(request):
+    """
+    Simulator-only endpoint — no authentication required.
+
+    GET  → confirmed transponder IDs for the active race (empty list if none).
+    POST → {"ensure_count": N}
+           If no Transponder rows exist at all, create N simulated ones
+           (IDs: SIM000001 … SIM00000N).
+           Always returns {"transponder_ids": [...all active transponder IDs...]}.
+    """
+    if request.method == "POST":
+        body = json.loads(request.body) if request.body else {}
+        ensure_count = max(1, int(body.get("ensure_count", 30)))
+
+        if not Transponder.objects.exists():
+            Transponder.objects.bulk_create(
+                [
+                    Transponder(
+                        transponder_id=f"SIM{i + 1:06d}",
+                        description=f"Simulated transponder {i + 1}",
+                        active=True,
+                    )
+                    for i in range(ensure_count)
+                ]
+            )
+
+        ids = list(
+            Transponder.objects.filter(active=True).values_list(
+                "transponder_id", flat=True
+            )
+        )
+        return JsonResponse({"transponder_ids": ids})
+
+    # GET — confirmed assignments for active race
+    cround = active_round()
+    if not cround:
+        return JsonResponse({"transponders": []})
+    active_race = (
+        cround.races.filter(ended__isnull=True).order_by("sequence_number").first()
+    )
+    if not active_race:
+        return JsonResponse({"transponders": []})
+    ids = list(
+        RaceTransponderAssignment.objects.filter(
+            race=active_race, confirmed=True
+        ).values_list("transponder__transponder_id", flat=True)
+    )
+    return JsonResponse({"transponders": ids})
 
 
 @login_required

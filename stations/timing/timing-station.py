@@ -114,10 +114,16 @@ class TimingStation:
         elif plugin_type == "nettag":
             plugin = NetTagPlugin(plugin_config)
         elif plugin_type == "simulator":
+            from urllib.parse import urlparse as _urlparse
+
+            _parsed = _urlparse(self.websocket_url)
+            _scheme = "https" if _parsed.scheme == "wss" else "http"
+            app_url = f"{_scheme}://{_parsed.netloc}"
             plugin = SimulatorPlugin(
                 plugin_config,
                 timing_mode=self.timing_mode,
                 rollover_seconds=self.rollover_seconds,
+                app_url=app_url,
             )
         else:
             raise ValueError(f"Unknown plugin type: {plugin_type}")
@@ -225,6 +231,22 @@ class TimingStation:
                         "status": status,
                     }
                 )
+
+            elif cmd_type == "race_started":
+                if self.plugin and hasattr(self.plugin, "on_race_started"):
+                    asyncio.create_task(
+                        self.plugin.on_race_started(
+                            command.get("race_id"),
+                            command.get("round_id"),
+                            command.get("assignments", []),
+                        )
+                    )
+
+            elif cmd_type == "race_ended":
+                if self.plugin and hasattr(self.plugin, "on_race_ended"):
+                    asyncio.create_task(
+                        self.plugin.on_race_ended(command.get("race_id"))
+                    )
 
             else:
                 self.logger.warning(f"Unknown command: {cmd_type}")

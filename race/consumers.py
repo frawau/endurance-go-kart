@@ -879,6 +879,17 @@ class TimingConsumer(AsyncWebsocketConsumer):
         signed = self.sign_message(message)
         await self.send(text_data=json.dumps(signed))
 
+    async def timing_race_started(self, event):
+        """Forward race_started channel-layer event to the connected timing station."""
+        command = {
+            "type": "command",
+            "command": "race_started",
+            "race_id": event["race_id"],
+            "round_id": event["round_id"],
+            "assignments": event["assignments"],
+        }
+        await self.send(text_data=json.dumps(self.sign_message(command)))
+
     async def _broadcast_crossing(self, result):
         """Broadcast crossing data to leaderboard and race control groups."""
         race_id = result["race_id"]
@@ -931,6 +942,14 @@ class TimingConsumer(AsyncWebsocketConsumer):
                     "race_id": race_id,
                     "race_type": result["race_type"],
                 },
+            )
+            # Tell the timing station so SimulatorPlugin can wind down
+            await self.send(
+                text_data=json.dumps(
+                    self.sign_message(
+                        {"type": "command", "command": "race_ended", "race_id": race_id}
+                    )
+                )
             )
 
     def _calculate_lap_time(self, raw_time, previous_raw_time):
