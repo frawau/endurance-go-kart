@@ -4757,6 +4757,7 @@ def get_available_transponders(request, race_id):
     return JsonResponse({"transponders": data})
 
 
+@csrf_exempt
 @require_http_methods(["GET", "POST"])
 def sim_transponders(request):
     """
