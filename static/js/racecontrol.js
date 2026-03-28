@@ -7,6 +7,7 @@ let emptyTeamsSocketInstance = null;
 
 // Multi-race state
 let isLapBased = false;
+let roundStarted = false;
 let activeRaceType = null;
 let activeRaceLabel = null;
 let activeStartMode = null;
@@ -430,7 +431,7 @@ function updateButtonVisibility(state, options = {}) {
     case "initial": // Not ready, not started
       document.getElementById("preRaceCheckButton")?.removeAttribute("hidden");
       // For multi-race auto-advance, show penalty card (teams already set up)
-      if (isLapBased && activeRaceType) {
+      if (isLapBased && activeRaceType && roundStarted) {
         document
           .getElementById("emptyTeamsCard")
           ?.style.setProperty("display", "none", "important");
@@ -833,6 +834,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const roundDataEl = document.getElementById('round-data');
   if (roundDataEl) {
     isLapBased = roundDataEl.dataset.lapBased === 'true';
+    roundStarted = roundDataEl.dataset.started === 'true';
     activeRaceType = roundDataEl.dataset.activeRaceType || null;
     activeRaceLabel = roundDataEl.dataset.activeRaceLabel || null;
     activeStartMode = roundDataEl.dataset.startMode || null;
@@ -1045,7 +1047,9 @@ function initializeDropdownLogic() {
         sanction: selectedOption.dataset.penaltySanction
       };
       
-      // Enable offender dropdown
+      // Show penalty fields and enable offender dropdown
+      const penaltyFields = document.getElementById('penaltyFields');
+      if (penaltyFields) penaltyFields.style.display = '';
       offenderSelect.disabled = false;
       
       // Set default duration value
@@ -1067,13 +1071,15 @@ function initializeDropdownLogic() {
       
     } else {
       selectedPenalty = null;
+      const penaltyFieldsEl = document.getElementById('penaltyFields');
+      if (penaltyFieldsEl) penaltyFieldsEl.style.display = 'none';
       offenderSelect.disabled = true;
       offenderSelect.value = '';
       victimSelect.disabled = true;
       victimSelect.value = '';
       durationInput.disabled = true;
       durationInput.value = '20';
-      
+
       // Clear victim options
       victimSelect.innerHTML = '<option value="">Select victim team...</option>';
     }

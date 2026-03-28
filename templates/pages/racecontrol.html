@@ -143,6 +143,8 @@
                                                 <!-- Options will be populated via JavaScript -->
                                             </select>
                                             
+                                            <!-- Offender/Victim/Duration — hidden until a penalty is selected -->
+                                            <div id="penaltyFields" style="display:none">
                                             <!-- Offender Dropdown -->
                                             <label for="offenderSelect" class="form-label">Offender</label>
                                             <select class="form-select mb-2" id="offenderSelect" style="font-size: 1.0rem;" disabled>
@@ -153,16 +155,17 @@
                                                     {% endfor %}
                                                 {% endif %}
                                             </select>
-                                            
+
                                             <!-- Victim Dropdown -->
                                             <label for="victimSelect" class="form-label">Victim</label>
                                             <select class="form-select mb-2" id="victimSelect" style="font-size: 1.0rem;" disabled>
                                                 <option value="">Select victim team...</option>
                                             </select>
-                                            
+
                                             <!-- Duration Input -->
                                             <label for="durationInput" class="form-label">Duration</label>
                                             <input type="number" class="form-control" id="durationInput" value="20" min="1" max="300" style="font-size: 1.0rem;" disabled>
+                                            </div>
                                         </div>
                                         
                                         <!-- Right side - Buttons -->
