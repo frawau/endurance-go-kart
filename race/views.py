@@ -437,7 +437,7 @@ def _notify_timing_race_started(active_race, cround):
 
         assignments_qs = RaceTransponderAssignment.objects.filter(
             race=active_race
-        ).select_related("transponder")
+        ).select_related("transponder", "team__team")
         grid_pos_map = {
             gp.team_id: gp.position
             for gp in GridPosition.objects.filter(race=active_race)
@@ -446,6 +446,7 @@ def _notify_timing_race_started(active_race, cround):
             {
                 "transponder_id": a.transponder.transponder_id,
                 "team_id": a.team_id,
+                "team_number": a.team.number,
                 "grid_position": grid_pos_map.get(a.team_id),
             }
             for a in assignments_qs
@@ -853,7 +854,23 @@ def change_kart_driver(request):
                 "message": f"Error for {tmember}: {e}",
                 "status": "error",
             }
-        # print(result)
+
+        # Notify simulator: driver change adds ~30 s to the team's current lap
+        try:
+            from channels.layers import get_channel_layer
+            from asgiref.sync import async_to_sync
+
+            async_to_sync(get_channel_layer().group_send)(
+                "timing",
+                {
+                    "type": "timing_team_delay",
+                    "team_number": tmember.team.number,
+                    "extra_seconds": 30.0,
+                },
+            )
+        except Exception:
+            pass
+
         return Response(result, status=status.HTTP_200_OK)
 
     except json.JSONDecodeError:

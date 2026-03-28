@@ -248,6 +248,15 @@ class TimingStation:
                         self.plugin.on_race_ended(command.get("race_id"))
                     )
 
+            elif cmd_type == "team_delay":
+                if self.plugin and hasattr(self.plugin, "on_team_delay"):
+                    asyncio.create_task(
+                        self.plugin.on_team_delay(
+                            command.get("team_number"),
+                            float(command.get("extra_seconds", 0)),
+                        )
+                    )
+
             else:
                 self.logger.warning(f"Unknown command: {cmd_type}")
 

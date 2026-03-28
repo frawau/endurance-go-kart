@@ -624,6 +624,10 @@ class StopAndGoConsumer(AsyncWebsocketConsumer):
                     f"Processing station-reported penalty served for team {team_number}"
                 )
 
+                penalty_duration = await database_sync_to_async(
+                    lambda: active_penalty.round_penalty.value
+                )()
+
                 # Mark penalty as served
                 await database_sync_to_async(
                     lambda: setattr(
@@ -636,6 +640,16 @@ class StopAndGoConsumer(AsyncWebsocketConsumer):
 
                 # Remove from queue
                 await database_sync_to_async(lambda: active_penalty.delete())()
+
+                # Notify simulator: S&G stop adds penalty_duration + 5 s to current lap
+                await self.channel_layer.group_send(
+                    "timing",
+                    {
+                        "type": "timing_team_delay",
+                        "team_number": team_number,
+                        "extra_seconds": float(penalty_duration) + 5.0,
+                    },
+                )
 
                 # Trigger next penalty after 10 seconds
                 await self.trigger_next_penalty_after_delay(current_round.id)
@@ -887,6 +901,16 @@ class TimingConsumer(AsyncWebsocketConsumer):
             "race_id": event["race_id"],
             "round_id": event["round_id"],
             "assignments": event["assignments"],
+        }
+        await self.send(text_data=json.dumps(self.sign_message(command)))
+
+    async def timing_team_delay(self, event):
+        """Forward team_delay event to the connected timing station."""
+        command = {
+            "type": "command",
+            "command": "team_delay",
+            "team_number": event["team_number"],
+            "extra_seconds": event["extra_seconds"],
         }
         await self.send(text_data=json.dumps(self.sign_message(command)))
 

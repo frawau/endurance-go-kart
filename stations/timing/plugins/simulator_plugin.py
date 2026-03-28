@@ -68,6 +68,10 @@ class SimulatorPlugin(TimingPlugin):
         self._round_id: Optional[int] = None
         # transponder_id → (first_offset_s, delta_s)
         self._current_assignments: Dict[str, Tuple[float, float]] = {}
+        # team_number → transponder_id (populated on race_started)
+        self._team_transponder: Dict[int, str] = {}
+        # transponder_id → extra seconds to add to the next lap sleep
+        self._extra_delay: Dict[str, float] = {}
         self._tod_offset: float = 0.0
 
         # Asyncio coordination
@@ -213,6 +217,14 @@ class SimulatorPlugin(TimingPlugin):
             offset = round(max(0.5, min(8.0, random.gauss(ideal, 0.5))), 3)
             self._current_assignments[tid] = (offset, round_deltas.get(tid, 4.0))
 
+        # Build team_number → transponder_id reverse map
+        self._team_transponder = {
+            a["team_number"]: a["transponder_id"]
+            for a in active
+            if a.get("team_number") is not None
+        }
+        self._extra_delay.clear()
+
         print(
             f"Simulator: race {race_id} (round {round_id}) — "
             f"{len(self._current_assignments)} transponders, firing"
@@ -227,6 +239,23 @@ class SimulatorPlugin(TimingPlugin):
                 f"continuing for {self.post_race_duration:.0f} s"
             )
             self._race_end_event.set()
+
+    async def on_team_delay(self, team_number: int, extra_seconds: float):
+        """
+        Inject extra lap time for a team (S&G penalty or driver change).
+
+        The next time that team's transponder wakes from its lap sleep it
+        will additionally sleep `extra_seconds` before reporting the crossing.
+        """
+        tid = self._team_transponder.get(team_number)
+        if tid is None:
+            print(f"Simulator: team_delay for unknown team {team_number}, ignoring")
+            return
+        self._extra_delay[tid] = self._extra_delay.get(tid, 0.0) + extra_seconds
+        print(
+            f"Simulator: +{extra_seconds:.1f} s injected for team {team_number} "
+            f"(transponder {tid})"
+        )
 
     # ── Simulation loops ──────────────────────────────────────────────────────
 
@@ -293,8 +322,15 @@ class SimulatorPlugin(TimingPlugin):
                     3,
                 )
                 await asyncio.sleep(lap_time)
-                cumulative = round(cumulative + lap_time, 3)
-                pending_interval = round(pending_interval + lap_time, 3)
+
+                # Consume any injected delay (S&G penalty or driver change)
+                extra = self._extra_delay.pop(transponder_id, 0.0)
+                if extra > 0.0:
+                    await asyncio.sleep(extra)
+
+                total = round(lap_time + extra, 3)
+                cumulative = round(cumulative + total, 3)
+                pending_interval = round(pending_interval + total, 3)
 
                 if random.random() < self.miss_probability:
                     continue  # missed — accumulate for interval mode
