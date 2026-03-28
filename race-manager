@@ -470,11 +470,9 @@ configure_stations() {
     if [ -f "$timing_toml" ]; then
         # [daemon] section — keys are unique, safe to match globally
         if [ -n "${APP_HOSTNAME:-}" ]; then
-            local ws_port="${APP_PORT:-5085}"
-            if [ "${SSL_MODE}" != "none" ] && [ -n "${SSL_MODE:-}" ]; then
-                ws_port=80
-            fi
-            sed -i "s|^websocket_url = .*|websocket_url = \"ws://127.0.0.1:${ws_port}/ws/timing/\"|" "$timing_toml"
+            # Always connect directly to Django (gunicorn port 5005), bypassing
+            # nginx.  This avoids the HTTP→HTTPS redirect that breaks ws://.
+            sed -i "s|^websocket_url = .*|websocket_url = \"ws://127.0.0.1:5005/ws/timing/\"|" "$timing_toml"
         fi
         if [ -n "${TIMING_HMAC_SECRET:-}" ]; then
             sed -i "s|^hmac_secret = .*|hmac_secret = \"${TIMING_HMAC_SECRET}\"|" "$timing_toml"

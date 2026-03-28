@@ -3,6 +3,8 @@ services:
     container_name: appseed_app
     restart: always
     build: .
+    ports:
+      - "127.0.0.1:5005:5005"
     environment:
       - DEBUG=False
       - POSTGRES_USER=${POSTGRES_USER}
