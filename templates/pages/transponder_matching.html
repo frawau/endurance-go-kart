@@ -257,7 +257,11 @@ function renderAssignments() {
 
     tbody.innerHTML = '';
 
-    assignments.forEach(assignment => {
+    const sorted = [...assignments].sort((a, b) =>
+        a.team_number.toString().localeCompare(b.team_number.toString(), undefined, { numeric: true })
+    );
+
+    sorted.forEach(assignment => {
         const row = document.createElement('tr');
 
         const statusBadge = assignment.confirmed
