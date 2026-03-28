@@ -403,11 +403,17 @@ function openReplaceModal(assignmentId, teamName, currentTransponderId) {
     document.getElementById('replaceTeamName').textContent = teamName;
     document.getElementById('replaceCurrentId').textContent = currentTransponderId;
 
-    // Reset select, excluding the current transponder
+    // Disable the current transponder and any already assigned to another team
+    const otherAssignedIds = new Set(
+        assignments
+            .filter(a => a.transponder_id !== currentTransponderId)
+            .map(a => a.transponder_id)
+    );
     const select = document.getElementById('replaceTransponderSelect');
     select.value = '';
     Array.from(select.options).forEach(opt => {
-        opt.disabled = opt.value === currentTransponderId;
+        if (!opt.value) return;
+        opt.disabled = opt.value === currentTransponderId || otherAssignedIds.has(opt.value);
     });
 
     new bootstrap.Modal(document.getElementById('replaceTransponderModal')).show();
