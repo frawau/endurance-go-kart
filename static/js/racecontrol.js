@@ -7,7 +7,6 @@ let emptyTeamsSocketInstance = null;
 
 // Multi-race state
 let isLapBased = false;
-let roundStarted = false;
 let activeRaceType = null;
 let activeRaceLabel = null;
 let activeStartMode = null;
@@ -428,24 +427,14 @@ function updateButtonVisibility(state, options = {}) {
 
   // Show buttons based on state
   switch (state) {
-    case "initial": // Not ready, not started
+    case "initial": // Not ready, not started — pre-check always required
       document.getElementById("preRaceCheckButton")?.removeAttribute("hidden");
-      // For multi-race auto-advance, show penalty card (teams already set up)
-      if (isLapBased && activeRaceType && roundStarted) {
-        document
-          .getElementById("emptyTeamsCard")
-          ?.style.setProperty("display", "none", "important");
-        document
-          .getElementById("teamSelectCard")
-          ?.style.setProperty("display", "block", "important");
-      } else {
-        document
-          .getElementById("emptyTeamsCard")
-          ?.style.setProperty("display", "block", "important");
-        document
-          .getElementById("teamSelectCard")
-          ?.style.setProperty("display", "none", "important");
-      }
+      document
+        .getElementById("emptyTeamsCard")
+        ?.style.setProperty("display", "block", "important");
+      document
+        .getElementById("teamSelectCard")
+        ?.style.setProperty("display", "none", "important");
       break;
     case "ready": // Ready, not started
       const startBtn = document.getElementById("startButton");
@@ -834,7 +823,6 @@ document.addEventListener("DOMContentLoaded", () => {
   const roundDataEl = document.getElementById('round-data');
   if (roundDataEl) {
     isLapBased = roundDataEl.dataset.lapBased === 'true';
-    roundStarted = roundDataEl.dataset.started === 'true';
     activeRaceType = roundDataEl.dataset.activeRaceType || null;
     activeRaceLabel = roundDataEl.dataset.activeRaceLabel || null;
     activeStartMode = roundDataEl.dataset.startMode || null;
