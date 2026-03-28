@@ -119,6 +119,10 @@ def _build_round_update_payload(cround):
     """Build the common payload dict for round/race/pause updates."""
     active = cround.active_race  # None for legacy rounds
 
+    # is_paused: check actual RoundPause records, not round.started
+    # (round.started is never set for multi-race rounds, making is_paused always True)
+    is_paused = cround.round_pause_set.filter(end__isnull=True).exists()
+
     if active:
         remaining = round(
             (active.duration - active.time_elapsed).total_seconds()
@@ -128,7 +132,8 @@ def _build_round_update_payload(cround):
         started = active.started is not None
         ready = active.ready
         ended = False  # active_race is always unfinished
-        armed = active.ready and active.started is None and cround.started is not None
+        # armed: race ready and waiting for first crossing (FIRST_CROSSING start mode)
+        armed = active.ready and active.started is None
         start_mode = active.start_mode
     else:
         # Legacy round or all races finished
@@ -150,7 +155,7 @@ def _build_round_update_payload(cround):
             ended = cround.ended is not None
 
     return {
-        "is paused": cround.is_paused,
+        "is paused": is_paused,
         "remaining seconds": remaining,
         "started": started,
         "ready": ready,

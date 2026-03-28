@@ -464,6 +464,12 @@ function updateButtonVisibility(state, options = {}) {
           endBtn.innerHTML = `<i class="fas fa-stop me-1"></i> End ${raceLabel}`;
         }
       }
+      document
+        .getElementById("emptyTeamsCard")
+        ?.style.setProperty("display", "none", "important");
+      document
+        .getElementById("teamSelectCard")
+        ?.style.setProperty("display", "block", "important");
       break;
     case "running": // Ready, started
       if (options.showFalseStart) {
@@ -506,6 +512,12 @@ function updateButtonVisibility(state, options = {}) {
           endBtn.innerHTML = `<i class="fas fa-stop me-1"></i> End ${raceLabel}`;
         }
       }
+      document
+        .getElementById("emptyTeamsCard")
+        ?.style.setProperty("display", "none", "important");
+      document
+        .getElementById("teamSelectCard")
+        ?.style.setProperty("display", "block", "important");
       break;
 
     case "paused": // Started, paused
@@ -523,6 +535,12 @@ function updateButtonVisibility(state, options = {}) {
           endBtnP.innerHTML = `<i class="fas fa-stop me-1"></i> End ${raceLabel}`;
         }
       }
+      document
+        .getElementById("emptyTeamsCard")
+        ?.style.setProperty("display", "none", "important");
+      document
+        .getElementById("teamSelectCard")
+        ?.style.setProperty("display", "block", "important");
       break;
     case "ended": // Ended
       // No buttons shown by default in 'ended' state

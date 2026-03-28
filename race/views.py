@@ -338,6 +338,7 @@ def racecontrol(request):
         )  # Order by registration time
 
         active_race = cround.active_race
+        is_paused = cround.round_pause_set.filter(end__isnull=True).exists()
 
         # For each session, compute completed changes + position in same-team queue
         pending_list = list(pending_sessions)
@@ -368,6 +369,7 @@ def racecontrol(request):
                 "pending_sessions": pending_sessions,
                 "settings": {"STOPANDGO_HMAC_SECRET": settings.STOPANDGO_HMAC_SECRET},
                 "active_race": active_race,
+                "is_paused": is_paused,
                 "race_sequence": race_sequence,
             },
         )
