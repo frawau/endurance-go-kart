@@ -409,18 +409,26 @@ def preracecheck(request):
     # Phase 2: for lap-based rounds, check transponder assignments
     if active_race:
         teams_without_transponder = []
+        teams_unconfirmed = []
         for rt in cround.round_team_set.filter(retired=False):
             if rt.pk in excluded_team_ids:
                 continue
-            if not RaceTransponderAssignment.objects.filter(
+            assignment = RaceTransponderAssignment.objects.filter(
                 race=active_race, team=rt
-            ).exists():
+            ).first()
+            if not assignment:
                 teams_without_transponder.append(
                     f"Team {rt.team.team.name} ({rt.team.number}) has no transponder assigned."
+                )
+            elif not assignment.confirmed:
+                teams_unconfirmed.append(
+                    f"Team {rt.team.team.name} ({rt.team.number}) transponder not confirmed."
                 )
 
         if teams_without_transponder:
             return JsonResponse({"result": False, "error": teams_without_transponder})
+        if teams_unconfirmed:
+            return JsonResponse({"result": False, "error": teams_unconfirmed})
 
     # Phase 3: all checks passed — activate
     cround.activate_race_ready()
