@@ -1592,6 +1592,15 @@ class Race(models.Model):
 
         is_qualifying = self.race_type != "MAIN"
 
+        # Pre-compute race-level finish detection data (used inside the per-team loop)
+        ending_mode = self.ending_mode
+        _required_laps = None
+        _cutoff_time = None
+        if ending_mode in ("FULL_LAPS", "CROSS_AFTER_LAPS", "AUTO_TRANSFORM"):
+            _required_laps = self.get_effective_lap_count()
+        if ending_mode in ("CROSS_AFTER_TIME", "QUALIFYING_PLUS", "AUTO_TRANSFORM"):
+            _cutoff_time = self.started + self.get_effective_time_limit()
+
         standings = []
         for team in self.get_all_teams():
             # Count only crossings strictly after race.started.
@@ -1614,9 +1623,35 @@ class Race(models.Model):
                 best_lap_time = best_lap.lap_time if best_lap else None
             else:
                 laps_completed = 0
+                last_crossing = None
                 total_time = None
                 last_lap_time = None
                 best_lap_time = None
+
+            # Per-team race finished flag (uses raw laps_completed before penalty adjustment)
+            if self.ended:
+                race_finished = True
+            elif ending_mode in ("FULL_LAPS", "CROSS_AFTER_LAPS"):
+                race_finished = (
+                    _required_laps is not None and laps_completed >= _required_laps
+                )
+            elif ending_mode in ("CROSS_AFTER_TIME", "QUALIFYING_PLUS"):
+                race_finished = bool(
+                    _cutoff_time
+                    and last_crossing
+                    and last_crossing.crossing_time > _cutoff_time
+                )
+            elif ending_mode == "AUTO_TRANSFORM":
+                if _cutoff_time and timezone.now() >= _cutoff_time:
+                    race_finished = bool(
+                        last_crossing and last_crossing.crossing_time > _cutoff_time
+                    )
+                else:
+                    race_finished = bool(
+                        _required_laps and laps_completed >= _required_laps
+                    )
+            else:
+                race_finished = False
 
             # Deduct lap penalties (L = Laps, P = Post Race Laps)
             if not is_qualifying:
@@ -1679,6 +1714,7 @@ class Race(models.Model):
                     else None,
                     "best_lap_time_formatted": fmt_time(best_lap_time),
                     "starting_position": starting_position,
+                    "race_finished": race_finished,
                 }
             )
 

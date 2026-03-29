@@ -383,7 +383,7 @@ data-round-name="{% if round %}{{ round.name }}{% endif %}">
 
 {% block extra_js %}
 {# Load the new JS file for button handling #}
-<script src="{% static 'js/racecontrol.js' %}?v=12"></script>
+<script src="{% static 'js/racecontrol.js' %}?v=13"></script>
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
@@ -423,9 +423,11 @@ document.addEventListener('DOMContentLoaded', function() {
                         return;
                     }
 
-                    // Handle suspicious lap (possible missed double-transponder crossing)
-                    if (data.type === 'race_lap_update' && data.is_suspicious && data.crossing_id) {
-                        showSuspiciousLapAlert(data.team_number, data.lap_number, data.crossing_id, data.suggested_split, data.max_split);
+                    // Handle lap updates — never affect button/badge state
+                    if (data.type === 'race_lap_update') {
+                        if (data.is_suspicious && data.crossing_id) {
+                            showSuspiciousLapAlert(data.team_number, data.lap_number, data.crossing_id, data.suggested_split, data.max_split);
+                        }
                         return;
                     }
 

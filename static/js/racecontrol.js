@@ -696,6 +696,7 @@ async function handleRaceAction(event) {
             break; // False restart goes back to paused
         }
 
+        button.innerHTML = originalButtonHTML; // Restore button label before updating visibility
         updateButtonVisibility(nextState, options); // Update UI based on FSM
 
         // Connect lanes only after successful pre-check

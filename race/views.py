@@ -431,10 +431,11 @@ def preracecheck(request):
             return JsonResponse({"result": False, "error": teams_unconfirmed})
 
     # Phase 3: all checks passed — activate
-    cround.activate_race_ready()
+    # Set race ready first so the signal fired by activate_race_ready sees the correct state
     if active_race and not active_race.ready:
         active_race.ready = True
         active_race.save()
+    cround.activate_race_ready()
 
     return JsonResponse({"result": True})
 

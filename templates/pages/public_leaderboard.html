@@ -195,6 +195,7 @@
                         <th style="width: 130px;">Last Lap</th>
                         <th style="width: 130px;">Best Lap</th>
                         <th style="width: 130px;">Gap</th>
+                        <th style="width: 50px;"></th>
                     </tr>
                 </thead>
                 <tbody id="standingsBody">
@@ -211,10 +212,11 @@
                         <td class="{% if '-' in s.gap_ahead %}gap-laps{% else %}gap-time{% endif %}">
                             {{ s.gap_ahead }}
                         </td>
+                        <td style="text-align:center;">{% if s.race_finished and not s.retired %}🏁{% endif %}</td>
                     </tr>
                     {% empty %}
                     <tr>
-                        <td colspan="8" style="text-align: center;">No standings data yet</td>
+                        <td colspan="9" style="text-align: center;">No standings data yet</td>
                     </tr>
                     {% endfor %}
                 </tbody>
@@ -343,6 +345,7 @@
                     : '';
                 const gapClass = s.gap_ahead && s.gap_ahead.includes('-') ? 'gap-laps' : 'gap-time';
                 const bestLapClass = (s.best_lap_time !== null && s.best_lap_time === overallBest) ? 'best-lap-overall' : '';
+                const finishedFlag = (s.race_finished && !s.retired) ? '🏁' : '';
 
                 row.innerHTML = `
                     <td><span class="position-badge">${s.position}</span></td>
@@ -353,6 +356,7 @@
                     <td>${s.last_lap_time_formatted}</td>
                     <td class="${bestLapClass}">${s.best_lap_time_formatted}</td>
                     <td class="${gapClass}">${s.gap_ahead}</td>
+                    <td style="text-align:center;">${finishedFlag}</td>
                 `;
 
                 tbody.appendChild(row);
