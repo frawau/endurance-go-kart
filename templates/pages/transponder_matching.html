@@ -70,8 +70,8 @@
                             <button id="refreshBtn" class="btn btn-outline-primary me-2">
                                 <i class="fas fa-sync-alt"></i> Refresh
                             </button>
-                            <button id="lockAllBtn" class="btn btn-danger" {% if race.grid_locked %}disabled{% endif %}>
-                                <i class="fas fa-lock"></i> {% if race.grid_locked %}Assignments Locked{% else %}Lock All Assignments{% endif %}
+                            <button id="lockAllBtn" class="btn btn-danger" {% if all_confirmed %}disabled{% endif %}>
+                                <i class="fas fa-lock"></i> {% if all_confirmed %}Assignments Locked{% else %}Lock All Assignments{% endif %}
                             </button>
                         </div>
                     </div>

@@ -4592,10 +4592,15 @@ def transponder_matching(request, race_id):
         "team", "transponder"
     )
 
+    total_teams = race.get_all_teams().count()
+    confirmed_count = assignments.filter(confirmed=True).count()
+    all_confirmed = total_teams > 0 and confirmed_count >= total_teams
+
     context = {
         "race": race,
         "transponders": transponders,
         "assignments": assignments,
+        "all_confirmed": all_confirmed,
     }
 
     return render(request, "pages/transponder_matching.html", context)
