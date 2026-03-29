@@ -72,6 +72,9 @@
 }
 /* Hidden from screen view */
 #print-area { display: none; }
+/* Drag-and-drop styles */
+tr.dragging { opacity: 0.4; }
+tr.drag-over { outline: 2px dashed #0d6efd; background: #e8f0fe !important; }
 {% endblock extra_style %}
 
 {% block main_content %}
@@ -155,7 +158,7 @@
                             </thead>
                             <tbody id="gridPositionsTable">
                                 {% for grid_pos in grid_positions %}
-                                <tr data-team-id="{{ grid_pos.team.id }}" data-position="{{ grid_pos.position }}">
+                                <tr data-team-id="{{ grid_pos.team.id }}" data-position="{{ grid_pos.position }}"{% if not is_locked %} draggable="true"{% endif %}>
                                     <td><strong>{{ grid_pos.position }}</strong></td>
                                     <td>{{ grid_pos.team.number }}</td>
                                     <td>{{ grid_pos.team.name }}</td>
@@ -267,28 +270,69 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             });
         });
+
+        // Drag-and-drop
+        let dragSrcRow = null;
+
+        const tbody = document.getElementById('gridPositionsTable');
+
+        tbody.addEventListener('dragstart', function(e) {
+            dragSrcRow = e.target.closest('tr');
+            if (!dragSrcRow) return;
+            dragSrcRow.classList.add('dragging');
+            e.dataTransfer.effectAllowed = 'move';
+        });
+
+        tbody.addEventListener('dragover', function(e) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            const targetRow = e.target.closest('tr');
+            if (targetRow && targetRow !== dragSrcRow) {
+                tbody.querySelectorAll('tr').forEach(r => r.classList.remove('drag-over'));
+                targetRow.classList.add('drag-over');
+            }
+        });
+
+        tbody.addEventListener('dragleave', function(e) {
+            const targetRow = e.target.closest('tr');
+            if (targetRow) targetRow.classList.remove('drag-over');
+        });
+
+        tbody.addEventListener('drop', function(e) {
+            e.preventDefault();
+            tbody.querySelectorAll('tr').forEach(r => r.classList.remove('drag-over'));
+            const targetRow = e.target.closest('tr');
+            if (!targetRow || targetRow === dragSrcRow || !dragSrcRow) return;
+
+            const parent = tbody;
+            const srcNext = dragSrcRow.nextSibling;
+            const tgtNext = targetRow.nextSibling;
+
+            if (srcNext === targetRow) {
+                parent.insertBefore(targetRow, dragSrcRow);
+            } else if (tgtNext === dragSrcRow) {
+                parent.insertBefore(dragSrcRow, targetRow);
+            } else {
+                parent.insertBefore(dragSrcRow, tgtNext);
+                parent.insertBefore(targetRow, srcNext);
+            }
+
+            saveAllPositions(tbody);
+        });
+
+        tbody.addEventListener('dragend', function(e) {
+            tbody.querySelectorAll('tr').forEach(r => {
+                r.classList.remove('dragging');
+                r.classList.remove('drag-over');
+            });
+            dragSrcRow = null;
+        });
     }
 
-    function swapRows(row1, row2) {
-        const positions = [];
-        const tbody = row1.closest('tbody');
+    function saveAllPositions(tbody) {
         const allRows = Array.from(tbody.querySelectorAll('tr'));
+        const positions = [];
 
-        // Swap in DOM
-        const parent = row1.parentNode;
-        const row1Next = row1.nextSibling;
-        const row2Next = row2.nextSibling;
-
-        if (row1Next === row2) {
-            parent.insertBefore(row2, row1);
-        } else if (row2Next === row1) {
-            parent.insertBefore(row1, row2);
-        } else {
-            parent.insertBefore(row1, row2Next);
-            parent.insertBefore(row2, row1Next);
-        }
-
-        // Collect all positions after swap
         allRows.forEach((row, index) => {
             const teamId = row.dataset.teamId;
             if (teamId) {
@@ -301,7 +345,14 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
 
-        // Send update to server
+        // Update move-up/move-down button disabled states
+        allRows.forEach((row, index) => {
+            const upBtn = row.querySelector('.move-up');
+            const downBtn = row.querySelector('.move-down');
+            if (upBtn) upBtn.disabled = (index === 0);
+            if (downBtn) downBtn.disabled = (index === allRows.length - 1);
+        });
+
         fetch('{% url "reorder_grid_positions" race.id %}', {
             method: 'POST',
             headers: {
@@ -322,6 +373,24 @@ document.addEventListener('DOMContentLoaded', function() {
             alert('Failed to update grid positions');
             location.reload();
         });
+    }
+
+    function swapRows(row1, row2) {
+        const tbody = row1.closest('tbody');
+        const parent = row1.parentNode;
+        const row1Next = row1.nextSibling;
+        const row2Next = row2.nextSibling;
+
+        if (row1Next === row2) {
+            parent.insertBefore(row2, row1);
+        } else if (row2Next === row1) {
+            parent.insertBefore(row1, row2);
+        } else {
+            parent.insertBefore(row1, row2Next);
+            parent.insertBefore(row2, row1Next);
+        }
+
+        saveAllPositions(tbody);
     }
 });
 </script>
