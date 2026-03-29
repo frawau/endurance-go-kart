@@ -429,13 +429,8 @@ function updateButtonVisibility(state, options = {}) {
   switch (state) {
     case "initial": // Not ready, not started — pre-check always required
       document.getElementById("preRaceCheckButton")?.removeAttribute("hidden");
-      {
-        const _et = document.getElementById("emptyTeamsCard");
-        const _ts = document.getElementById("teamSelectCard");
-        console.log("[CARDS] initial: emptyTeamsCard=", _et ? "found" : "NULL", "teamSelectCard=", _ts ? "found" : "NULL");
-        if (_et) { _et.style.setProperty("display", "block", "important"); console.log("[CARDS] emptyTeamsCard computed display:", getComputedStyle(_et).display); }
-        if (_ts) { _ts.style.setProperty("display", "none", "important"); console.log("[CARDS] teamSelectCard computed display:", getComputedStyle(_ts).display); }
-      }
+      document.getElementById("emptyTeamsCard")?.style.setProperty("display", "block", "important");
+      document.getElementById("teamSelectCard")?.style.setProperty("display", "none", "important");
       break;
     case "ready": // Ready, not started
       const startBtn = document.getElementById("startButton");
@@ -797,30 +792,14 @@ function updateEmptyTeamsList(teams) {
 }
 
 // --- Event Listeners Setup ---
-console.log('JavaScript file loaded, setting up DOMContentLoaded listener...');
 
 // Separate function to load HMAC secret
 function loadHmacSecret() {
-  console.log('Loading HMAC secret from template data...');
   const roundData = document.getElementById('round-data');
-  console.log('Round data element:', roundData);
   if (roundData) {
-    console.log('Round data attributes:', roundData.dataset);
-    console.log('Available dataset keys:', Object.keys(roundData.dataset));
-    
-    // Try different attribute access methods
     hmacSecret = roundData.dataset.hmacSecret || roundData.getAttribute('data-hmac-secret');
-    console.log('HMAC secret loaded:', hmacSecret ? 'YES' : 'NO');
-    console.log('Secret value:', hmacSecret);
-    console.log('Secret length:', hmacSecret ? hmacSecret.length : 'N/A');
-  } else {
-    console.error('round-data element not found!');
-    
-    // Try fallback from window
-    if (window.STOPANDGO_HMAC_SECRET) {
-      hmacSecret = window.STOPANDGO_HMAC_SECRET;
-      console.log('Using fallback HMAC secret from window:', hmacSecret ? 'YES' : 'NO');
-    }
+  } else if (window.STOPANDGO_HMAC_SECRET) {
+    hmacSecret = window.STOPANDGO_HMAC_SECRET;
   }
 }
 
@@ -833,11 +812,7 @@ if (document.readyState === 'loading') {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
-  // Ensure HMAC secret is loaded
-  if (!hmacSecret) {
-    console.log('HMAC secret not loaded yet, trying again...');
-    loadHmacSecret();
-  }
+  if (!hmacSecret) loadHmacSecret();
 
   // Initialize multi-race state from data attributes
   const roundDataEl = document.getElementById('round-data');
@@ -857,40 +832,21 @@ document.addEventListener("DOMContentLoaded", () => {
   // Initialize Stop & Go functionality with multiple attempts
   function tryInitializeStopAndGo(attempt) {
     attempt = attempt || 1;
-    console.log(`Attempt ${attempt} to initialize Stop & Go...`);
-    
     const penaltySelect = document.getElementById('penaltySelect');
     const offenderSelect = document.getElementById('offenderSelect');
     const victimSelect = document.getElementById('victimSelect');
-    
+
     if (penaltySelect && offenderSelect && victimSelect) {
-      console.log('All Stop & Go elements found, initializing...');
-      
-      // Get current round ID
       const roundIdContainer = document.getElementById('race-control-buttons');
       currentRoundId = roundIdContainer?.dataset.roundId;
-      
-      if (currentRoundId) {
-        loadStopAndGoPenalties();
-      }
-      
+      if (currentRoundId) loadStopAndGoPenalties();
       initializeStopAndGo();
       initializeDropdownLogic();
       return true;
-    } else {
-      console.log('Stop & Go elements not found:', {
-        penalty: !!penaltySelect,
-        offender: !!offenderSelect,
-        victim: !!victimSelect
-      });
-      
-      if (attempt < 5) {
-        setTimeout(() => tryInitializeStopAndGo(attempt + 1), 1000);
-      } else {
-        console.log('Failed to initialize Stop & Go after 5 attempts');
-      }
-      return false;
+    } else if (attempt < 5) {
+      setTimeout(() => tryInitializeStopAndGo(attempt + 1), 1000);
     }
+    return false;
   }
   
   tryInitializeStopAndGo();
@@ -1022,20 +978,11 @@ function loadStopAndGoPenalties() {
  * Initialize dropdown interaction logic
  */
 function initializeDropdownLogic() {
-  console.log('Initializing dropdown logic...');
   const penaltySelect = document.getElementById('penaltySelect');
   const offenderSelect = document.getElementById('offenderSelect');
   const victimSelect = document.getElementById('victimSelect');
   const durationInput = document.getElementById('durationInput');
   const stopGoButton = document.getElementById('stopGoButton');
-  
-  console.log('Elements found:', {
-    penaltySelect: !!penaltySelect,
-    offenderSelect: !!offenderSelect,
-    victimSelect: !!victimSelect,
-    durationInput: !!durationInput,
-    stopGoButton: !!stopGoButton
-  });
   
   if (!penaltySelect || !offenderSelect || !victimSelect || !durationInput || !stopGoButton) {
     console.log('Some elements not found, skipping dropdown initialization');

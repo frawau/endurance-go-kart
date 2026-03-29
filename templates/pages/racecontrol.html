@@ -380,15 +380,9 @@ data-round-name="{% if round %}{{ round.name }}{% endif %}">
 
 {% endblock content %}
 
-<!-- Debug: Add HMAC secret directly to script -->
-<script>
-  window.STOPANDGO_HMAC_SECRET = '{{ settings.STOPANDGO_HMAC_SECRET }}';
-  console.log('HMAC secret set via script tag:', window.STOPANDGO_HMAC_SECRET ? 'YES' : 'NO');
-</script>
-
 {% block extra_js %}
 {# Load the new JS file for button handling #}
-<script src="{% static 'js/racecontrol.js' %}?v=10"></script>
+<script src="{% static 'js/racecontrol.js' %}?v=11"></script>
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
@@ -483,7 +477,6 @@ document.addEventListener('DOMContentLoaded', function() {
                             currentState = 'ready';
                         }
 
-                        console.log("[WS-STATE]", {ready: data.ready, started: data.started, armed: data.armed, ended: data.ended}, "→", currentState);
                         updateButtonVisibility(currentState);
                     }
                 } catch (err) {
