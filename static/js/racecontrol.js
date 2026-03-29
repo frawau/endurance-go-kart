@@ -429,12 +429,13 @@ function updateButtonVisibility(state, options = {}) {
   switch (state) {
     case "initial": // Not ready, not started — pre-check always required
       document.getElementById("preRaceCheckButton")?.removeAttribute("hidden");
-      document
-        .getElementById("emptyTeamsCard")
-        ?.style.setProperty("display", "block", "important");
-      document
-        .getElementById("teamSelectCard")
-        ?.style.setProperty("display", "none", "important");
+      {
+        const _et = document.getElementById("emptyTeamsCard");
+        const _ts = document.getElementById("teamSelectCard");
+        console.log("[CARDS] initial: emptyTeamsCard=", _et ? "found" : "NULL", "teamSelectCard=", _ts ? "found" : "NULL");
+        if (_et) { _et.style.setProperty("display", "block", "important"); console.log("[CARDS] emptyTeamsCard computed display:", getComputedStyle(_et).display); }
+        if (_ts) { _ts.style.setProperty("display", "none", "important"); console.log("[CARDS] teamSelectCard computed display:", getComputedStyle(_ts).display); }
+      }
       break;
     case "ready": // Ready, not started
       const startBtn = document.getElementById("startButton");
