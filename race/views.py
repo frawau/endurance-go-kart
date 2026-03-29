@@ -10,6 +10,7 @@ import ipaddress
 import netifaces
 import csv
 
+from django.db import transaction
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth import authenticate
@@ -4227,22 +4228,29 @@ def reorder_grid_positions(request, race_id):
         # data should be list of {team_id, position}
         positions_data = data.get("positions", [])
 
-        for item in positions_data:
-            team_id = item.get("team_id")
-            position = item.get("position")
+        with transaction.atomic():
+            # Phase 1: shift all affected positions into a safe temp range to
+            # avoid the (race, position) unique constraint during reordering.
+            for idx, item in enumerate(positions_data):
+                GridPosition.objects.filter(
+                    race=race, team_id=item.get("team_id")
+                ).update(position=10000 + idx)
 
-            team = get_object_or_404(round_team, id=team_id)
-
-            GridPosition.objects.update_or_create(
-                race=race,
-                team=team,
-                defaults={
-                    "position": position,
-                    "source": "MANUAL",
-                    "manually_overridden": True,
-                    "override_reason": "Drag and drop reorder",
-                },
-            )
+            # Phase 2: apply the final positions.
+            for item in positions_data:
+                team_id = item.get("team_id")
+                position = item.get("position")
+                team = get_object_or_404(round_team, id=team_id)
+                GridPosition.objects.update_or_create(
+                    race=race,
+                    team=team,
+                    defaults={
+                        "position": position,
+                        "source": "MANUAL",
+                        "manually_overridden": True,
+                        "override_reason": "Drag and drop reorder",
+                    },
+                )
 
         return JsonResponse({"success": True})
 
