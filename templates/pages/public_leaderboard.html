@@ -277,7 +277,17 @@
                     if (data.next_race_url) {
                         window.location.href = data.next_race_url;
                     }
-                } else if (data.type === 'pause_update' || data.type === 'round_update') {
+                } else if (data.type === 'pause_update') {
+                    // Pause/resume only fires while the race is running — always apply
+                    if (raceTimer && data.is_paused !== undefined) {
+                        raceTimer.updatePauseState(data.is_paused);
+                        if (data.remaining_seconds !== undefined) {
+                            raceTimer.updateRemainingTime(data.remaining_seconds);
+                        }
+                    }
+                } else if (data.type === 'round_update' && data.started === true) {
+                    // Only sync timer when the race has actually started;
+                    // pre-race and post-race round_updates must not touch the timer
                     if (raceTimer && data.is_paused !== undefined) {
                         raceTimer.updatePauseState(data.is_paused);
                         if (data.remaining_seconds !== undefined) {
