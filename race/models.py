@@ -2100,7 +2100,7 @@ class LapCrossing(models.Model):
 
     # Lap timing data
     lap_number = models.IntegerField(
-        validators=[MinValueValidator(1)], verbose_name="Lap Number"
+        validators=[MinValueValidator(0)], verbose_name="Lap Number"
     )
     crossing_time = models.DateTimeField(verbose_name="Crossing Time")
     lap_time = models.DurationField(null=True, blank=True, verbose_name="Lap Time")

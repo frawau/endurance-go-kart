@@ -25,6 +25,7 @@
                 {% for race in race_sequence %}
                     <span class="badge {% if race == active_race %}bg-primary{% elif race.ended %}bg-success{% else %}bg-secondary{% endif %}"
                           data-race-type="{{ race.race_type }}"
+                          data-race-ended="{% if race.ended %}true{% else %}false{% endif %}"
                           id="race-badge-{{ race.race_type }}">
                         {{ race.get_race_type_display }}
                     </span>
@@ -382,7 +383,7 @@ data-round-name="{% if round %}{{ round.name }}{% endif %}">
 
 {% block extra_js %}
 {# Load the new JS file for button handling #}
-<script src="{% static 'js/racecontrol.js' %}?v=11"></script>
+<script src="{% static 'js/racecontrol.js' %}?v=12"></script>
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
@@ -477,7 +478,9 @@ document.addEventListener('DOMContentLoaded', function() {
                             currentState = 'ready';
                         }
 
-                        updateButtonVisibility(currentState);
+                        if (!buttonActionInProgress) {
+                            updateButtonVisibility(currentState);
+                        }
                     }
                 } catch (err) {
                     console.error("Error processing round WS message:", err, e.data);

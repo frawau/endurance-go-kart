@@ -1116,7 +1116,7 @@ class TimingConsumer(AsyncWebsocketConsumer):
                 .first()
             )
 
-            lap_number = (last_crossing.lap_number + 1) if last_crossing else 1
+            lap_number = (last_crossing.lap_number + 1) if last_crossing else 0
 
             # Calculate lap time from raw_time using timing mode
             previous_raw = last_crossing.raw_time if last_crossing else None
@@ -1168,7 +1168,7 @@ class TimingConsumer(AsyncWebsocketConsumer):
             # Trigger Race.started on first crossing (FIRST_CROSSING mode)
             race_started = False
             if (
-                lap_number == 1
+                lap_number == 0
                 and race.started is None
                 and race.start_mode != "IMMEDIATE"
             ):
@@ -1218,7 +1218,7 @@ class TimingConsumer(AsyncWebsocketConsumer):
             }
 
             # Grid order check (MAIN race only, driven by ChampionshipPenalty)
-            if lap_number == 1 and race.race_type == "MAIN":
+            if lap_number == 0 and race.race_type == "MAIN":
                 grid_order_penalty = ChampionshipPenalty.objects.filter(
                     championship=race.round.championship,
                     penalty__name="grid order",
@@ -1226,7 +1226,7 @@ class TimingConsumer(AsyncWebsocketConsumer):
                 if grid_order_penalty:
                     grid_pos = GridPosition.objects.filter(race=race, team=team).first()
                     crossing_order = LapCrossing.objects.filter(
-                        race=race, lap_number=1
+                        race=race, lap_number=0
                     ).count()
                     if grid_pos and crossing_order != grid_pos.position:
                         RoundPenalty.objects.create(

@@ -11,6 +11,10 @@ let activeRaceType = null;
 let activeRaceLabel = null;
 let activeStartMode = null;
 
+// Guard: prevent WS state updates from overwriting button state while a button
+// action fetch is in flight.  Set to true at fetch start, false on completion.
+let buttonActionInProgress = false;
+
 // Stop & Go state variables
 let stopAndGoSocket = null;
 let stopAndGoState = 'idle'; // 'idle', 'active', 'served'
@@ -580,6 +584,7 @@ async function handleRaceAction(event) {
   const originalButtonHTML = button.innerHTML;
   button.innerHTML = `<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>`;
   console.log(`Sending POST request to: ${url}`);
+  buttonActionInProgress = true;
 
   // --- Clear relevant timeouts when an action is initiated ---
   if (action !== "false_start") clearTimeout(falseStartTimeoutId);
@@ -722,7 +727,8 @@ async function handleRaceAction(event) {
     button.innerHTML = originalButtonHTML; // Restore button text
     button.disabled = false; // Re-enable only the clicked button on network error
   }
-  // No finally block needed as enablement is handled in error/success paths now
+  // Clear in-progress flag regardless of outcome
+  buttonActionInProgress = false;
 }
 
 /**
@@ -1504,6 +1510,16 @@ function updateMultiRaceUI(data) {
   const newType = data.active_race_type;
   const newLabel = data.active_race_label;
 
+  // When the active race changes, mark the previous one as ended
+  if (activeRaceType && activeRaceType !== newType) {
+    const prevBadge = document.querySelector(
+      `#raceProgressIndicator [data-race-type="${activeRaceType}"]`
+    );
+    if (prevBadge) {
+      prevBadge.dataset.raceEnded = 'true';
+    }
+  }
+
   // Update cached state
   activeRaceType = newType;
   activeRaceLabel = newLabel;
@@ -1521,37 +1537,24 @@ function updateMultiRaceUI(data) {
     }
   }
 
-  // Update progress badges
+  // Update progress badges using the data-race-ended attribute for accuracy
   const badges = document.querySelectorAll('#raceProgressIndicator .badge');
-  badges.forEach(badge => {
-    const badgeType = badge.dataset.raceType;
-    if (badgeType === newType) {
-      badge.className = 'badge bg-primary';
-    } else if (!badge.classList.contains('bg-success')) {
-      // Not already marked as completed — mark completed if it's before the active one
-      // Simple heuristic: if badge is not active and not already success, leave as secondary
-      badge.className = 'badge bg-secondary';
-    }
-  });
 
-  // Mark all badges before the active one as completed (success)
-  let foundActive = false;
-  badges.forEach(badge => {
-    const badgeType = badge.dataset.raceType;
-    if (badgeType === newType) {
-      foundActive = true;
-      badge.className = 'badge bg-primary';
-    } else if (!foundActive) {
-      badge.className = 'badge bg-success';
-    } else {
-      badge.className = 'badge bg-secondary';
-    }
-  });
-
-  // If no active race (all done), mark all as success
   if (!newType) {
+    // All races done — mark every badge as completed
     badges.forEach(badge => {
+      badge.dataset.raceEnded = 'true';
       badge.className = 'badge bg-success';
+    });
+  } else {
+    badges.forEach(badge => {
+      if (badge.dataset.raceType === newType) {
+        badge.className = 'badge bg-primary';
+      } else if (badge.dataset.raceEnded === 'true') {
+        badge.className = 'badge bg-success';
+      } else {
+        badge.className = 'badge bg-secondary';
+      }
     });
   }
 }
