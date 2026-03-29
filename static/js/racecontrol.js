@@ -413,6 +413,7 @@ function hideFalseRestartButton() {
  */
 function updateButtonVisibility(state, options = {}) {
   console.log(`Updating button visibility for state: ${state}`, options);
+  console.trace(`updateButtonVisibility called with state: ${state}`);
   const allActionButtons = document.querySelectorAll(
     "#race-control-buttons .race-action-btn",
   );

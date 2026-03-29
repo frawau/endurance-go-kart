@@ -403,6 +403,25 @@ document.addEventListener('DOMContentLoaded', function() {
         }, timeout);
     });
 
+    // DEBUG: MutationObserver to trace teamSelectCard visibility changes
+    (function() {
+        const card = document.getElementById('teamSelectCard');
+        if (card) {
+            const obs = new MutationObserver(mutations => {
+                mutations.forEach(m => {
+                    if (m.type === 'attributes' && m.attributeName === 'style') {
+                        console.log('teamSelectCard style changed:', card.style.display, card.style.cssText);
+                        console.trace('teamSelectCard display change');
+                    }
+                });
+            });
+            obs.observe(card, { attributes: true, attributeFilter: ['style'] });
+            console.log('DEBUG: MutationObserver attached to teamSelectCard, initial display:', card.style.display);
+        } else {
+            console.warn('DEBUG: teamSelectCard not found for MutationObserver');
+        }
+    })();
+
     {% if round %}
         const roundId = {{ round.id }};
         const wsScheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
