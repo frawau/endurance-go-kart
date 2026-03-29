@@ -831,6 +831,19 @@ if (document.readyState === 'loading') {
 document.addEventListener("DOMContentLoaded", () => {
   console.log('DOMContentLoaded event fired!');
 
+  // Watch for unexpected style changes on the two cards
+  const _cardObserver = new MutationObserver((mutations) => {
+    mutations.forEach((m) => {
+      if (m.attributeName === 'style') {
+        console.warn(`[OBSERVER] ${m.target.id} style changed to:`, m.target.getAttribute('style'), new Error().stack);
+      }
+    });
+  });
+  ['emptyTeamsCard','teamSelectCard'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) _cardObserver.observe(el, { attributes: true, attributeFilter: ['style'] });
+  });
+
   // Ensure HMAC secret is loaded
   if (!hmacSecret) {
     console.log('HMAC secret not loaded yet, trying again...');
