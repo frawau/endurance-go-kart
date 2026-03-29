@@ -24,6 +24,12 @@ except Exception as e:
 done
 echo "PostgreSQL started"
 
+# Sync freshly-built static files from the image into the persistent volume.
+# The static_volume mounts at /static and shadows whatever the image has there,
+# so without this step code changes to JS/CSS would never be served.
+echo "Syncing static files from image..."
+cp -rf /static_baked/. /static/
+
 # Always run collectstatic (safe to run multiple times)
 echo "Collecting static files..."
 python manage.py collectstatic --no-input

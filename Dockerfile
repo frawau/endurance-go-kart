@@ -37,6 +37,12 @@ RUN --mount=type=cache,target=/cache/flags \
 # Update font cache
 RUN fc-cache -fv
 
+# Preserve a copy of static files outside the volume-mounted path.
+# The static_volume mounts at /static at runtime and shadows that directory,
+# so any changes baked into the image would be invisible. We keep a pristine
+# copy at /static_baked and sync it into the volume on every startup.
+RUN cp -r static/ /static_baked/
+
 # Make startup script executable
 RUN chmod +x run-app.sh
 
