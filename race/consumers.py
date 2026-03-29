@@ -1103,12 +1103,19 @@ class TimingConsumer(AsyncWebsocketConsumer):
                 )
                 return None
 
-            # Qualifying post-expiry logic: when the race time limit expires,
-            # each non-retired team is allowed exactly ONE more crossing (their
-            # "finishing lap"). Extra crossings — e.g. the leader completing
-            # another lap before the last-place car finishes — are dropped.
+            # Post-expiry logic: for races that end by "one more crossing after
+            # the time limit", each team is allowed exactly ONE crossing after
+            # the cutoff (their finishing crossing). All subsequent crossings for
+            # that team are dropped, even if other teams haven't finished yet.
+            # This applies to any race with a time-based finish mode, regardless
+            # of race_type (including MAIN races with CROSS_AFTER_TIME).
+            _TIME_FINISH_MODES = (
+                "CROSS_AFTER_TIME",
+                "QUALIFYING_PLUS",
+                "AUTO_TRANSFORM",
+            )
             cutoff_time = None
-            if race.race_type != "MAIN" and race.started:
+            if race.ending_mode in _TIME_FINISH_MODES and race.started:
                 cutoff_time = race.started + race.get_effective_time_limit()
 
             if cutoff_time is not None and crossing_time >= cutoff_time:
@@ -1117,8 +1124,9 @@ class TimingConsumer(AsyncWebsocketConsumer):
                 ).exists()
                 if already_finished:
                     print(
-                        f"Timing: Post-expiry duplicate for team {team.number} "
-                        f"({race.race_type}), dropping"
+                        f"Timing: Post-expiry crossing for team {team.number} "
+                        f"({race.race_type}/{race.ending_mode}) — already has "
+                        f"finishing crossing, dropping"
                     )
                     return None
 
@@ -1189,9 +1197,10 @@ class TimingConsumer(AsyncWebsocketConsumer):
                 race.save(update_fields=["started"])
                 race_started = True
 
-            # Qualifying race end: triggered by crossings, not by a timer.
+            # Time-limit race end: triggered by crossings, not by a timer.
             # The race ends once every non-retired team has crossed at least
-            # once after the time limit expired.
+            # once after the time limit expired (applies to all CROSS_AFTER_TIME-
+            # family races, including MAIN).
             race_finished = False
             if (
                 cutoff_time is not None
