@@ -383,7 +383,7 @@ data-round-name="{% if round %}{{ round.name }}{% endif %}">
 
 {% block extra_js %}
 {# Load the new JS file for button handling #}
-<script src="{% static 'js/racecontrol.js' %}?v=13"></script>
+<script src="{% static 'js/racecontrol.js' %}?v=14"></script>
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
@@ -420,6 +420,12 @@ document.addEventListener('DOMContentLoaded', function() {
                             `expected grid position ${data.expected_position}`,
                             'warning'
                         );
+                        return;
+                    }
+
+                    // race_finished: timing system signals the race ended automatically
+                    if (data.type === 'race_finished') {
+                        addSystemMessage(`Race finished automatically.`, 'info');
                         return;
                     }
 
