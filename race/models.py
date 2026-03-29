@@ -1603,13 +1603,15 @@ class Race(models.Model):
 
         standings = []
         for team in self.get_all_teams():
-            # Count only crossings strictly after race.started.
-            # In IMMEDIATE mode the first crossing is a completed lap (karts are
-            # mid-track at start). In FIRST_CROSSING mode race.started equals the
-            # first crossing time, so __gt naturally excludes it. Either way,
-            # every crossing in this queryset is one completed lap.
+            # Count only crossings that have a lap_time — i.e. completed laps.
+            # The first crossing always has lap_time=None (no previous reference),
+            # so laps_completed=0 after the first passage and 1 after the first
+            # timed lap, matching "Lap 0 → Lap 1 → ..." numbering.
             laps = self.lap_crossings.filter(
-                team=team, is_valid=True, crossing_time__gt=self.started
+                team=team,
+                is_valid=True,
+                crossing_time__gt=self.started,
+                lap_time__isnull=False,
             ).order_by("crossing_time")
 
             if laps.exists():
