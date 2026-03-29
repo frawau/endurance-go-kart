@@ -388,7 +388,7 @@ data-round-name="{% if round %}{{ round.name }}{% endif %}">
 
 {% block extra_js %}
 {# Load the new JS file for button handling #}
-<script src="{% static 'js/racecontrol.js' %}?v=9"></script>
+<script src="{% static 'js/racecontrol.js' %}?v=10"></script>
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
@@ -483,6 +483,7 @@ document.addEventListener('DOMContentLoaded', function() {
                             currentState = 'ready';
                         }
 
+                        console.log("[WS-STATE]", {ready: data.ready, started: data.started, armed: data.armed, ended: data.ended}, "→", currentState);
                         updateButtonVisibility(currentState);
                     }
                 } catch (err) {
