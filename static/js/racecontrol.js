@@ -653,7 +653,10 @@ async function handleRaceAction(event) {
               nextState = "armed";
             } else {
               nextState = "running";
-              options = { showFalseStart: true };
+              // False Start window only for non-qualifying races
+              if (!activeRaceType || !activeRaceType.startsWith("Q")) {
+                options = { showFalseStart: true };
+              }
             }
             break;
           case "pause":
@@ -829,20 +832,6 @@ if (document.readyState === 'loading') {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
-  console.log('DOMContentLoaded event fired!');
-
-  // Watch for unexpected style changes on the two cards
-  const _cardObserver = new MutationObserver((mutations) => {
-    mutations.forEach((m) => {
-      console.error(`[OBSERVER] ${m.target.id} style changed to:`, m.target.getAttribute('style'), new Error().stack);
-    });
-  });
-  ['emptyTeamsCard','teamSelectCard'].forEach(id => {
-    const el = document.getElementById(id);
-    console.error(`[OBSERVER-SETUP] ${id}:`, el ? 'found' : 'NOT FOUND');
-    if (el) _cardObserver.observe(el, { attributes: true, attributeFilter: ['style'] });
-  });
-
   // Ensure HMAC secret is loaded
   if (!hmacSecret) {
     console.log('HMAC secret not loaded yet, trying again...');
@@ -907,15 +896,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // --- Set Initial Button State ---
   // Determine initial state based on which buttons are initially visible in the HTML
-  const _startBtn = document.getElementById("startButton");
-  const _preCheckBtn = document.getElementById("preRaceCheckButton");
-  console.log("[DEBUG] startButton hidden:", _startBtn?.hidden, "offsetParent:", _startBtn?.offsetParent);
-  console.log("[DEBUG] preRaceCheckButton hidden:", _preCheckBtn?.hidden, "offsetParent:", _preCheckBtn?.offsetParent);
-  console.log("[DEBUG] teamSelectCard style:", document.getElementById("teamSelectCard")?.getAttribute("style"));
-  console.log("[DEBUG] emptyTeamsCard style:", document.getElementById("emptyTeamsCard")?.getAttribute("style"));
-  let initialState = "initial"; // Default
+  let initialState = "initial";
   if (document.getElementById("startButton")?.offsetParent !== null)
-    initialState = "ready"; // Check visibility more reliably
+    initialState = "ready";
   else if (document.getElementById("pauseButton")?.offsetParent !== null)
     initialState = "running";
   else if (document.getElementById("resumeButton")?.offsetParent !== null)
@@ -925,10 +908,9 @@ document.addEventListener("DOMContentLoaded", () => {
       "#race-control-buttons .race-action-btn:not([hidden])",
     )
   )
-    initialState = "ended"; // If no buttons visible
+    initialState = "ended";
 
-  console.log("[DEBUG] detected initialState:", initialState);
-  updateButtonVisibility(initialState); // Set initial visibility
+  updateButtonVisibility(initialState);
 
   // --- Initial Lane Connection Check ---
   // Connect if initial state is ready, running, or paused

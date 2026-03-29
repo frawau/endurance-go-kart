@@ -132,8 +132,12 @@ def _build_round_update_payload(cround):
         started = active.started is not None
         ready = active.ready
         ended = False  # active_race is always unfinished
-        # armed: race ready and waiting for first crossing (FIRST_CROSSING start mode)
-        armed = active.ready and active.started is None
+        # armed: FIRST_CROSSING mode only — race ready, waiting for first transponder crossing
+        armed = (
+            active.ready
+            and active.started is None
+            and active.start_mode == "FIRST_CROSSING"
+        )
         start_mode = active.start_mode
     else:
         # Legacy round or all races finished
