@@ -895,6 +895,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // --- Set Initial Button State ---
   // Determine initial state based on which buttons are initially visible in the HTML
+  const _startBtn = document.getElementById("startButton");
+  const _preCheckBtn = document.getElementById("preRaceCheckButton");
+  console.log("[DEBUG] startButton hidden:", _startBtn?.hidden, "offsetParent:", _startBtn?.offsetParent);
+  console.log("[DEBUG] preRaceCheckButton hidden:", _preCheckBtn?.hidden, "offsetParent:", _preCheckBtn?.offsetParent);
+  console.log("[DEBUG] teamSelectCard style:", document.getElementById("teamSelectCard")?.getAttribute("style"));
+  console.log("[DEBUG] emptyTeamsCard style:", document.getElementById("emptyTeamsCard")?.getAttribute("style"));
   let initialState = "initial"; // Default
   if (document.getElementById("startButton")?.offsetParent !== null)
     initialState = "ready"; // Check visibility more reliably
@@ -909,6 +915,7 @@ document.addEventListener("DOMContentLoaded", () => {
   )
     initialState = "ended"; // If no buttons visible
 
+  console.log("[DEBUG] detected initialState:", initialState);
   updateButtonVisibility(initialState); // Set initial visibility
 
   // --- Initial Lane Connection Check ---
