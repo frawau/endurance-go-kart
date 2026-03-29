@@ -10,9 +10,9 @@ import datetime as dt
 
 class Command(BaseCommand):
     help = (
-        "Assign available transponders to teams that have none for the current race. "
-        "Skips teams already assigned. Assigns in team-number order using "
-        "transponders sorted by ID."
+        "Assign available transponders to teams for the first race in the current round. "
+        "Only runs when no assignments exist yet. The system carries assignments forward "
+        "to subsequent races automatically."
     )
 
     def get_current_round(self):
@@ -30,12 +30,6 @@ class Command(BaseCommand):
             action="store_true",
             help="Show what would be assigned without creating anything",
         )
-        parser.add_argument(
-            "--race",
-            type=str,
-            metavar="RACE_TYPE",
-            help="Race type to assign for (e.g. Q1, MAIN). Defaults to active race.",
-        )
 
     def handle(self, *args, **options):
         cround = self.get_current_round()
@@ -43,28 +37,24 @@ class Command(BaseCommand):
             self.stdout.write(self.style.ERROR("No current round found."))
             return
 
-        # Determine target race
-        race_type = options.get("race")
-        if race_type:
-            target_race = cround.races.filter(race_type=race_type.upper()).first()
-            if not target_race:
-                self.stdout.write(
-                    self.style.ERROR(
-                        f"Race '{race_type.upper()}' not found in round '{cround.name}'."
-                    )
-                )
-                return
-        else:
-            target_race = cround.active_race
-            if target_race is None:
-                target_race = cround.races.order_by("sequence_number").first()
-
+        # Always target the first race in the round
+        target_race = cround.races.order_by("sequence_number").first()
         if target_race is None:
-            self.stdout.write(self.style.ERROR("No race found for current round."))
+            self.stdout.write(self.style.ERROR("No races found for current round."))
             return
 
         self.stdout.write(f"Round: {cround.name}")
         self.stdout.write(f"Race:  {target_race.get_race_type_display()}")
+
+        # Refuse to run if any assignments already exist for this race
+        if RaceTransponderAssignment.objects.filter(race=target_race).exists():
+            self.stdout.write(
+                self.style.ERROR(
+                    f"Assignments already exist for {target_race.get_race_type_display()}. "
+                    "Use the admin to manage them."
+                )
+            )
+            return
 
         # All teams in the round, sorted by team number
         all_teams = list(
@@ -73,37 +63,15 @@ class Command(BaseCommand):
             .order_by("team__number")
         )
 
-        # Teams already assigned for this race
-        assigned_team_ids = set(
-            RaceTransponderAssignment.objects.filter(race=target_race).values_list(
-                "team_id", flat=True
-            )
-        )
-
-        unassigned_teams = [t for t in all_teams if t.id not in assigned_team_ids]
-
-        if not unassigned_teams:
-            self.stdout.write(
-                self.style.SUCCESS("All teams already have transponder assignments.")
-            )
+        if not all_teams:
+            self.stdout.write(self.style.ERROR("No teams found in current round."))
             return
 
-        self.stdout.write(
-            f"Teams needing assignment: {len(unassigned_teams)} of {len(all_teams)}"
-        )
+        self.stdout.write(f"Teams to assign: {len(all_teams)}")
 
-        # Transponders already used in this race
-        used_transponder_ids = set(
-            RaceTransponderAssignment.objects.filter(race=target_race).values_list(
-                "transponder_id", flat=True
-            )
-        )
-
-        # Available active transponders not yet used in this race
+        # Available active transponders, sorted by ID
         available = list(
-            Transponder.objects.filter(active=True)
-            .exclude(id__in=used_transponder_ids)
-            .order_by("transponder_id")
+            Transponder.objects.filter(active=True).order_by("transponder_id")
         )
 
         if not available:
@@ -114,16 +82,16 @@ class Command(BaseCommand):
             )
             return
 
-        if len(available) < len(unassigned_teams):
+        if len(available) < len(all_teams):
             self.stdout.write(
                 self.style.WARNING(
                     f"Only {len(available)} transponders available for "
-                    f"{len(unassigned_teams)} teams — will assign as many as possible."
+                    f"{len(all_teams)} teams — will assign as many as possible."
                 )
             )
 
         to_create = []
-        for team, transponder in zip(unassigned_teams, available):
+        for team, transponder in zip(all_teams, available):
             self.stdout.write(
                 f"  Team #{team.team.number:>3}  {team.team.team.name:<30} "
                 f"→  {transponder.transponder_id}"
