@@ -120,7 +120,10 @@
                                     <ul class="list-group" id="emptyTeamsUL"></ul>
                                 </div>
                             </div>
-                            <div class="card h-100" id="teamSelectCard" {% if not round or active_race and not active_race.ready or not active_race and not round.ready %}style="display: none;"{% endif %}>
+                            <div class="card h-100" id="teamSelectCard"
+                                data-debug-round-ready="{{ round.ready|yesno:'true,false,no-round' }}"
+                                data-debug-active-race-ready="{% if active_race %}{{ active_race.ready|yesno:'true,false' }}{% else %}no-active-race{% endif %}"
+                                {% if not round or active_race and not active_race.ready or not active_race and not round.ready %}style="display: none;"{% endif %}>
                                 <div class="card-header">
                                     <div class="d-flex justify-content-between align-items-center">
                                         <h5 class="mb-0">Penalties</h5>

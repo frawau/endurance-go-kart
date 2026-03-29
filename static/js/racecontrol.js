@@ -433,9 +433,12 @@ function updateButtonVisibility(state, options = {}) {
       document
         .getElementById("emptyTeamsCard")
         ?.style.setProperty("display", "block", "important");
-      document
-        .getElementById("teamSelectCard")
-        ?.style.setProperty("display", "none", "important");
+      {
+        const tscEl = document.getElementById("teamSelectCard");
+        console.log("DEBUG initial: teamSelectCard element=", tscEl, "style before=", tscEl?.style?.cssText);
+        if (tscEl) tscEl.style.setProperty("display", "none", "important");
+        console.log("DEBUG initial: teamSelectCard style after=", tscEl?.style?.cssText);
+      }
       break;
     case "ready": // Ready, not started
       const startBtn = document.getElementById("startButton");
@@ -831,7 +834,26 @@ if (document.readyState === 'loading') {
 
 document.addEventListener("DOMContentLoaded", () => {
   console.log('DOMContentLoaded event fired!');
-  
+
+  // DEBUG: attach MutationObserver FIRST so we catch every style change
+  (function() {
+    const card = document.getElementById('teamSelectCard');
+    if (card) {
+      const obs = new MutationObserver(mutations => {
+        mutations.forEach(m => {
+          if (m.type === 'attributes' && m.attributeName === 'style') {
+            console.log('DEBUG MutObs: teamSelectCard style=', card.style.display, card.style.cssText);
+            console.trace('DEBUG MutObs: teamSelectCard display change');
+          }
+        });
+      });
+      obs.observe(card, { attributes: true, attributeFilter: ['style'] });
+      console.log('DEBUG: MutationObserver (early) attached, initial display:', card.style.display, 'cssText:', card.style.cssText);
+    } else {
+      console.warn('DEBUG: teamSelectCard NOT FOUND in early DOMContentLoaded');
+    }
+  })();
+
   // Ensure HMAC secret is loaded
   if (!hmacSecret) {
     console.log('HMAC secret not loaded yet, trying again...');
