@@ -1074,6 +1074,19 @@ class TimingConsumer(AsyncWebsocketConsumer):
             race = assignment.race
             team = assignment.team
 
+            # Drop crossings for races that haven't been armed or started yet.
+            # This prevents karts still on track after Q2 ends from accidentally
+            # triggering the Main Race start via FIRST_CROSSING mode.
+            race_accepts_crossing = race.started is not None or (
+                race.ready and race.start_mode != "IMMEDIATE"
+            )
+            if not race_accepts_crossing:
+                print(
+                    f"Timing: Race {race.race_type} not armed/started — "
+                    f"dropping crossing for team {team.number}"
+                )
+                return None
+
             # Dedup: if this team already had a crossing within TRANSPONDER_DEDUP_SECONDS,
             # this is a redundant transponder on the same kart — drop it silently.
             TRANSPONDER_DEDUP_SECONDS = 7
