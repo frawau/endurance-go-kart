@@ -834,13 +834,12 @@ document.addEventListener("DOMContentLoaded", () => {
   // Watch for unexpected style changes on the two cards
   const _cardObserver = new MutationObserver((mutations) => {
     mutations.forEach((m) => {
-      if (m.attributeName === 'style') {
-        console.warn(`[OBSERVER] ${m.target.id} style changed to:`, m.target.getAttribute('style'), new Error().stack);
-      }
+      console.error(`[OBSERVER] ${m.target.id} style changed to:`, m.target.getAttribute('style'), new Error().stack);
     });
   });
   ['emptyTeamsCard','teamSelectCard'].forEach(id => {
     const el = document.getElementById(id);
+    console.error(`[OBSERVER-SETUP] ${id}:`, el ? 'found' : 'NOT FOUND');
     if (el) _cardObserver.observe(el, { attributes: true, attributeFilter: ['style'] });
   });
 
