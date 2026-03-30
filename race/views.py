@@ -924,7 +924,7 @@ def round_list_update(request):
             context["selected_round"] = selected_round
             # Update organiser logo to selected round
             context["organiser_logo"] = get_organiser_logo(selected_round)
-            existing_race = selected_round.races.first()
+            existing_race = selected_round.races.filter(race_type="MAIN").first()
             context["ending_mode_choices"] = [
                 c
                 for c in Championship.ENDING_MODES
@@ -974,7 +974,7 @@ def round_form(request):
                 cround.weight_penalty = [">=", [0, 0]]
 
         # Convert to JSON string for template
-        existing_race = cround.races.first()
+        existing_race = cround.races.filter(race_type="MAIN").first()
         qual_info = _get_qualifying_info(cround)
         context = {
             "round": cround,
@@ -1196,10 +1196,14 @@ def update_round(request, round_id):
                 cround.uses_legacy_session_model = False
                 cround.save()
                 ending_mode = request.POST.get("ending_mode", "CROSS_AFTER_TIME")
+                race_start_mode = request.POST.get("race_start_mode", "IMMEDIATE")
                 ok, err = _create_qualifying_races(cround, request.POST, ending_mode)
                 if not ok:
-                    messages.error(request, err)
-                    return redirect("rounds_list")
+                    # Races already started — can't recreate, but still update
+                    # ending_mode and start_mode on the unstarted MAIN race
+                    Race.objects.filter(
+                        round=cround, race_type="MAIN", started__isnull=True
+                    ).update(ending_mode=ending_mode, start_mode=race_start_mode)
             elif not lap_based and not was_legacy:
                 # Disabling lap-based: clean up Race objects
                 if Race.objects.filter(round=cround, started__isnull=False).exists():
@@ -1216,12 +1220,6 @@ def update_round(request, round_id):
                 cround.save()
             else:
                 cround.save()
-                # Update ending_mode and start_mode on existing unstarted races
-                ending_mode = request.POST.get("ending_mode", "CROSS_AFTER_TIME")
-                race_start_mode = request.POST.get("race_start_mode", "IMMEDIATE")
-                Race.objects.filter(
-                    round=cround, race_type="MAIN", started__isnull=True
-                ).update(ending_mode=ending_mode, start_mode=race_start_mode)
 
             messages.success(request, f"Round '{cround.name}' updated successfully")
 
