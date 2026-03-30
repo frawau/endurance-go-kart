@@ -1350,7 +1350,11 @@ class Race(models.Model):
                     teams_still_on_final_lap.add(team.id)
 
         # Race finished when all teams that started final lap have crossed
-        return len(teams_still_on_final_lap) == 0
+        if len(teams_still_on_final_lap) == 0:
+            return True
+
+        # Timeout fallback: 120s after cutoff, end regardless of missing crossings
+        return timezone.now() >= cutoff_time + dt.timedelta(seconds=120)
 
     def _check_full_laps(self):
         """All teams completed required laps"""

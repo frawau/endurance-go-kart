@@ -226,6 +226,17 @@ def handle_race_change(sender, instance, **kwargs):
                 {"type": "race_ended", "next_race_url": next_url},
             )
 
+    # When a race ends, push final standings to its leaderboard so end-flags
+    # appear immediately (standings are otherwise only pushed on lap crossings).
+    update_fields = kwargs.get("update_fields")
+    if instance.ended is not None and (
+        update_fields is None or "ended" in update_fields
+    ):
+        async_to_sync(channel_layer.group_send)(
+            f"leaderboard_{instance.id}",
+            {"type": "race_standings_refresh"},
+        )
+
     # When a race ends, carry over its transponder assignments to the next race
     # so the director only needs to review/edit and click "Lock all assignments"
     if instance.ended is not None:

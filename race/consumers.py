@@ -252,6 +252,7 @@ class RoundConsumer(AsyncWebsocketConsumer):
                     "active_race_type": event.get("active_race_type"),
                     "active_race_label": event.get("active_race_label"),
                     "has_more_races": event.get("has_more_races"),
+                    "race_ready": event.get("race_ready", False),
                 }
             )
         )
@@ -903,6 +904,8 @@ class TimingConsumer(AsyncWebsocketConsumer):
             "assignments": event["assignments"],
         }
         await self.send(text_data=json.dumps(self.sign_message(command)))
+        # Schedule server-side auto-end for time-only modes (QUALIFYING, etc.)
+        asyncio.ensure_future(self._schedule_auto_end(event["race_id"]))
 
     async def timing_team_delay(self, event):
         """Forward team_delay event to the connected timing station."""
@@ -957,6 +960,10 @@ class TimingConsumer(AsyncWebsocketConsumer):
                 {"type": "grid_violation", **result["grid_violation"]},
             )
 
+        if result.get("race_started"):
+            # FIRST_CROSSING mode: race just started on this crossing — schedule auto-end
+            asyncio.ensure_future(self._schedule_auto_end(race_id))
+
         if result.get("race_finished"):
             print(f"Race {race_id} finished!")
             await self.channel_layer.group_send(
@@ -975,6 +982,53 @@ class TimingConsumer(AsyncWebsocketConsumer):
                     )
                 )
             )
+
+    async def _schedule_auto_end(self, race_id):
+        """Sleep until the race time limit expires then auto-end the race."""
+        _AUTO_END_MODES = ("QUALIFYING", "TIME_ONLY")
+        delay = await database_sync_to_async(self._get_auto_end_delay)(
+            race_id, _AUTO_END_MODES
+        )
+        if delay is None:
+            return
+        print(f"Race {race_id}: auto-end scheduled in {delay:.1f}s")
+        await asyncio.sleep(delay)
+        ended = await database_sync_to_async(self._do_auto_end_race)(race_id)
+        if ended:
+            print(f"Race {race_id}: auto-ended after time limit")
+
+    @staticmethod
+    def _get_auto_end_delay(race_id, modes):
+        """Return seconds remaining until race time limit, or None if not applicable."""
+        from .models import Race as _Race
+
+        try:
+            race = _Race.objects.select_related("round", "round__championship").get(
+                id=race_id
+            )
+        except _Race.DoesNotExist:
+            return None
+        if race.ending_mode not in modes or not race.started or race.ended:
+            return None
+        elapsed = (dt.datetime.now() - race.started).total_seconds()
+        limit = race.get_effective_time_limit().total_seconds()
+        return max(0.0, limit - elapsed)
+
+    @staticmethod
+    def _do_auto_end_race(race_id):
+        """End race if time has expired and it's still running. Returns True if ended."""
+        from .models import Race as _Race
+
+        try:
+            race = _Race.objects.select_related("round", "round__championship").get(
+                id=race_id, ended__isnull=True
+            )
+        except _Race.DoesNotExist:
+            return False
+        if race.is_race_finished():
+            race.end_this_race()
+            return True
+        return False
 
     def _calculate_lap_time(self, raw_time, previous_raw_time):
         """
@@ -1471,6 +1525,13 @@ class LeaderboardConsumer(AsyncWebsocketConsumer):
     async def race_lap_update(self, event):
         """Lap update sent to the round group — leaderboard gets its own lap_crossing_update."""
         pass
+
+    async def race_standings_refresh(self, event):
+        """Push updated standings when race ends (no crossing needed to show flags)."""
+        standings = await self.get_current_standings()
+        await self.send(
+            text_data=json.dumps({"type": "standings_update", "standings": standings})
+        )
 
     async def round_update(self, event):
         """Forward round state changes (started, ended) to the leaderboard client."""
