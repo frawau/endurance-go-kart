@@ -130,6 +130,7 @@ class Championship(models.Model):
             "Time Only - Positions frozen at last crossing before time expired",
         ),
         ("AUTO_TRANSFORM", "Auto-transform to CROSS_AFTER_TIME when max time expires"),
+        ("CROSS_AFTER_LEADER", "Cross Start/Finish Line after Leader"),
     )
 
     QUALIFYING_TIEBREAKER_CHOICES = (
@@ -1121,6 +1122,7 @@ class Race(models.Model):
 
         mode_checkers = {
             "CROSS_AFTER_TIME": self._check_cross_after_time,
+            "CROSS_AFTER_LEADER": self._check_cross_after_leader,
             "CROSS_AFTER_LAPS": self._check_cross_after_laps,
             "QUALIFYING": self._check_qualifying,
             "QUALIFYING_PLUS": self._check_qualifying_plus,
@@ -1205,6 +1207,85 @@ class Race(models.Model):
         )
         if best_lap_time is not None:
             if timezone.now() >= cutoff_time + best_lap_time * 2.5:
+                return True
+
+        return False
+
+    def get_leader_finish_time(self, cutoff_time):
+        """Return the crossing_time of the leader's first crossing at or after cutoff_time.
+
+        Leader = team with most valid laps at cutoff_time; ties broken by
+        earliest last crossing before cutoff.  Returns None if the leader
+        has not yet crossed after the cutoff.
+        """
+        active_teams = self.get_participating_teams()
+        leader = None
+        leader_laps = -1
+        leader_last_time = None
+
+        for team in active_teams:
+            laps_qs = self.lap_crossings.filter(
+                team=team, is_valid=True, crossing_time__lte=cutoff_time
+            )
+            count = laps_qs.count()
+            last_time = (
+                laps_qs.order_by("-crossing_time")
+                .values_list("crossing_time", flat=True)
+                .first()
+            )
+            if count > leader_laps or (
+                count == leader_laps
+                and last_time is not None
+                and (leader_last_time is None or last_time < leader_last_time)
+            ):
+                leader = team
+                leader_laps = count
+                leader_last_time = last_time
+
+        if leader is None:
+            return None
+
+        return (
+            self.lap_crossings.filter(team=leader, crossing_time__gte=cutoff_time)
+            .order_by("crossing_time")
+            .values_list("crossing_time", flat=True)
+            .first()
+        )
+
+    def _check_cross_after_leader(self):
+        """Leader crosses after time → ends leader's race.  Every subsequent
+        crossing ends the race for that team.  Race over when all teams have
+        crossed at or after the leader's finishing crossing (or timeout)."""
+        time_limit = self.get_effective_time_limit()
+        cutoff_time = self.started + time_limit
+
+        if timezone.now() < cutoff_time:
+            return False
+
+        leader_finish_time = self.get_leader_finish_time(cutoff_time)
+        if leader_finish_time is None:
+            return False  # leader hasn't crossed yet
+
+        active_teams = self.get_participating_teams()
+        crossed_after_leader = (
+            self.lap_crossings.filter(crossing_time__gte=leader_finish_time)
+            .values_list("team_id", flat=True)
+            .distinct()
+        )
+        if set(active_teams.values_list("id", flat=True)).issubset(
+            set(crossed_after_leader)
+        ):
+            return True
+
+        # Timeout fallback: 2.5× best lap after leader's crossing
+        best_lap_time = (
+            self.lap_crossings.filter(lap_time__isnull=False, is_valid=True)
+            .order_by("lap_time")
+            .values_list("lap_time", flat=True)
+            .first()
+        )
+        if best_lap_time is not None:
+            if timezone.now() >= leader_finish_time + best_lap_time * 2.5:
                 return True
 
         return False
@@ -1615,12 +1696,18 @@ class Race(models.Model):
             _required_laps = self.get_effective_lap_count()
         if ending_mode in (
             "CROSS_AFTER_TIME",
+            "CROSS_AFTER_LEADER",
             "QUALIFYING_PLUS",
             "AUTO_TRANSFORM",
             "TIME_ONLY",
             "QUALIFYING",
         ):
             _cutoff_time = self.started + self.get_effective_time_limit()
+
+        # For CROSS_AFTER_LEADER, pre-compute the leader's finish time once
+        _leader_finish_time = None
+        if ending_mode == "CROSS_AFTER_LEADER" and _cutoff_time:
+            _leader_finish_time = self.get_leader_finish_time(_cutoff_time)
 
         # Compute the lap-counting boundary so that standings are frozen correctly:
         # - TIME_ONLY / QUALIFYING: always freeze at the time limit (not race.ended,
@@ -1681,6 +1768,12 @@ class Race(models.Model):
                     _cutoff_time
                     and last_crossing
                     and last_crossing.crossing_time > _cutoff_time
+                )
+            elif ending_mode == "CROSS_AFTER_LEADER":
+                race_finished = bool(
+                    _leader_finish_time
+                    and last_crossing
+                    and last_crossing.crossing_time >= _leader_finish_time
                 )
             elif ending_mode == "AUTO_TRANSFORM":
                 if _cutoff_time and timezone.now() >= _cutoff_time:

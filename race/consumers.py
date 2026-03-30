@@ -1113,24 +1113,41 @@ class TimingConsumer(AsyncWebsocketConsumer):
                 )
                 return None
 
-            # Post-expiry logic: for races that end by "one more crossing after
-            # the time limit", each team is allowed exactly ONE crossing after
-            # the cutoff (their finishing crossing). All subsequent crossings for
-            # that team are dropped, even if other teams haven't finished yet.
-            # This applies to any race with a time-based finish mode, regardless
-            # of race_type (including MAIN races with CROSS_AFTER_TIME).
+            # Post-expiry logic: once a team has made their "finishing crossing"
+            # (first crossing at or after the finish_boundary), all subsequent
+            # crossings for that team are dropped.
+            #
+            # finish_boundary varies by mode:
+            #   CROSS_AFTER_TIME / QUALIFYING_PLUS / AUTO_TRANSFORM → cutoff_time
+            #   CROSS_AFTER_LEADER → leader's first post-cutoff crossing time
+            #     (None until the leader crosses, so pre-leader crossings are
+            #      recorded as normal laps without triggering the finishing logic)
             _TIME_FINISH_MODES = (
                 "CROSS_AFTER_TIME",
                 "QUALIFYING_PLUS",
                 "AUTO_TRANSFORM",
             )
             cutoff_time = None
-            if race.ending_mode in _TIME_FINISH_MODES and race.started:
+            if (
+                race.ending_mode in _TIME_FINISH_MODES + ("CROSS_AFTER_LEADER",)
+                and race.started
+            ):
                 cutoff_time = race.started + race.get_effective_time_limit()
 
-            if cutoff_time is not None and crossing_time >= cutoff_time:
+            finish_boundary = None
+            if cutoff_time is not None:
+                if race.ending_mode in _TIME_FINISH_MODES:
+                    finish_boundary = cutoff_time
+                elif (
+                    race.ending_mode == "CROSS_AFTER_LEADER"
+                    and crossing_time >= cutoff_time
+                ):
+                    finish_boundary = race.get_leader_finish_time(cutoff_time)
+                    # None until leader crosses — pre-leader post-cutoff laps are kept
+
+            if finish_boundary is not None and crossing_time >= finish_boundary:
                 already_finished = LapCrossing.objects.filter(
-                    race=race, team=team, crossing_time__gte=cutoff_time
+                    race=race, team=team, crossing_time__gte=finish_boundary
                 ).exists()
                 if already_finished:
                     print(
@@ -1208,13 +1225,12 @@ class TimingConsumer(AsyncWebsocketConsumer):
                 race_started = True
 
             # Time-limit race end: triggered by crossings, not by a timer.
-            # The race ends once every non-retired team has crossed at least
-            # once after the time limit expired (applies to all CROSS_AFTER_TIME-
-            # family races, including MAIN).
+            # The race ends once every non-retired team has made their finishing
+            # crossing (at or after finish_boundary).
             race_finished = False
             if (
-                cutoff_time is not None
-                and crossing_time >= cutoff_time
+                finish_boundary is not None
+                and crossing_time >= finish_boundary
                 and not race.ended
             ):
                 active_team_ids = set(
@@ -1224,7 +1240,7 @@ class TimingConsumer(AsyncWebsocketConsumer):
                 )
                 crossed_after_ids = set(
                     LapCrossing.objects.filter(
-                        race=race, crossing_time__gte=cutoff_time
+                        race=race, crossing_time__gte=finish_boundary
                     ).values_list("team_id", flat=True)
                 )
                 if active_team_ids.issubset(crossed_after_ids):
