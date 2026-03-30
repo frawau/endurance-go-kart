@@ -14,6 +14,7 @@ from .models import (
     championship_team,
     Round,
     Race,
+    Session,
     Transponder,
     RaceTransponderAssignment,
     LapCrossing,
