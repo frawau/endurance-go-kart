@@ -152,6 +152,13 @@ class Command(BaseCommand):
         cround = self._find_round()
         self.log(f"Round: {cround.name}")
 
+        # Reset post_race_check so penalties are applied even on repeated runs
+        # without an intervening racereset.
+        if cround.post_race_check_completed:
+            cround.post_race_check_completed = False
+            cround.save(update_fields=["post_race_check_completed"])
+            self.log("Reset post_race_check_completed")
+
         active_race = self._find_race(cround, options.get("race_id"))
         self.log(
             f"Race: {active_race.get_race_type_display()} "
@@ -297,29 +304,21 @@ class Command(BaseCommand):
             s.save()
 
     def _do_race_end(self, cround, active_race, now):
-        """Replicate endofrace view logic."""
-        active_race.ended = now
-        active_race.save()
-        sessions = cround.session_set.filter(
-            register__isnull=False, start__isnull=False, end__isnull=True
-        )
-        for s in sessions:
-            s.end = now
-            s.save()
-        cround.session_set.filter(
-            register__isnull=False, start__isnull=True, end__isnull=True
-        ).delete()
-        from race.models import ChangeLane
+        """End the race via the canonical Race.end_this_race() path.
 
-        ChangeLane.objects.all().delete()
-        # Close round if this is the last race
-        next_race = (
-            cround.races.filter(ended__isnull=True).order_by("sequence_number").first()
-        )
-        if next_race is None:
-            cround.ended = now
-            cround.save()
-            cround.post_race_check()
+        Using end_this_race() ensures sessions are closed, qualifying results
+        are propagated, the round is closed when this is the last race, and
+        post_race_check() (penalties) is always applied — regardless of whether
+        the race was already ended externally by the consumer.
+        """
+        # Refresh from DB in case consumer already ended it.
+        active_race.refresh_from_db(fields=["ended"])
+        if active_race.ended is not None:
+            self.log(
+                "[Director] Race already ended by consumer, skipping _do_race_end."
+            )
+            return
+        active_race.end_this_race()
 
     def _maybe_issue_penalty(self, coord, cround, penalty_prob, loop, speed):
         """Randomly issue a Stop & Go or other penalty."""

@@ -4539,6 +4539,21 @@ def split_lap(request, crossing_id):
 @user_passes_test(is_admin_user)
 @csrf_exempt
 @require_POST
+def dismiss_suspicious_lap(request, crossing_id):
+    """Clear the suspicious flag on a lap crossing (director decides it was not a missed crossing)."""
+    try:
+        crossing = get_object_or_404(LapCrossing, id=crossing_id)
+        crossing.is_suspicious = False
+        crossing.save(update_fields=["is_suspicious"])
+        return JsonResponse({"success": True})
+    except Exception as e:
+        return JsonResponse({"success": False, "error": str(e)}, status=400)
+
+
+@login_required
+@user_passes_test(is_admin_user)
+@csrf_exempt
+@require_POST
 def invalidate_lap(request, crossing_id):
     """Mark a lap as invalid"""
     try:

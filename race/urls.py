@@ -236,6 +236,11 @@ urlpatterns = [
         name="split_lap",
     ),
     path(
+        "api/lap/<int:crossing_id>/dismiss-suspicious/",
+        views.dismiss_suspicious_lap,
+        name="dismiss_suspicious_lap",
+    ),
+    path(
         "api/lap/<int:crossing_id>/invalidate/",
         views.invalidate_lap,
         name="invalidate_lap",

@@ -231,7 +231,8 @@ function showSuspiciousLapAlert(teamNumber, lapNumber, crossingId, suggestedSpli
     `</span>` +
     `<button class="btn btn-sm btn-warning ms-2" onclick="splitSuspiciousLap(${crossingId}, '${alertId}', '${countId}')">` +
     `<i class="fas fa-cut"></i> Split</button>` +
-    `<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>`;
+    `<button class="btn btn-sm btn-secondary ms-2" onclick="dismissSuspiciousLap(${crossingId}, '${alertId}')">` +
+    `<i class="fas fa-times"></i> Dismiss</button>`;
 
   messagesContainer.insertBefore(alertDiv, messagesContainer.firstChild);
 }
@@ -263,6 +264,22 @@ function splitSuspiciousLap(crossingId, alertId, countId) {
       }
     })
     .catch(() => addSystemMessage("Failed to split lap — check connection", "danger"));
+}
+
+function dismissSuspiciousLap(crossingId, alertId) {
+  fetch(`/api/lap/${crossingId}/dismiss-suspicious/`, {
+    method: "POST",
+    headers: { "X-CSRFToken": getCookie("csrftoken"), "Content-Type": "application/json" },
+  })
+    .then((r) => r.json())
+    .then((data) => {
+      const el = document.getElementById(alertId);
+      if (el) el.remove();
+      if (!data.success) {
+        addSystemMessage("Error dismissing alert: " + (data.error || "unknown error"), "danger");
+      }
+    })
+    .catch(() => addSystemMessage("Failed to dismiss — check connection", "danger"));
 }
 
 /**
