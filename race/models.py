@@ -1190,9 +1190,24 @@ class Race(models.Model):
             .distinct()
         )
 
-        return set(active_teams.values_list("id", flat=True)).issubset(
+        if set(active_teams.values_list("id", flat=True)).issubset(
             set(teams_crossed_after)
+        ):
+            return True
+
+        # Timeout fallback: if 2.5× the best lap time has elapsed since the
+        # time limit expired, end the race even if not all teams have crossed.
+        best_lap_time = (
+            self.lap_crossings.filter(lap_time__isnull=False, is_valid=True)
+            .order_by("lap_time")
+            .values_list("lap_time", flat=True)
+            .first()
         )
+        if best_lap_time is not None:
+            if timezone.now() >= cutoff_time + best_lap_time * 2.5:
+                return True
+
+        return False
 
     def _check_cross_after_laps(self):
         """
@@ -1598,8 +1613,29 @@ class Race(models.Model):
         _cutoff_time = None
         if ending_mode in ("FULL_LAPS", "CROSS_AFTER_LAPS", "AUTO_TRANSFORM"):
             _required_laps = self.get_effective_lap_count()
-        if ending_mode in ("CROSS_AFTER_TIME", "QUALIFYING_PLUS", "AUTO_TRANSFORM"):
+        if ending_mode in (
+            "CROSS_AFTER_TIME",
+            "QUALIFYING_PLUS",
+            "AUTO_TRANSFORM",
+            "TIME_ONLY",
+            "QUALIFYING",
+        ):
             _cutoff_time = self.started + self.get_effective_time_limit()
+
+        # Compute the lap-counting boundary so that standings are frozen correctly:
+        # - TIME_ONLY / QUALIFYING: always freeze at the time limit (not race.ended,
+        #   which the RD sets later), so that crossings after the clock hits zero
+        #   never appear in the standings.
+        # - All other ended races: freeze at race.ended (when the RD or auto-logic
+        #   ended the race — captures the manual "end now = mode 1" behaviour).
+        # - Ongoing races: no boundary, all valid crossings count.
+        _end_boundary = None
+        if self.ended:
+            _end_boundary = self.ended
+        if _cutoff_time and ending_mode in ("TIME_ONLY", "QUALIFYING"):
+            # For time-only modes use the tighter of the two (cutoff always <= ended)
+            if _end_boundary is None or _cutoff_time < _end_boundary:
+                _end_boundary = _cutoff_time
 
         standings = []
         for team in self.get_all_teams():
@@ -1612,7 +1648,10 @@ class Race(models.Model):
                 is_valid=True,
                 crossing_time__gt=self.started,
                 lap_time__isnull=False,
-            ).order_by("crossing_time")
+            )
+            if _end_boundary:
+                laps = laps.filter(crossing_time__lte=_end_boundary)
+            laps = laps.order_by("crossing_time")
 
             if laps.exists():
                 laps_completed = laps.count()

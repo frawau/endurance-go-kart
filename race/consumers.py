@@ -1087,6 +1087,16 @@ class TimingConsumer(AsyncWebsocketConsumer):
                 )
                 return None
 
+            # Drop crossings once the race is over (manual RD end or auto-end).
+            # This freezes positions at the moment the race ended — equivalent to
+            # the race director pressing "End Race" which behaves as mode 1.
+            if race.ended is not None:
+                print(
+                    f"Timing: Race {race.race_type} already ended — "
+                    f"dropping crossing for team {team.number}"
+                )
+                return None
+
             # Dedup: if this team already had a crossing within TRANSPONDER_DEDUP_SECONDS,
             # this is a redundant transponder on the same kart — drop it silently.
             TRANSPONDER_DEDUP_SECONDS = 7
@@ -1223,6 +1233,10 @@ class TimingConsumer(AsyncWebsocketConsumer):
 
             if not race_finished:
                 race_finished = race.is_race_finished()
+                # For any mode (lap-based, time-only, timeout), officially end the
+                # race so subsequent crossings are dropped and standings are frozen.
+                if race_finished and not race.ended:
+                    race.end_this_race()
 
             result = {
                 "race_id": race.id,
