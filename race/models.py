@@ -122,7 +122,7 @@ class Championship(models.Model):
         ("QUALIFYING", "Qualifying - Best lap time before time elapses"),
         (
             "QUALIFYING_PLUS",
-            "Qualifying+ - Best time crossing line, last lap starts after time",
+            "Qualifying+ - Complete laps started before time expired",
         ),
         ("FULL_LAPS", "Full laps - Race ends when you complete set number of laps"),
         (
