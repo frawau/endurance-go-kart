@@ -1531,6 +1531,14 @@ class LeaderboardConsumer(AsyncWebsocketConsumer):
         """Session updates go to the round group — leaderboard doesn't use them."""
         pass
 
+    async def race_finished(self, event):
+        """Race-finished notification goes to race control — leaderboard ignores it."""
+        pass
+
+    async def grid_violation(self, event):
+        """Grid violation goes to race control — leaderboard ignores it."""
+        pass
+
     async def race_standings_refresh(self, event):
         """Push updated standings when race ends (no crossing needed to show flags)."""
         standings = await self.get_current_standings()
