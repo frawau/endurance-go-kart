@@ -1223,6 +1223,13 @@ class TimingConsumer(AsyncWebsocketConsumer):
                 race.started = crossing_time
                 race.save(update_fields=["started"])
                 race_started = True
+                # Adjust all open sessions to start at race start time so that
+                # pre-race warm-up time (before first crossing) is not counted.
+                for session in Session.objects.filter(
+                    race=race, start__isnull=False, end__isnull=True
+                ):
+                    session.start = crossing_time
+                    session.save(update_fields=["start"])
 
             # Close this team's active session when their finishing crossing is
             # recorded — each team's race ends at their own crossing time, not
