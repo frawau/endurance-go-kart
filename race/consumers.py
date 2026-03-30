@@ -1359,7 +1359,11 @@ class LeaderboardConsumer(AsyncWebsocketConsumer):
         await self.channel_layer.group_add(self.race_group_name, self.channel_name)
 
         # Also subscribe to the round group to receive pause/round updates
-        race = await database_sync_to_async(Race.objects.get)(id=self.race_id)
+        try:
+            race = await database_sync_to_async(Race.objects.get)(id=self.race_id)
+        except Race.DoesNotExist:
+            await self.close(code=4404)
+            return
         self.round_group_name = f"round_{race.round_id}"
         await self.channel_layer.group_add(self.round_group_name, self.channel_name)
 

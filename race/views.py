@@ -1216,6 +1216,12 @@ def update_round(request, round_id):
                 cround.save()
             else:
                 cround.save()
+                # Update ending_mode and start_mode on existing unstarted races
+                ending_mode = request.POST.get("ending_mode", "CROSS_AFTER_TIME")
+                race_start_mode = request.POST.get("race_start_mode", "IMMEDIATE")
+                Race.objects.filter(
+                    round=cround, race_type="MAIN", started__isnull=True
+                ).update(ending_mode=ending_mode, start_mode=race_start_mode)
 
             messages.success(request, f"Round '{cround.name}' updated successfully")
 
