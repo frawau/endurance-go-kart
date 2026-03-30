@@ -1527,6 +1527,10 @@ class LeaderboardConsumer(AsyncWebsocketConsumer):
         """Lap update sent to the round group — leaderboard gets its own lap_crossing_update."""
         pass
 
+    async def session_update(self, event):
+        """Session updates go to the round group — leaderboard doesn't use them."""
+        pass
+
     async def race_standings_refresh(self, event):
         """Push updated standings when race ends (no crossing needed to show flags)."""
         standings = await self.get_current_standings()
