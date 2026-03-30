@@ -112,7 +112,11 @@ document.addEventListener('DOMContentLoaded', function() {
             const data = JSON.parse(event.data);
             console.log("WebSocket received:", data);
 
-            if (data.session_update) {
+            if (data.race_ready) {
+                // New race ready — reload to reset session times
+                window.location.reload();
+                return;
+            } else if (data.session_update) {
                 // Handle driver session updates
                 console.log(`Handling session update for driver ${data.driver_id}, active: ${data.driver_active}, status ${data.driver_status}`);
                 const driverTimers = timerRegistry.byDriverId[data.driver_id];

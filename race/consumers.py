@@ -1448,6 +1448,10 @@ class LeaderboardConsumer(AsyncWebsocketConsumer):
             )
         )
 
+    async def race_lap_update(self, event):
+        """Lap update sent to the round group — leaderboard gets its own lap_crossing_update."""
+        pass
+
     async def round_update(self, event):
         """Forward round state changes (started, ended) to the leaderboard client."""
         await self.send(

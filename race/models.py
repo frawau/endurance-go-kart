@@ -1662,10 +1662,13 @@ class Race(models.Model):
                     ended_q_races, main_race, tiebreaker=tiebreaker
                 )
 
-        if cround.active_race is None:
+        # MAIN is always the last race — end the round when it finishes.
+        # Using active_race is None would be blocked by any ghost unstarted
+        # Q-races left over from a reset.
+        if self.race_type == "MAIN":
+            cround.post_race_check()
             cround.ended = now
             cround.save()
-            cround.post_race_check()
 
     def calculate_race_standings(self):
         """

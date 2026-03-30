@@ -199,10 +199,13 @@ def handle_race_change(sender, instance, **kwargs):
     payload = _build_round_update_payload(cround)
     payload["type"] = "round_update"
 
+    # When pre-race check fires for a new race, flag it so displays can reset
+    if instance.ready and instance.started is None and instance.ended is None:
+        payload["race_ready"] = True
+
     channel_layer = get_channel_layer()
     async_to_sync(channel_layer.group_send)(f"round_{cround.id}", payload)
 
-    # When pre-race check fires for a new race:
     if instance.ready and instance.started is None and instance.ended is None:
         # Tell the previous race's leaderboard to redirect here
         prev_ended = (

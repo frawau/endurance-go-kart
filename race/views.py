@@ -660,14 +660,17 @@ def endofrace(request):
                     ended_q_races, main_race, tiebreaker=tiebreaker
                 )
 
-        # Check if there is a next race
-        next_race = cround.active_race  # re-query after saving
+        # MAIN is always last — close the round when it finishes.
+        # Don't re-query active_race: ghost unstarted Q-races left over from
+        # a reset have ended=None and would prevent the round from closing.
         penalty_count = 0
-        if next_race is None:
-            # Last race finished — close the round
+        next_race = None
+        if active_race.race_type == "MAIN":
+            penalty_count = cround.post_race_check()
             cround.ended = now
             cround.save()
-            penalty_count = cround.post_race_check()
+        else:
+            next_race = cround.active_race  # re-query for Q→MAIN transition
 
         return JsonResponse(
             {
