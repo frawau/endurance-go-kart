@@ -1224,6 +1224,19 @@ class TimingConsumer(AsyncWebsocketConsumer):
                 race.save(update_fields=["started"])
                 race_started = True
 
+            # Close this team's active session when their finishing crossing is
+            # recorded — each team's race ends at their own crossing time, not
+            # when the last team eventually triggers end_this_race().
+            if finish_boundary is not None and crossing_time >= finish_boundary:
+                for session in Session.objects.filter(
+                    driver__team=team,
+                    race=race,
+                    start__isnull=False,
+                    end__isnull=True,
+                ):
+                    session.end = crossing_time
+                    session.save()
+
             # Time-limit race end: triggered by crossings, not by a timer.
             # The race ends once every non-retired team has made their finishing
             # crossing (at or after finish_boundary).
