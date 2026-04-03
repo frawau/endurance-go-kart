@@ -77,7 +77,9 @@ def default_weight_penalty():
         [62.5, 17.5],
         [60, 20],
         [57.5, 22.5],
-        [0, 25],
+        [55, 25],
+        [52.5, 27.5],
+        [0, 30],
     ]
 
 
@@ -883,9 +885,9 @@ class Round(models.Model):
         except MultipleObjectsReturned:
             # Driver is associated with multiple round_teams (unexpected)
             print(f"Driver {driver} is associated with multiple round_teams.")
-            retval[
-                "message"
-            ] = f"Driver {driver} is associated with multiple round_teams."
+            retval["message"] = (
+                f"Driver {driver} is associated with multiple round_teams."
+            )
         return retval
 
     def driver_time_limit(self, rteam):
@@ -1846,13 +1848,13 @@ class Race(models.Model):
                     "penalty_laps": penalty_laps,
                     "total_time": total_time.total_seconds() if total_time else None,
                     "total_time_formatted": fmt_time(total_time),
-                    "last_lap_time": last_lap_time.total_seconds()
-                    if last_lap_time
-                    else None,
+                    "last_lap_time": (
+                        last_lap_time.total_seconds() if last_lap_time else None
+                    ),
                     "last_lap_time_formatted": fmt_time(last_lap_time),
-                    "best_lap_time": best_lap_time.total_seconds()
-                    if best_lap_time
-                    else None,
+                    "best_lap_time": (
+                        best_lap_time.total_seconds() if best_lap_time else None
+                    ),
                     "best_lap_time_formatted": fmt_time(best_lap_time),
                     "starting_position": starting_position,
                     "race_finished": race_finished,
@@ -1863,9 +1865,11 @@ class Race(models.Model):
             # Sort by best lap time ascending (no time = last)
             standings.sort(
                 key=lambda x: (
-                    x["best_lap_time"]
-                    if x["best_lap_time"] is not None
-                    else float("inf"),
+                    (
+                        x["best_lap_time"]
+                        if x["best_lap_time"] is not None
+                        else float("inf")
+                    ),
                 )
             )
         else:
@@ -1898,9 +1902,9 @@ class Race(models.Model):
                         lap_diff = (
                             car_ahead["laps_completed"] - standing["laps_completed"]
                         )
-                        standing[
-                            "gap_ahead"
-                        ] = f"-{lap_diff} lap{'s' if lap_diff > 1 else ''}"
+                        standing["gap_ahead"] = (
+                            f"-{lap_diff} lap{'s' if lap_diff > 1 else ''}"
+                        )
                     elif standing["total_time"] and car_ahead["total_time"]:
                         time_diff = standing["total_time"] - car_ahead["total_time"]
                         standing["gap_ahead"] = f"+{time_diff:.3f}s"
