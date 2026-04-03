@@ -128,18 +128,28 @@ class RaceTasks:
                         if change_lanes:
                             await cls._send_changedriver_update()
                 elif race_duration - elapsed < dt.timedelta(seconds=65):
-                    # Near end of race — wait and end the race.
+                    # Near end of race — wait for the time limit to expire.
                     dowait = (race_duration - elapsed).total_seconds()
                     print(f"\n\n\nClosing in {dowait} seconds!\n\n\n")
                     while int(dowait) > 0:
                         await aio.sleep(dowait)
                         elapsed = await cround.async_pit_elapsed()
                         dowait = (race_duration - elapsed).total_seconds()
+                    # Only auto-end for modes where the timer IS the end
+                    # condition.  Crossing-based modes (CROSS_AFTER_TIME,
+                    # CROSS_AFTER_LEADER, QUALIFYING_PLUS, AUTO_TRANSFORM)
+                    # are ended by handle_lap_crossing() when teams cross.
+                    _TIMER_END_MODES = ("QUALIFYING", "TIME_ONLY")
                     await sync_to_async(cround.refresh_from_db)()
                     if not cround.ended:
                         if active_race:
-                            await sync_to_async(active_race.end_this_race)()
-                        else:
+                            await sync_to_async(active_race.refresh_from_db)()
+                            if (
+                                not active_race.ended
+                                and active_race.ending_mode in _TIMER_END_MODES
+                            ):
+                                await sync_to_async(active_race.end_this_race)()
+                        elif not active_race:
                             await sync_to_async(cround.end_race)()
                 elif (
                     race_duration - elapsed - cround.pitlane_close_before
