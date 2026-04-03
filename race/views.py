@@ -2,6 +2,7 @@
 """
 Copyright (c) 2019 - present AppSeed.us
 """
+
 import datetime as dt
 import json
 import re
@@ -678,9 +679,9 @@ def endofrace(request):
                 "penalty_count": penalty_count,
                 "has_next_race": next_race is not None,
                 "next_race_type": next_race.race_type if next_race else None,
-                "next_race_label": next_race.get_race_type_display()
-                if next_race
-                else None,
+                "next_race_label": (
+                    next_race.get_race_type_display() if next_race else None
+                ),
             }
         )
     else:
@@ -1555,9 +1556,9 @@ def join_championship_view(request):
                     championship=championship, team=team, number=number
                 )
                 # Store success message in session
-                request.session[
-                    "success_message"
-                ] = f"Successfully added {team.name} to {championship.name} with number {number}!"
+                request.session["success_message"] = (
+                    f"Successfully added {team.name} to {championship.name} with number {number}!"
+                )
                 return redirect("join_championship")
             except Team.DoesNotExist:
                 form.add_error("team", "Selected team does not exist.")
@@ -4360,7 +4361,24 @@ def public_leaderboard(request):
         )
 
     standings = race.calculate_race_standings() if race.started else []
-    teams = race.get_all_teams().order_by("team__number") if not race.started else []
+    if not race.started:
+        teams = race.get_all_teams()
+        if race.grid_positions.exists():
+            # Order by starting grid (MAIN race after qualifying)
+            teams = teams.filter(gridposition__race=race).order_by(
+                "gridposition__position"
+            )
+            # Append any teams without a grid position (late entries, etc.)
+            ungridded = (
+                race.get_all_teams()
+                .exclude(gridposition__race=race)
+                .order_by("team__number")
+            )
+            teams = list(teams) + list(ungridded)
+        else:
+            teams = teams.order_by("team__number")
+    else:
+        teams = []
 
     context = {
         "race": race,
@@ -4425,12 +4443,12 @@ def get_race_laps(request, race_id):
                     "team_name": team.name,
                     "lap_number": lap["lap_number"],
                     "crossing_time": lap["crossing_time"].isoformat(),
-                    "lap_time": str(lap["lap_time"]).split(".")[0]
-                    if lap["lap_time"]
-                    else "—",
-                    "lap_time_seconds": lap["lap_time"].total_seconds()
-                    if lap["lap_time"]
-                    else None,
+                    "lap_time": (
+                        str(lap["lap_time"]).split(".")[0] if lap["lap_time"] else "—"
+                    ),
+                    "lap_time_seconds": (
+                        lap["lap_time"].total_seconds() if lap["lap_time"] else None
+                    ),
                     "is_valid": lap["is_valid"],
                     "is_suspicious": lap["is_suspicious"],
                     "was_split": lap["was_split"],
@@ -4811,9 +4829,9 @@ def get_available_transponders(request, race_id):
             {
                 "transponder_id": transponder.transponder_id,
                 "description": transponder.description,
-                "last_seen": transponder.last_seen.isoformat()
-                if transponder.last_seen
-                else None,
+                "last_seen": (
+                    transponder.last_seen.isoformat() if transponder.last_seen else None
+                ),
             }
         )
 
