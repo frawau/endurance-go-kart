@@ -312,20 +312,19 @@ class RoundConsumer(AsyncWebsocketConsumer):
 
     async def race_lap_update(self, event):
         """Broadcast lap crossing updates to race control"""
-        await self.send(
-            text_data=json.dumps(
-                {
-                    "type": "race_lap_update",
-                    "race_id": event["race_id"],
-                    "team_number": event["team_number"],
-                    "lap_number": event["lap_number"],
-                    "is_suspicious": event.get("is_suspicious", False),
-                    "suggested_split": event.get("suggested_split", 2),
-                    "max_split": event.get("max_split", 2),
-                    "crossing_id": event.get("crossing_id"),
-                }
-            )
-        )
+        msg = {
+            "type": "race_lap_update",
+            "race_id": event["race_id"],
+            "team_number": event["team_number"],
+            "lap_number": event["lap_number"],
+            "is_suspicious": event.get("is_suspicious", False),
+            "suggested_split": event.get("suggested_split", 2),
+            "max_split": event.get("max_split", 2),
+            "crossing_id": event.get("crossing_id"),
+        }
+        if event.get("remaining_seconds") is not None:
+            msg["remaining_seconds"] = event["remaining_seconds"]
+        await self.send(text_data=json.dumps(msg))
 
     async def race_finished(self, event):
         """Broadcast race finished notification to race control"""
@@ -572,20 +571,19 @@ class StopAndGoConsumer(AsyncWebsocketConsumer):
 
     async def race_lap_update(self, event):
         """Broadcast lap crossing updates to race control"""
-        await self.send(
-            text_data=json.dumps(
-                {
-                    "type": "race_lap_update",
-                    "race_id": event["race_id"],
-                    "team_number": event["team_number"],
-                    "lap_number": event["lap_number"],
-                    "is_suspicious": event.get("is_suspicious", False),
-                    "suggested_split": event.get("suggested_split", 2),
-                    "max_split": event.get("max_split", 2),
-                    "crossing_id": event.get("crossing_id"),
-                }
-            )
-        )
+        msg = {
+            "type": "race_lap_update",
+            "race_id": event["race_id"],
+            "team_number": event["team_number"],
+            "lap_number": event["lap_number"],
+            "is_suspicious": event.get("is_suspicious", False),
+            "suggested_split": event.get("suggested_split", 2),
+            "max_split": event.get("max_split", 2),
+            "crossing_id": event.get("crossing_id"),
+        }
+        if event.get("remaining_seconds") is not None:
+            msg["remaining_seconds"] = event["remaining_seconds"]
+        await self.send(text_data=json.dumps(msg))
 
     async def race_finished(self, event):
         """Broadcast race finished notification to race control"""
@@ -954,6 +952,7 @@ class TimingConsumer(AsyncWebsocketConsumer):
                 "suggested_split": suggested_split,
                 "max_split": max_split,
                 "crossing_id": result.get("crossing_id"),
+                "remaining_seconds": result.get("remaining_seconds"),
             },
         )
 
@@ -1344,6 +1343,14 @@ class TimingConsumer(AsyncWebsocketConsumer):
                 if race_finished and not race.ended:
                     race.end_this_race()
 
+            # Compute server-authoritative remaining time for client clock sync
+            if race.started and not race.ended:
+                remaining_seconds = round(
+                    (race.duration - race.time_elapsed).total_seconds()
+                )
+            else:
+                remaining_seconds = None
+
             result = {
                 "race_id": race.id,
                 "round_id": race.round.id,
@@ -1357,6 +1364,7 @@ class TimingConsumer(AsyncWebsocketConsumer):
                 "race_finished": race_finished,
                 "race_type": race.race_type if race_finished else None,
                 "race_started": race_started,
+                "remaining_seconds": remaining_seconds,
             }
 
             # Grid order check (MAIN race only, driven by ChampionshipPenalty)
@@ -1460,10 +1468,11 @@ class LeaderboardConsumer(AsyncWebsocketConsumer):
         await self.accept()
 
         # Send initial standings
-        standings = await self.get_current_standings()
-        await self.send(
-            text_data=json.dumps({"type": "standings_update", "standings": standings})
-        )
+        standings, remaining = await self.get_current_standings()
+        msg = {"type": "standings_update", "standings": standings}
+        if remaining is not None:
+            msg["remaining_seconds"] = remaining
+        await self.send(text_data=json.dumps(msg))
 
     async def disconnect(self, close_code):
         # Leave race leaderboard group
@@ -1478,12 +1487,11 @@ class LeaderboardConsumer(AsyncWebsocketConsumer):
         try:
             data = json.loads(text_data)
             if data.get("type") == "reload":
-                standings = await self.get_current_standings()
-                await self.send(
-                    text_data=json.dumps(
-                        {"type": "standings_update", "standings": standings}
-                    )
-                )
+                standings, remaining = await self.get_current_standings()
+                msg = {"type": "standings_update", "standings": standings}
+                if remaining is not None:
+                    msg["remaining_seconds"] = remaining
+                await self.send(text_data=json.dumps(msg))
         except json.JSONDecodeError:
             pass
 
@@ -1492,18 +1500,15 @@ class LeaderboardConsumer(AsyncWebsocketConsumer):
         Called when a lap crossing occurs.
         Recalculate and broadcast standings.
         """
-        standings = await self.get_current_standings()
-        await self.send(
-            text_data=json.dumps(
-                {
-                    "type": "standings_update",
-                    "standings": standings,
-                    "flash_team_number": event.get("crossing_data", {}).get(
-                        "team_number"
-                    ),
-                }
-            )
-        )
+        standings, remaining = await self.get_current_standings()
+        msg = {
+            "type": "standings_update",
+            "standings": standings,
+            "flash_team_number": event.get("crossing_data", {}).get("team_number"),
+        }
+        if remaining is not None:
+            msg["remaining_seconds"] = remaining
+        await self.send(text_data=json.dumps(msg))
 
     async def race_ended(self, event):
         """Called when pre-race check fires for next race. Redirect this leaderboard."""
@@ -1546,10 +1551,11 @@ class LeaderboardConsumer(AsyncWebsocketConsumer):
 
     async def race_standings_refresh(self, event):
         """Push updated standings when race ends (no crossing needed to show flags)."""
-        standings = await self.get_current_standings()
-        await self.send(
-            text_data=json.dumps({"type": "standings_update", "standings": standings})
-        )
+        standings, remaining = await self.get_current_standings()
+        msg = {"type": "standings_update", "standings": standings}
+        if remaining is not None:
+            msg["remaining_seconds"] = remaining
+        await self.send(text_data=json.dumps(msg))
 
     async def round_update(self, event):
         """Forward round state changes (started, ended) to the leaderboard client."""
@@ -1567,12 +1573,16 @@ class LeaderboardConsumer(AsyncWebsocketConsumer):
 
     @database_sync_to_async
     def get_current_standings(self):
-        """Get current race standings"""
+        """Get current race standings and remaining time for clock sync."""
         try:
             race = Race.objects.get(id=self.race_id)
-            return race.calculate_race_standings()
+            standings = race.calculate_race_standings()
+            remaining = None
+            if race.started and not race.ended:
+                remaining = round((race.duration - race.time_elapsed).total_seconds())
+            return standings, remaining
         except Race.DoesNotExist:
-            return []
+            return [], None
 
 
 class TransponderScanConsumer(AsyncWebsocketConsumer):

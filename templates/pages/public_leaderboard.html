@@ -273,6 +273,9 @@
                 const data = JSON.parse(event.data);
                 if (data.type === 'standings_update') {
                     updateStandings(data.standings, data.flash_team_number);
+                    if (raceTimer && data.remaining_seconds !== undefined) {
+                        raceTimer.updateRemainingTime(data.remaining_seconds);
+                    }
                 } else if (data.type === 'race_ended') {
                     if (data.next_race_url) {
                         window.location.href = data.next_race_url;

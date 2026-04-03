@@ -174,7 +174,15 @@ document.addEventListener('DOMContentLoaded', function() {
             const data = JSON.parse(event.data);
             console.log("WebSocket received:", data);
 
-            if (data.race_ready) {
+            if (data.type === 'race_lap_update') {
+                // Sync countdown timer from server on every crossing
+                if (data.remaining_seconds !== undefined && data.remaining_seconds !== null) {
+                    timerRegistry.countdownTimers.forEach(timer => {
+                        timer.updateRemainingTime(data.remaining_seconds);
+                    });
+                }
+                return;
+            } else if (data.race_ready) {
                 // New race ready — reload to reset session times
                 window.location.reload();
                 return;

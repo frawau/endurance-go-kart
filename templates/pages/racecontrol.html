@@ -434,6 +434,12 @@ document.addEventListener('DOMContentLoaded', function() {
                         if (data.is_suspicious && data.crossing_id) {
                             showSuspiciousLapAlert(data.team_number, data.lap_number, data.crossing_id, data.suggested_split, data.max_split);
                         }
+                        // Sync countdown timer from server on every crossing
+                        if (data.remaining_seconds !== undefined && data.remaining_seconds !== null) {
+                            timerRegistry.countdownTimers.forEach(timer => {
+                                timer.updateRemainingTime(data.remaining_seconds);
+                            });
+                        }
                         return;
                     }
 
