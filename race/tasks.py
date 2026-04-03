@@ -6,7 +6,6 @@ from django.db.models import Q
 from asgiref.sync import sync_to_async
 from django.template.loader import render_to_string
 from channels.layers import get_channel_layer
-from .signals import race_end_requested
 
 
 class RaceTasks:
@@ -129,17 +128,19 @@ class RaceTasks:
                         if change_lanes:
                             await cls._send_changedriver_update()
                 elif race_duration - elapsed < dt.timedelta(seconds=65):
-                    # Near end of race — wait and fire race-end signal.
+                    # Near end of race — wait and end the race.
                     dowait = (race_duration - elapsed).total_seconds()
                     print(f"\n\n\nClosing in {dowait} seconds!\n\n\n")
                     while int(dowait) > 0:
                         await aio.sleep(dowait)
                         elapsed = await cround.async_pit_elapsed()
                         dowait = (race_duration - elapsed).total_seconds()
-                        if not cround.ended:
-                            await race_end_requested.asend(
-                                sender=cls, round_id=cround.id
-                            )
+                    await sync_to_async(cround.refresh_from_db)()
+                    if not cround.ended:
+                        if active_race:
+                            await sync_to_async(active_race.end_this_race)()
+                        else:
+                            await sync_to_async(cround.end_race)()
                 elif (
                     race_duration - elapsed - cround.pitlane_close_before
                     < dt.timedelta(seconds=65)

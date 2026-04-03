@@ -92,9 +92,11 @@ class EmptyTeamsConsumer(AsyncWebsocketConsumer):
                     self.room_group_name,
                     {
                         "type": "system_message",
-                        "message": "Team deleted successfully"
-                        if success
-                        else "Failed to delete team",
+                        "message": (
+                            "Team deleted successfully"
+                            if success
+                            else "Failed to delete team"
+                        ),
                         "tag": "success" if success else "danger",
                     },
                 )
@@ -1285,6 +1287,19 @@ class TimingConsumer(AsyncWebsocketConsumer):
                 ):
                     session.start = crossing_time
                     session.save(update_fields=["start"])
+
+            # For CROSS_AFTER_LEADER: the finish_boundary is derived from
+            # get_leader_finish_time() which queries saved crossings.  When
+            # THIS crossing is the leader's first post-cutoff crossing it
+            # wasn't in the DB yet at query time, so finish_boundary was None.
+            # Now that the crossing is saved, re-evaluate.
+            if (
+                finish_boundary is None
+                and race.ending_mode == "CROSS_AFTER_LEADER"
+                and cutoff_time is not None
+                and crossing_time >= cutoff_time
+            ):
+                finish_boundary = race.get_leader_finish_time(cutoff_time)
 
             # Close this team's active session when their finishing crossing is
             # recorded — each team's race ends at their own crossing time, not
