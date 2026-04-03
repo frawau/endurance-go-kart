@@ -1492,16 +1492,6 @@ class LeaderboardConsumer(AsyncWebsocketConsumer):
         Called when a lap crossing occurs.
         Recalculate and broadcast standings.
         """
-        # Debounce: only send updates at most once per second
-        current_time = time.time()
-        if not hasattr(self, "_last_update"):
-            self._last_update = 0
-
-        if current_time - self._last_update < 1.0:
-            return  # Skip this update
-
-        self._last_update = current_time
-
         standings = await self.get_current_standings()
         await self.send(
             text_data=json.dumps(
