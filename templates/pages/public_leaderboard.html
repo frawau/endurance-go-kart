@@ -405,6 +405,14 @@
         }
 
         connect();
+
+        // Resync standings and timer when tab regains focus — browsers
+        // throttle background tabs so timers and WS messages can lag.
+        document.addEventListener('visibilitychange', function() {
+            if (!document.hidden && socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({type: 'reload'}));
+            }
+        });
     </script>
     {% endif %}{# end race script #}
 </body>

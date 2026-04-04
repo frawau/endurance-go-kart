@@ -233,10 +233,40 @@ class RoundConsumer(AsyncWebsocketConsumer):
         # Leave room group
         await self.channel_layer.group_discard(self.round_group_name, self.channel_name)
 
-    # Receive message from WebSocket
     async def receive(self, text_data):
-        # We can handle client-to-server messages here if needed
-        pass
+        """Handle client requests — supports resync on tab focus."""
+        try:
+            data = json.loads(text_data)
+            if data.get("type") == "resync":
+                payload = await self._get_round_state()
+                if payload:
+                    await self.send(text_data=json.dumps(payload))
+        except json.JSONDecodeError:
+            pass
+
+    @database_sync_to_async
+    def _get_round_state(self):
+        """Build current round state for resync."""
+        from .signals import _build_round_update_payload
+
+        try:
+            cround = Round.objects.get(id=self.round_id)
+        except Round.DoesNotExist:
+            return None
+        payload = _build_round_update_payload(cround)
+        return {
+            "is_paused": payload["is paused"],
+            "remaining_seconds": payload["remaining seconds"],
+            "session_update": False,
+            "started": payload["started"],
+            "ready": payload["ready"],
+            "ended": payload["ended"],
+            "armed": payload.get("armed", False),
+            "start_mode": payload.get("start_mode"),
+            "active_race_type": payload.get("active_race_type"),
+            "active_race_label": payload.get("active_race_label"),
+            "has_more_races": payload.get("has_more_races"),
+        }
 
     # Receive message from room group
     async def round_update(self, event):

@@ -922,6 +922,12 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
 
+    // Resync timer when tab regains focus
+    document.addEventListener('visibilitychange', function() {
+        if (!document.hidden) {
+            roundSocket.send(JSON.stringify({type: 'resync'}));
+        }
+    });
 });
 </script>
 {% endblock extra_js %}

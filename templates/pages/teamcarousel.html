@@ -207,6 +207,13 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Initial connection
     connectWebSocket();
+
+    // Resync timer when tab regains focus
+    document.addEventListener('visibilitychange', function() {
+        if (!document.hidden && socket && socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify({type: 'resync'}));
+        }
+    });
 });
 </script>
 {% endif %}
