@@ -312,6 +312,13 @@ class Round(models.Model):
     ended = models.DateTimeField(null=True, blank=True)
     post_race_check_completed = models.BooleanField(default=False)
     results_confirmed = models.BooleanField(default=False)
+    points_factor = models.DecimalField(
+        max_digits=3,
+        decimal_places=2,
+        default=1,
+        verbose_name="Points Factor",
+        help_text="Multiplier for championship points (1=full, 0.5=half, 0=none)",
+    )
     qr_fernet = models.BinaryField(
         max_length=64, default=Fernet.generate_key, editable=False
     )

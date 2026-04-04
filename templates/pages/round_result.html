@@ -132,13 +132,28 @@
     {% endif %}
 
     {% if user.is_authenticated and can_confirm %}
-    <div class="mt-4 mb-3 d-flex align-items-center gap-3">
+    <div class="mt-4 mb-3 d-flex align-items-center gap-3 flex-wrap">
         {% if selected_round.results_confirmed %}
-        <span class="badge bg-success fs-6 me-2"><i class="fas fa-check-circle me-1"></i>Results Confirmed</span>
-        <button id="unconfirm-btn" class="btn btn-outline-warning btn-sm">Withdraw Confirmation</button>
+        <span class="badge bg-success fs-6 me-2"><i class="fas fa-check-circle me-1"></i>Results Confirmed
+            {% if selected_round.points_factor|floatformat:2 == "0.50" %} (Half Points){% endif %}
+            {% if selected_round.points_factor|floatformat:2 == "0.00" %} (No Points){% endif %}
+        </span>
+        <button id="unconfirm-btn" class="btn btn-sm"
+                style="background-color: #ff5252; color: #fff; font-weight: 600; border: none;">
+            Withdraw Confirmation
+        </button>
         {% else %}
-        <button id="confirm-btn" class="btn btn-success">
-            <i class="fas fa-check-circle me-1"></i>Confirm Round Results
+        <span class="text-light me-2" style="font-weight:500;">Confirm with:</span>
+        <button class="btn btn-success confirm-btn" data-factor="1">
+            <i class="fas fa-check-circle me-1"></i>Full Points
+        </button>
+        <button class="btn btn-sm confirm-btn" data-factor="0.5"
+                style="background-color: #ff9800; color: #fff; font-weight: 600; border: none;">
+            Half Points
+        </button>
+        <button class="btn btn-sm confirm-btn" data-factor="0"
+                style="background-color: #78909c; color: #fff; font-weight: 600; border: none;">
+            No Points
         </button>
         {% endif %}
     </div>
@@ -146,14 +161,17 @@
     (function() {
         const csrfToken = '{{ csrf_token }}';
         const roundId = {{ selected_round_id }};
-        const confirmBtn = document.getElementById('confirm-btn');
-        const unconfirmBtn = document.getElementById('unconfirm-btn');
-        if (confirmBtn) {
-            confirmBtn.addEventListener('click', function() {
-                if (!confirm('Confirm these round results and award championship points?')) return;
+        document.querySelectorAll('.confirm-btn').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                const factor = this.dataset.factor;
+                const labels = {'1': 'full points', '0.5': 'half points', '0': 'no points'};
+                if (!confirm('Confirm round results with ' + labels[factor] + '?')) return;
+                const body = new URLSearchParams();
+                body.append('points_factor', factor);
                 fetch(`/api/round/${roundId}/confirm-results/`, {
                     method: 'POST',
-                    headers: {'X-CSRFToken': csrfToken}
+                    headers: {'X-CSRFToken': csrfToken, 'Content-Type': 'application/x-www-form-urlencoded'},
+                    body: body
                 })
                 .then(r => r.json())
                 .then(data => {
@@ -161,7 +179,8 @@
                     else { alert('Error: ' + data.error); }
                 });
             });
-        }
+        });
+        const unconfirmBtn = document.getElementById('unconfirm-btn');
         if (unconfirmBtn) {
             unconfirmBtn.addEventListener('click', function() {
                 if (!confirm('Withdraw confirmation and remove championship points for this round?')) return;

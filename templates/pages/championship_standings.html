@@ -41,7 +41,7 @@
                     <th>#</th>
                     <th>Team</th>
                     {% for rnd in confirmed_rounds %}
-                    <th class="round-col" title="{{ rnd.name }} — {{ rnd.start|date:'Y-m-d' }}">{{ rnd.name }}</th>
+                    <th class="round-col" title="{{ rnd.name }} — {{ rnd.start|date:'Y-m-d' }}{% if rnd.points_factor|floatformat:2 == '0.50' %} (Half Pts){% elif rnd.points_factor|floatformat:2 == '0.00' %} (No Pts){% endif %}">{{ rnd.name }}{% if rnd.points_factor|floatformat:2 == "0.50" %}*{% elif rnd.points_factor|floatformat:2 == "0.00" %}**{% endif %}</th>
                     {% endfor %}
                     <th class="total-col">Total</th>
                 </tr>

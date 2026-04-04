@@ -2401,6 +2401,14 @@ def confirm_round_results(request, round_id):
             {"success": False, "error": "No standings data available."}, status=400
         )
 
+    from decimal import Decimal, ROUND_HALF_UP
+
+    factor_str = request.POST.get("points_factor", "1")
+    try:
+        factor = Decimal(factor_str)
+    except Exception:
+        factor = Decimal("1")
+
     with transaction.atomic():
         RoundStanding.objects.filter(round=rnd).delete()
         for entry in standings:
@@ -2411,7 +2419,10 @@ def confirm_round_results(request, round_id):
             )
             ct = rt.team if rt else None
             if ct:
-                points = championship.points_for_position(entry["position"])
+                raw_points = championship.points_for_position(entry["position"])
+                points = (Decimal(str(raw_points)) * factor).quantize(
+                    Decimal("0.1"), rounding=ROUND_HALF_UP
+                )
                 RoundStanding.objects.create(
                     round=rnd,
                     team=ct,
@@ -2419,9 +2430,14 @@ def confirm_round_results(request, round_id):
                     points=points,
                 )
         rnd.results_confirmed = True
-        rnd.save(update_fields=["results_confirmed"])
+        rnd.points_factor = factor
+        rnd.save(update_fields=["results_confirmed", "points_factor"])
 
-    return JsonResponse({"success": True, "message": "Round results confirmed."})
+    labels = {"1": "full", "0.5": "half", "0": "no"}
+    label = labels.get(factor_str, factor_str)
+    return JsonResponse(
+        {"success": True, "message": f"Round results confirmed with {label} points."}
+    )
 
 
 @login_required
