@@ -20,16 +20,21 @@
     </form>
 
     {% if selected and standings %}
-    <div class="scoring-info mt-3 mb-2">
-        {% if selected.points_system == "DESCENDING" %}
-        <span class="badge bg-info text-dark">Most points wins</span>
-        {% else %}
-        <span class="badge bg-info text-dark">Fewest points wins</span>
-        {% endif %}
-        <span class="ms-2 text-muted-light">
-            Points: {{ selected.points_values|join:", " }}
-            {% if selected.points_system == "ASCENDING" %} (start value, +1 per position){% endif %}
-        </span>
+    <div class="scoring-info mt-3 mb-2 d-flex align-items-center gap-3">
+        <div>
+            {% if selected.points_system == "DESCENDING" %}
+            <span class="badge bg-info text-dark">Most points wins</span>
+            {% else %}
+            <span class="badge bg-info text-dark">Fewest points wins</span>
+            {% endif %}
+            <span class="ms-2 text-muted-light">
+                Points: {{ selected.points_values|join:", " }}
+                {% if selected.points_system == "ASCENDING" %} (start value, +1 per position){% endif %}
+            </span>
+        </div>
+        <button class="btn btn-sm btn-print ms-auto" onclick="window.print()">
+            <i class="fas fa-print me-1"></i>Print
+        </button>
     </div>
 
     <div class="table-responsive mt-3">
@@ -87,10 +92,63 @@
     <div class="alert alert-info mt-3">Select a championship to view standings.</div>
     {% endif %}
 </div>
+
+<!-- ── Print area (hidden on screen, shown on print) ─────────────────── -->
+{% if selected and standings %}
+<div id="print-area">
+    <div class="print-header">
+        {% if organiser_logo %}
+        <div><img src="{{ organiser_logo.image.url }}" alt="Organiser"></div>
+        {% endif %}
+        <div class="print-title">Championship Standings</div>
+        <div class="print-subtitle">{{ selected.name }} — {{ selected.start|date:"Y" }}</div>
+    </div>
+
+    <table class="print-standings-table">
+        <thead>
+            <tr>
+                <th class="pos-cell">Rank</th>
+                <th class="num-cell">#</th>
+                <th>Team</th>
+                {% for rnd in confirmed_rounds %}
+                <th class="round-cell">{{ rnd.name }}{% if rnd.points_factor|floatformat:2 == "0.50" %}*{% elif rnd.points_factor|floatformat:2 == "0.00" %}**{% endif %}</th>
+                {% endfor %}
+                <th class="total-cell">Total</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in standings %}
+            <tr>
+                <td class="pos-cell">{{ row.rank }}</td>
+                <td class="num-cell">{{ row.team_number }}</td>
+                <td>{{ row.team_name }}</td>
+                {% for rnd in confirmed_rounds %}
+                <td class="round-cell">
+                    {% with rnd_data=row.round_points %}
+                    {% if rnd.id in rnd_data %}{{ rnd_data|get_item:rnd.id|get_item:"points" }}{% else %}—{% endif %}
+                    {% endwith %}
+                </td>
+                {% endfor %}
+                <td class="total-cell">{{ row.total }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    {% if sponsors_logos %}
+    <div class="print-sponsors">
+        {% for logo in sponsors_logos %}
+        <img src="{{ logo.image.url }}" alt="{{ logo.name }}">
+        {% endfor %}
+    </div>
+    {% endif %}
+</div>
+{% endif %}
 {% endblock main_content %}
 
 {% block extra_js %}
 <style>
+    /* ── Screen styles ── */
     h1 {
         color: #e6e6fa !important;
         margin-bottom: 25px;
@@ -110,6 +168,14 @@
     }
 
     .scoring-info .text-muted-light { color: rgba(200,200,220,0.7); font-size: 0.85rem; }
+
+    .btn-print {
+        font-size: 0.8rem; font-weight: 600; padding: 4px 14px;
+        border: 1px solid rgba(100,180,255,0.5);
+        color: #7ec8ff; background: rgba(30,60,100,0.6);
+        border-radius: 12px; letter-spacing: 0.3px;
+    }
+    .btn-print:hover { background: rgba(50,90,140,0.8); color: #b0d8ff; }
 
     .standings-table { background-color: rgba(40,40,50,0.85); margin: 0; }
     .standings-table th {
@@ -142,5 +208,102 @@
     .total-col { text-align: center; min-width: 70px; font-size: 1.05rem; }
     .points-val { cursor: default; }
     .no-result { color: rgba(160,160,180,0.5); }
+
+    /* Hidden from screen */
+    #print-area { display: none; }
+
+    /* ── Print styles ── */
+    @media print {
+        body * { visibility: hidden; }
+        #print-area {
+            visibility: visible;
+            display: block !important;
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            margin: 0;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+        }
+        #print-area * { visibility: visible; }
+
+        .print-header {
+            text-align: center;
+            margin-bottom: 24px;
+        }
+        .print-header img {
+            max-height: 80px;
+            margin-bottom: 12px;
+        }
+        .print-title {
+            font-size: 28pt;
+            font-weight: bold;
+            margin: 4px 0;
+        }
+        .print-subtitle {
+            font-size: 14pt;
+            color: #444;
+            margin: 2px 0;
+        }
+
+        .print-standings-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+            font-size: 11pt;
+        }
+        .print-standings-table th {
+            background: #222 !important;
+            color: #fff !important;
+            padding: 6px 10px;
+            text-align: left;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+        }
+        .print-standings-table td {
+            padding: 5px 10px;
+            border-bottom: 1px solid #ccc;
+        }
+        .print-standings-table tr:nth-child(even) td {
+            background: #f5f5f5 !important;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+        }
+        .print-standings-table .pos-cell {
+            font-weight: bold;
+            font-size: 12pt;
+            width: 50px;
+            text-align: center;
+        }
+        .print-standings-table .num-cell {
+            font-weight: bold;
+            width: 50px;
+            text-align: center;
+        }
+        .print-standings-table .round-cell {
+            text-align: center;
+            min-width: 50px;
+        }
+        .print-standings-table .total-cell {
+            text-align: center;
+            font-weight: bold;
+            min-width: 60px;
+        }
+
+        .print-sponsors {
+            margin-top: 30px;
+            text-align: center;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 24px;
+            flex-wrap: wrap;
+        }
+        .print-sponsors img {
+            max-height: 60px;
+            max-width: 140px;
+        }
+    }
 </style>
 {% endblock %}
