@@ -64,6 +64,10 @@ def logo_path(instance, filename):
     return f"static/logos/{instance.name}_{round(dt.datetime.now().timestamp())}"
 
 
+def default_points_values():
+    return [25, 18, 15, 12, 10, 8, 6, 4, 2, 1]
+
+
 def default_weight_penalty():
     return [
         ">=",
@@ -175,7 +179,7 @@ class Championship(models.Model):
         verbose_name="Points System",
     )
     points_values = models.JSONField(
-        default=list,
+        default=default_points_values,
         blank=True,
         verbose_name="Points per Position",
         help_text="Descending: list of points [25,18,15,...]. Ascending: [start_value] e.g. [0] or [1].",
