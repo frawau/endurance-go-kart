@@ -4830,7 +4830,7 @@ def transponder_matching(request, race_id):
 
 
 @login_required
-@user_passes_test(is_admin_user)
+@user_passes_test(is_admin_or_race_director)
 def get_transponder_assignments(request, race_id):
     """API endpoint to get current transponder assignments"""
     race = get_object_or_404(Race, id=race_id)
@@ -4989,7 +4989,7 @@ def lock_transponder_assignments(request, race_id):
 
 
 @login_required
-@user_passes_test(is_admin_user)
+@user_passes_test(is_admin_or_race_director)
 def get_available_transponders(request, race_id):
     """API endpoint to get transponders not yet assigned to this race"""
     race = get_object_or_404(Race, id=race_id)

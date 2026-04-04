@@ -245,6 +245,15 @@
                                                             <td>{{ team.team.number }}</td>
                                                             <td>{{ team.team.team.name }}</td>
                                                             <td>
+                                                                {% if active_race and not round.uses_legacy_session_model %}
+                                                                <button class="btn btn-sm btn-outline-info swap-transponder-btn me-1"
+                                                                    data-team-id="{{ team.id }}"
+                                                                    data-team-name="{{ team.team.team.name }}"
+                                                                    data-team-number="{{ team.team.number }}"
+                                                                    title="Swap transponder">
+                                                                    <i class="fas fa-exchange-alt"></i>
+                                                                </button>
+                                                                {% endif %}
                                                                 <button class="btn btn-sm retire-toggle-btn {% if team.retired %}btn-success{% else %}btn-outline-danger{% endif %}"
                                                                     data-team-id="{{ team.id }}"
                                                                     data-retired="{{ team.retired|yesno:'true,false' }}">
@@ -378,6 +387,39 @@ data-active-race-label="{% if active_race %}{{ active_race.get_race_type_display
 data-start-mode="{% if active_race %}{{ active_race.start_mode }}{% endif %}"
 data-round-name="{% if round %}{{ round.name }}{% endif %}">
 </div>
+
+<!-- Swap Transponder Modal -->
+{% if active_race and not round.uses_legacy_session_model %}
+<div class="modal fade" id="swapTransponderModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content bg-dark text-light">
+            <div class="modal-header border-secondary">
+                <h5 class="modal-title">Swap Transponder — <span id="swap-team-label"></span></h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label">Current Transponder:</label>
+                    <select id="swap-current-select" class="form-select bg-secondary text-light border-secondary">
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Replace With:</label>
+                    <select id="swap-new-select" class="form-select bg-secondary text-light border-secondary">
+                        <option value="">Loading...</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer border-secondary">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-info" id="swap-confirm-btn">
+                    <i class="fas fa-exchange-alt me-1"></i>Swap
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
 
 {% endblock content %}
 
@@ -921,6 +963,96 @@ document.addEventListener('DOMContentLoaded', function() {
             });
         });
     });
+
+    // ── Swap Transponder ──
+    {% if active_race and not round.uses_legacy_session_model %}
+    const swapRaceId = {{ active_race.id }};
+    const swapModal = new bootstrap.Modal(document.getElementById('swapTransponderModal'));
+    const swapCurrentSel = document.getElementById('swap-current-select');
+    const swapNewSel = document.getElementById('swap-new-select');
+    const swapTeamLabel = document.getElementById('swap-team-label');
+    const swapConfirmBtn = document.getElementById('swap-confirm-btn');
+
+    document.querySelectorAll('.swap-transponder-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            const teamId = this.dataset.teamId;
+            const teamName = this.dataset.teamName;
+            const teamNumber = this.dataset.teamNumber;
+            swapTeamLabel.textContent = `#${teamNumber} ${teamName}`;
+            swapCurrentSel.innerHTML = '<option value="">Loading...</option>';
+            swapNewSel.innerHTML = '<option value="">Loading...</option>';
+            swapConfirmBtn.disabled = true;
+
+            // Fetch team's current assignments and available transponders in parallel
+            Promise.all([
+                fetch(`/api/race/${swapRaceId}/transponder-assignments/`).then(r => r.json()),
+                fetch(`/api/race/${swapRaceId}/available-transponders/`).then(r => r.json())
+            ]).then(([assignData, availData]) => {
+                // Populate current transponder dropdown (only this team's)
+                const teamAssignments = assignData.assignments.filter(a => a.team_id == teamId);
+                swapCurrentSel.innerHTML = '';
+                if (teamAssignments.length === 0) {
+                    swapCurrentSel.innerHTML = '<option value="">No transponder assigned</option>';
+                } else {
+                    teamAssignments.forEach(a => {
+                        const opt = document.createElement('option');
+                        opt.value = a.id;
+                        opt.textContent = a.transponder_id;
+                        swapCurrentSel.appendChild(opt);
+                    });
+                }
+
+                // Populate available transponders dropdown
+                swapNewSel.innerHTML = '';
+                if (availData.transponders.length === 0) {
+                    swapNewSel.innerHTML = '<option value="">No transponders available</option>';
+                } else {
+                    availData.transponders.forEach(t => {
+                        const opt = document.createElement('option');
+                        opt.value = t.transponder_id;
+                        opt.textContent = t.transponder_id + (t.description ? ` (${t.description})` : '');
+                        swapNewSel.appendChild(opt);
+                    });
+                }
+
+                swapConfirmBtn.disabled = (teamAssignments.length === 0 || availData.transponders.length === 0);
+            });
+
+            swapModal.show();
+        });
+    });
+
+    swapConfirmBtn.addEventListener('click', function() {
+        const assignmentId = swapCurrentSel.value;
+        const newTransponderId = swapNewSel.value;
+        if (!assignmentId || !newTransponderId) return;
+
+        this.disabled = true;
+        fetch(`/api/transponder-assignment/${assignmentId}/replace/`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCookie('csrftoken')
+            },
+            body: JSON.stringify({ transponder_id: newTransponderId })
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                addSystemMessage(data.message, 'info');
+                swapModal.hide();
+            } else {
+                addSystemMessage('Swap failed: ' + (data.error || 'Unknown error'), 'danger');
+            }
+        })
+        .catch(err => {
+            addSystemMessage('Swap error: ' + err.message, 'danger');
+        })
+        .finally(() => {
+            this.disabled = false;
+        });
+    });
+    {% endif %}
 
     // Resync timer when tab regains focus
     document.addEventListener('visibilitychange', function() {
