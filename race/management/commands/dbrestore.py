@@ -1,6 +1,7 @@
 import json
 import os
 import subprocess
+import tarfile
 import tempfile
 
 from django.apps import apps
@@ -8,17 +9,18 @@ from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 from django.db import connection
 
-SEPARATOR = b"\n---GOKART_DUMP_BOUNDARY---\n"
+# Legacy format (version 1) used a custom binary boundary.
+LEGACY_SEPARATOR = b"\n---GOKART_DUMP_BOUNDARY---\n"
 
 
 class Command(BaseCommand):
     help = (
-        "Restore a PostgreSQL database from a backup created by dbbackup. "
-        "Checks schema compatibility before restoring."
+        "Restore a PostgreSQL database (and media files) from a backup "
+        "created by dbbackup.  Checks schema compatibility before restoring."
     )
 
     def add_arguments(self, parser):
-        parser.add_argument("input", help="Path to backup file (.dump)")
+        parser.add_argument("input", help="Path to backup file (.tar.gz or .dump)")
         parser.add_argument(
             "--force",
             action="store_true",
@@ -28,6 +30,11 @@ class Command(BaseCommand):
             "--info",
             action="store_true",
             help="Show backup metadata and compatibility check, then exit.",
+        )
+        parser.add_argument(
+            "--no-media",
+            action="store_true",
+            help="Skip restoring media files (database only).",
         )
 
     def _get_current_schema(self):
@@ -44,26 +51,48 @@ class Command(BaseCommand):
         return schema
 
     def _parse_backup(self, path):
-        """Split backup into metadata dict and pg_dump bytes."""
+        """Parse backup file. Returns (meta_dict, dump_bytes, tar_handle_or_None)."""
+        # Try tar.gz first (version 2+)
+        if tarfile.is_tarfile(path):
+            tar = tarfile.open(path, "r:gz")
+            try:
+                meta_member = tar.getmember("metadata.json")
+            except KeyError:
+                tar.close()
+                raise CommandError(
+                    "Archive missing metadata.json — not a valid gokart backup."
+                )
+            meta = json.loads(tar.extractfile(meta_member).read().decode("utf-8"))
+
+            try:
+                dump_member = tar.getmember("database.dump")
+            except KeyError:
+                tar.close()
+                raise CommandError("Archive missing database.dump.")
+            dump_bytes = tar.extractfile(dump_member).read()
+
+            return meta, dump_bytes, tar
+
+        # Fall back to legacy format (version 1)
         with open(path, "rb") as f:
             raw = f.read()
 
-        idx = raw.find(SEPARATOR)
+        idx = raw.find(LEGACY_SEPARATOR)
         if idx == -1:
             raise CommandError(
-                "Invalid backup file — missing metadata boundary. "
-                "Was this created by dbbackup?"
+                "Invalid backup file — not a tar.gz archive and missing "
+                "legacy metadata boundary. Was this created by dbbackup?"
             )
 
         meta_bytes = raw[:idx]
-        dump_bytes = raw[idx + len(SEPARATOR) :]
+        dump_bytes = raw[idx + len(LEGACY_SEPARATOR) :]
 
         try:
             meta = json.loads(meta_bytes.decode("utf-8"))
         except (json.JSONDecodeError, UnicodeDecodeError) as e:
             raise CommandError(f"Cannot parse backup metadata: {e}")
 
-        return meta, dump_bytes
+        return meta, dump_bytes, None
 
     def _check_compatibility(self, backup_tables, current_tables):
         """Compare schemas. Returns (ok, messages)."""
@@ -73,8 +102,8 @@ class Command(BaseCommand):
         backup_set = set(backup_tables.keys())
         current_set = set(current_tables.keys())
 
-        missing_in_backup = current_set - backup_set
         extra_in_backup = backup_set - current_set
+        missing_in_backup = current_set - backup_set
         common = backup_set & current_set
 
         if extra_in_backup:
@@ -95,8 +124,8 @@ class Command(BaseCommand):
             backup_cols = set(backup_tables[table])
             current_cols = set(current_tables[table])
 
-            missing_cols = current_cols - backup_cols
             extra_cols = backup_cols - current_cols
+            missing_cols = current_cols - backup_cols
 
             if extra_cols:
                 messages.append(
@@ -113,18 +142,48 @@ class Command(BaseCommand):
 
         return ok, messages
 
+    def _restore_media(self, tar):
+        """Extract media files from tar archive to BASE_DIR."""
+        base_dir = settings.BASE_DIR
+        count = 0
+        for member in tar.getmembers():
+            if not member.name.startswith("media/"):
+                continue
+            # media/static/person/foo → static/person/foo
+            rel_path = member.name[len("media/") :]
+            dest = os.path.join(base_dir, rel_path)
+            dest_dir = os.path.dirname(dest)
+            os.makedirs(dest_dir, exist_ok=True)
+
+            src = tar.extractfile(member)
+            if src is None:
+                continue
+            with open(dest, "wb") as f:
+                f.write(src.read())
+            count += 1
+        return count
+
     def handle(self, *args, **options):
         input_path = options["input"]
         if not os.path.isfile(input_path):
             raise CommandError(f"File not found: {input_path}")
 
-        meta, dump_bytes = self._parse_backup(input_path)
+        meta, dump_bytes, tar = self._parse_backup(input_path)
 
         # Show metadata
-        self.stdout.write(f"Backup created:  {meta.get('created', 'unknown')}")
-        self.stdout.write(f"Source database:  {meta.get('database', 'unknown')}")
-        self.stdout.write(f"Tables in backup: {len(meta.get('tables', {}))}")
-        self.stdout.write(f"Metadata version: {meta.get('version', 'unknown')}")
+        version = meta.get("version", 1)
+        self.stdout.write(f"Backup version:   {version}")
+        self.stdout.write(f"Backup created:   {meta.get('created', 'unknown')}")
+        self.stdout.write(f"Source database:   {meta.get('database', 'unknown')}")
+        self.stdout.write(f"Tables in backup:  {len(meta.get('tables', {}))}")
+
+        # Count media files in archive
+        media_file_count = 0
+        if tar:
+            media_file_count = sum(
+                1 for m in tar.getmembers() if m.name.startswith("media/")
+            )
+        self.stdout.write(f"Media files:       {media_file_count}")
 
         # Compatibility check
         backup_tables = meta.get("tables", {})
@@ -141,9 +200,13 @@ class Command(BaseCommand):
             self.stdout.write(self.style.SUCCESS("\nSchema fully compatible."))
 
         if options["info"]:
+            if tar:
+                tar.close()
             return
 
         if not ok and not options["force"]:
+            if tar:
+                tar.close()
             raise CommandError(
                 "Schema incompatibility detected. "
                 "Use --force to restore anyway, or --info to inspect."
@@ -154,7 +217,7 @@ class Command(BaseCommand):
                 self.style.WARNING("Proceeding despite incompatibilities (--force).")
             )
 
-        # Perform restore
+        # Restore database
         db = settings.DATABASES["default"]
         db_name = db["NAME"]
         db_user = db["USER"]
@@ -174,9 +237,9 @@ class Command(BaseCommand):
         if db_port:
             pg_args += ["-p", str(db_port)]
 
-        self.stdout.write(f"\nRestoring to database '{db_name}' …")
+        self.stdout.write(f"\nRestoring database '{db_name}' …")
 
-        # Write dump to temp file (pg_restore reads from file, not stdin for -Fc)
+        # Write dump to temp file (pg_restore reads from file for -Fc format)
         with tempfile.NamedTemporaryFile(suffix=".dump", delete=False) as tmp:
             tmp.write(dump_bytes)
             tmp_path = tmp.name
@@ -191,7 +254,6 @@ class Command(BaseCommand):
             # during --clean). Only report actual errors.
             if result.returncode != 0:
                 stderr = result.stderr.decode().strip()
-                # Filter out harmless "does not exist" warnings from --clean
                 error_lines = [
                     line
                     for line in stderr.splitlines()
@@ -210,4 +272,16 @@ class Command(BaseCommand):
         finally:
             os.unlink(tmp_path)
 
-        self.stdout.write(self.style.SUCCESS("Database restored successfully."))
+        self.stdout.write(self.style.SUCCESS("Database restored."))
+
+        # Restore media files
+        if tar and not options["no_media"]:
+            count = self._restore_media(tar)
+            self.stdout.write(self.style.SUCCESS(f"Restored {count} media files."))
+        elif tar and options["no_media"]:
+            self.stdout.write("Skipped media restore (--no-media).")
+
+        if tar:
+            tar.close()
+
+        self.stdout.write(self.style.SUCCESS("Restore complete."))

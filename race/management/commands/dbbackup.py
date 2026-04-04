@@ -1,19 +1,24 @@
 import datetime as dt
+import io
 import json
 import os
 import subprocess
-import tempfile
+import tarfile
 
 from django.apps import apps
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 from django.db import connection
 
+# Directories under BASE_DIR that hold uploaded media (ImageField paths).
+MEDIA_DIRS = ["static/person", "static/logos", "static/illustration"]
+
 
 class Command(BaseCommand):
     help = (
-        "Back up the PostgreSQL database to a compressed archive. "
-        "Embeds schema metadata for compatibility checks on restore."
+        "Back up the PostgreSQL database and uploaded media files to a "
+        "compressed tar archive.  Embeds schema metadata for compatibility "
+        "checks on restore."
     )
 
     def add_arguments(self, parser):
@@ -22,7 +27,7 @@ class Command(BaseCommand):
             "--output",
             help=(
                 "Output file path. Defaults to "
-                "gokart_backup_YYYYMMDD_HHMMSS.dump in the current directory."
+                "gokart_backup_YYYYMMDD_HHMMSS.tar.gz in the current directory."
             ),
         )
 
@@ -51,15 +56,16 @@ class Command(BaseCommand):
             raise CommandError("POSTGRES_DB not set — cannot back up.")
 
         timestamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
-        output = options["output"] or f"gokart_backup_{timestamp}.dump"
+        output = options["output"] or f"gokart_backup_{timestamp}.tar.gz"
 
         # Build schema fingerprint
         fingerprint = self._get_schema_fingerprint()
         meta = {
-            "version": 1,
+            "version": 2,
             "created": dt.datetime.now().isoformat(),
             "database": db_name,
             "tables": fingerprint,
+            "media_dirs": MEDIA_DIRS,
         }
 
         env = os.environ.copy()
@@ -89,21 +95,42 @@ class Command(BaseCommand):
         except subprocess.CalledProcessError as e:
             raise CommandError(f"pg_dump failed: {e.stderr.decode().strip()}")
 
-        dump_data = result.data if hasattr(result, "data") else result.stdout
+        dump_data = result.stdout
 
-        # Write combined archive: JSON metadata line + newline + pg_dump binary
-        meta_bytes = json.dumps(meta).encode("utf-8")
-        separator = b"\n---GOKART_DUMP_BOUNDARY---\n"
+        # Build tar.gz archive
+        base_dir = settings.BASE_DIR
+        media_count = 0
 
-        with open(output, "wb") as f:
-            f.write(meta_bytes)
-            f.write(separator)
-            f.write(dump_data)
+        with tarfile.open(output, "w:gz") as tar:
+            # 1. metadata.json
+            meta_bytes = json.dumps(meta, indent=2).encode("utf-8")
+            info = tarfile.TarInfo(name="metadata.json")
+            info.size = len(meta_bytes)
+            tar.addfile(info, io.BytesIO(meta_bytes))
+
+            # 2. database.dump (pg_dump custom format)
+            info = tarfile.TarInfo(name="database.dump")
+            info.size = len(dump_data)
+            tar.addfile(info, io.BytesIO(dump_data))
+
+            # 3. media files
+            for media_dir in MEDIA_DIRS:
+                full_path = os.path.join(base_dir, media_dir)
+                if not os.path.isdir(full_path):
+                    continue
+                for root, dirs, files in os.walk(full_path):
+                    for fname in files:
+                        file_path = os.path.join(root, fname)
+                        arcname = os.path.join(
+                            "media", media_dir, os.path.relpath(file_path, full_path)
+                        )
+                        tar.add(file_path, arcname=arcname)
+                        media_count += 1
 
         size_mb = os.path.getsize(output) / (1024 * 1024)
         self.stdout.write(
             self.style.SUCCESS(
                 f"Backup saved to {output} ({size_mb:.1f} MB, "
-                f"{len(fingerprint)} tables)"
+                f"{len(fingerprint)} tables, {media_count} media files)"
             )
         )
