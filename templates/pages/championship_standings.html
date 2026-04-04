@@ -1,0 +1,146 @@
+{% extends "layout/content.html" %}
+{% load round_tags %}
+
+{% block main_content %}
+<div class="container">
+    <h1>Championship Standings</h1>
+
+    <form method="get" id="champ-form">
+        <div class="form-group">
+            <label for="champ-select">Select Championship:</label>
+            <select class="form-control" id="champ-select" name="championship_id" onchange="this.form.submit()">
+                <option value="">-- Choose --</option>
+                {% for c in championships %}
+                    <option value="{{ c.id }}" {% if c.id == selected_id %}selected{% endif %}>
+                        {{ c.name }} ({{ c.start|date:"Y" }})
+                    </option>
+                {% endfor %}
+            </select>
+        </div>
+    </form>
+
+    {% if selected and standings %}
+    <div class="scoring-info mt-3 mb-2">
+        {% if selected.points_system == "DESCENDING" %}
+        <span class="badge bg-info text-dark">Most points wins</span>
+        {% else %}
+        <span class="badge bg-info text-dark">Fewest points wins</span>
+        {% endif %}
+        <span class="ms-2 text-muted-light">
+            Points: {{ selected.points_values|join:", " }}
+            {% if selected.points_system == "ASCENDING" %} (start value, +1 per position){% endif %}
+        </span>
+    </div>
+
+    <div class="table-responsive mt-3">
+        <table class="table standings-table mb-0">
+            <thead>
+                <tr class="header-standings">
+                    <th class="col-strip"></th>
+                    <th>Rank</th>
+                    <th>#</th>
+                    <th>Team</th>
+                    {% for rnd in confirmed_rounds %}
+                    <th class="round-col" title="{{ rnd.name }} — {{ rnd.start|date:'Y-m-d' }}">{{ rnd.name }}</th>
+                    {% endfor %}
+                    <th class="total-col">Total</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in standings %}
+                <tr class="{% cycle 'team-odd' 'team-even' %}">
+                    <td class="col-strip" style="background:
+                        {% if row.rank == 1 %}#ffd700
+                        {% elif row.rank == 2 %}#c0c0c0
+                        {% elif row.rank == 3 %}#cd7f32
+                        {% else %}transparent{% endif %};"></td>
+                    <td class="rank-cell">{{ row.rank }}</td>
+                    <td>{{ row.team_number }}</td>
+                    <td class="team-name-cell">
+                        {% if row.team_logo %}
+                        <img src="{{ row.team_logo.url }}" class="team-logo-sm" alt="">
+                        {% endif %}
+                        {{ row.team_name }}
+                    </td>
+                    {% for rnd in confirmed_rounds %}
+                    <td class="round-col">
+                        {% with rnd_data=row.round_points %}
+                        {% if rnd.id in rnd_data %}
+                            <span class="points-val" title="P{{ rnd_data|get_item:rnd.id|get_item:"position" }}">
+                                {{ rnd_data|get_item:rnd.id|get_item:"points" }}
+                            </span>
+                        {% else %}
+                            <span class="no-result">—</span>
+                        {% endif %}
+                        {% endwith %}
+                    </td>
+                    {% endfor %}
+                    <td class="total-col fw-bold">{{ row.total }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% elif selected %}
+    <div class="alert alert-info mt-3">No confirmed round results yet for this championship.</div>
+    {% else %}
+    <div class="alert alert-info mt-3">Select a championship to view standings.</div>
+    {% endif %}
+</div>
+{% endblock main_content %}
+
+{% block extra_js %}
+<style>
+    h1 {
+        color: #e6e6fa !important;
+        margin-bottom: 25px;
+        text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+    }
+    #champ-form label { color: #e6e6fa !important; font-weight: 500; }
+    #champ-select {
+        color: #e6e6fa !important;
+        background-color: rgba(40,40,60,0.9) !important;
+        border: 1px solid rgba(100,100,140,0.4);
+        border-radius: 4px;
+        padding: 8px 12px;
+    }
+    #champ-select option {
+        color: #e6e6fa !important;
+        background-color: #2d2d3d !important;
+    }
+
+    .scoring-info .text-muted-light { color: rgba(200,200,220,0.7); font-size: 0.85rem; }
+
+    .standings-table { background-color: rgba(40,40,50,0.85); margin: 0; }
+    .standings-table th {
+        background-color: rgba(30,30,40,0.9);
+        color: #e6e6fa !important;
+        font-weight: 600;
+        letter-spacing: 0.5px;
+        border-bottom: 2px solid rgba(80,80,100,0.6);
+        padding: 10px 15px;
+        white-space: nowrap;
+    }
+    .standings-table td {
+        color: #e6e6fa !important;
+        border-top: 1px solid rgba(80,80,100,0.3);
+        padding: 9px 15px;
+    }
+
+    .col-strip {
+        width: 8px !important; min-width: 8px !important; max-width: 8px !important;
+        padding: 0 !important; border-right: none !important;
+    }
+    .standings-table tr.team-odd  { background-color: rgba(90,50,70,0.8); }
+    .standings-table tr.team-even { background-color: rgba(50,70,100,0.8); }
+
+    .rank-cell { font-weight: 700; font-size: 1.1rem; }
+    .team-name-cell { font-weight: 600; }
+    .team-logo-sm { height: 20px; width: auto; margin-right: 6px; vertical-align: middle; }
+
+    .round-col { text-align: center; min-width: 60px; }
+    .total-col { text-align: center; min-width: 70px; font-size: 1.05rem; }
+    .points-val { cursor: default; }
+    .no-result { color: rgba(160,160,180,0.5); }
+</style>
+{% endblock %}

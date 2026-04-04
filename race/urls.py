@@ -286,6 +286,22 @@ urlpatterns = [
         views.get_available_transponders,
         name="get_available_transponders",
     ),
+    # Championship Standings
+    path(
+        "championship/standings/",
+        views.championship_standings,
+        name="championship_standings",
+    ),
+    path(
+        "api/round/<int:round_id>/confirm-results/",
+        views.confirm_round_results,
+        name="confirm_round_results",
+    ),
+    path(
+        "api/round/<int:round_id>/unconfirm-results/",
+        views.unconfirm_round_results,
+        name="unconfirm_round_results",
+    ),
     # Team Retirement
     path(
         "api/retire-team/",

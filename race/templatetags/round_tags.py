@@ -37,3 +37,11 @@ def format_time(timedelta):
 
     # Format as HH:MM:SS
     return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+
+@register.filter
+def get_item(dictionary, key):
+    """Lookup a dictionary value by key in templates."""
+    if isinstance(dictionary, dict):
+        return dictionary.get(key)
+    return None

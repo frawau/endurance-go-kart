@@ -164,10 +164,39 @@ class Championship(models.Model):
         verbose_name="Qualifying Tiebreaker",
     )
 
+    POINTS_SYSTEM_CHOICES = (
+        ("DESCENDING", "Descending (most points wins, e.g. F1)"),
+        ("ASCENDING", "Ascending (fewest points wins, e.g. Golf)"),
+    )
+    points_system = models.CharField(
+        max_length=16,
+        choices=POINTS_SYSTEM_CHOICES,
+        default="DESCENDING",
+        verbose_name="Points System",
+    )
+    points_values = models.JSONField(
+        default=list,
+        blank=True,
+        verbose_name="Points per Position",
+        help_text="Descending: list of points [25,18,15,...]. Ascending: [start_value] e.g. [0] or [1].",
+    )
+
     @property
     def ongoing(self):
         now = dt.date.today()
         return self.start <= now <= self.end
+
+    def points_for_position(self, position):
+        """Return championship points for a given finishing position (1-based)."""
+        values = self.points_values or []
+        if self.points_system == "ASCENDING":
+            start = values[0] if values else 0
+            return start + (position - 1)
+        else:
+            idx = position - 1
+            if idx < len(values):
+                return values[idx]
+            return 0
 
     class Meta:
         verbose_name = _("Championship")
@@ -278,6 +307,7 @@ class Round(models.Model):
     started = models.DateTimeField(null=True, blank=True)
     ended = models.DateTimeField(null=True, blank=True)
     post_race_check_completed = models.BooleanField(default=False)
+    results_confirmed = models.BooleanField(default=False)
     qr_fernet = models.BinaryField(
         max_length=64, default=Fernet.generate_key, editable=False
     )
@@ -2591,3 +2621,23 @@ class Logo(models.Model):
 
     def __str__(self):
         return self.name
+
+
+class RoundStanding(models.Model):
+    """Stores confirmed championship points for a team in a round."""
+
+    round = models.ForeignKey(Round, on_delete=models.CASCADE, related_name="standings")
+    team = models.ForeignKey(
+        "championship_team", on_delete=models.CASCADE, related_name="standings"
+    )
+    position = models.IntegerField()
+    points = models.DecimalField(max_digits=6, decimal_places=1)
+
+    class Meta:
+        unique_together = ("round", "team")
+        verbose_name = _("Round Standing")
+        verbose_name_plural = _("Round Standings")
+        ordering = ["round", "position"]
+
+    def __str__(self):
+        return f"P{self.position} ({self.points}pts) — {self.team} in {self.round}"

@@ -58,6 +58,7 @@ from .models import (
     RaceTransponderAssignment,
     LapCrossing,
     QualifyingKnockoutRule,
+    RoundStanding,
 )
 from .signals import race_end_requested
 from .serializers import ChangeLaneSerializer
@@ -1749,6 +1750,16 @@ def round_result(request):
                     )
     finished_teams.sort(key=lambda t: t["number"])
 
+    # Championship points confirmation context
+    can_confirm = False
+    has_points_scheme = False
+    if selected_round:
+        has_points_scheme = bool(selected_round.championship.points_values)
+        main_finished = any(
+            rd["is_finished"] and rd["race"].race_type == "MAIN" for rd in races_data
+        )
+        can_confirm = has_points_scheme and main_finished
+
     return render(
         request,
         "pages/round_result.html",
@@ -1758,6 +1769,8 @@ def round_result(request):
             "selected_round_id": int(selected_round_id) if selected_round_id else None,
             "races_data": races_data,
             "finished_teams": finished_teams,
+            "can_confirm": can_confirm,
+            "has_points_scheme": has_points_scheme,
             "organiser_logo": get_organiser_logo(selected_round),
             "sponsors_logos": get_sponsor_logos(selected_round),
         },
@@ -2359,6 +2372,140 @@ def round_penalties(request):
     return render(request, "pages/round_penalties.html", context)
 
 
+@login_required
+@user_passes_test(is_admin_user)
+@require_POST
+def confirm_round_results(request, round_id):
+    """Confirm MAIN race results and compute championship points for this round."""
+    rnd = get_object_or_404(Round, id=round_id)
+    championship = rnd.championship
+
+    main_race = rnd.races.filter(race_type="MAIN").first()
+    if not main_race or not main_race.ended:
+        return JsonResponse(
+            {"success": False, "error": "MAIN race not finished yet."}, status=400
+        )
+
+    if not championship.points_values:
+        return JsonResponse(
+            {
+                "success": False,
+                "error": "No points scheme configured for this championship.",
+            },
+            status=400,
+        )
+
+    standings = main_race.calculate_race_standings()
+    if not standings:
+        return JsonResponse(
+            {"success": False, "error": "No standings data available."}, status=400
+        )
+
+    with transaction.atomic():
+        RoundStanding.objects.filter(round=rnd).delete()
+        for entry in standings:
+            rt = (
+                round_team.objects.filter(id=entry["team_id"])
+                .select_related("team")
+                .first()
+            )
+            ct = rt.team if rt else None
+            if ct:
+                points = championship.points_for_position(entry["position"])
+                RoundStanding.objects.create(
+                    round=rnd,
+                    team=ct,
+                    position=entry["position"],
+                    points=points,
+                )
+        rnd.results_confirmed = True
+        rnd.save(update_fields=["results_confirmed"])
+
+    return JsonResponse({"success": True, "message": "Round results confirmed."})
+
+
+@login_required
+@user_passes_test(is_admin_user)
+@require_POST
+def unconfirm_round_results(request, round_id):
+    """Withdraw confirmation — removes stored standings for this round."""
+    rnd = get_object_or_404(Round, id=round_id)
+    with transaction.atomic():
+        RoundStanding.objects.filter(round=rnd).delete()
+        rnd.results_confirmed = False
+        rnd.save(update_fields=["results_confirmed"])
+    return JsonResponse({"success": True, "message": "Round results unconfirmed."})
+
+
+def championship_standings(request):
+    """Public championship standings page."""
+    championships = (
+        Championship.objects.filter(points_values__isnull=False)
+        .exclude(points_values=[])
+        .order_by("-start")
+    )
+
+    selected_id = request.GET.get("championship_id")
+    if not selected_id and championships.exists():
+        today = dt.date.today()
+        ongoing = championships.filter(start__lte=today, end__gte=today).first()
+        selected_id = (ongoing or championships.first()).id
+
+    selected = None
+    standings_table = []
+    confirmed_rounds = []
+
+    if selected_id:
+        selected = get_object_or_404(Championship, id=int(selected_id))
+        confirmed_rounds = list(
+            Round.objects.filter(
+                championship=selected, results_confirmed=True
+            ).order_by("start")
+        )
+        teams = championship_team.objects.filter(championship=selected).select_related(
+            "team"
+        )
+
+        for ct in teams:
+            row = {
+                "team_number": ct.number,
+                "team_name": ct.team.name,
+                "team_logo": ct.team.logo if ct.team.logo else None,
+                "round_points": {},
+                "total": 0,
+            }
+            for rs in RoundStanding.objects.filter(round__in=confirmed_rounds, team=ct):
+                row["round_points"][rs.round_id] = {
+                    "position": rs.position,
+                    "points": float(rs.points),
+                }
+                row["total"] += float(rs.points)
+            standings_table.append(row)
+
+        reverse_sort = selected.points_system == "DESCENDING"
+        standings_table.sort(key=lambda r: r["total"], reverse=reverse_sort)
+        for idx, row in enumerate(standings_table, 1):
+            row["rank"] = idx
+
+    return render(
+        request,
+        "pages/championship_standings.html",
+        {
+            "championships": championships,
+            "selected": selected,
+            "selected_id": int(selected_id) if selected_id else None,
+            "standings": standings_table,
+            "confirmed_rounds": confirmed_rounds,
+            "organiser_logo": get_organiser_logo(
+                confirmed_rounds[0] if confirmed_rounds else None
+            ),
+            "sponsors_logos": get_sponsor_logos(
+                confirmed_rounds[0] if confirmed_rounds else None
+            ),
+        },
+    )
+
+
 def all_drivers_view(request):
     # Get all championships with end date after today
     today = dt.date.today()
@@ -2660,6 +2807,21 @@ def edit_championship_view(request):
                     # Update start and end dates
                     championship.start = dt.date(year, 1, 1)
                     championship.end = dt.date(year, 12, 31)
+
+                # Update points system
+                points_system = request.POST.get("points_system", "DESCENDING")
+                championship.points_system = points_system
+                if points_system == "ASCENDING":
+                    start_val = int(request.POST.get("points_start", 0))
+                    championship.points_values = [start_val]
+                else:
+                    raw = request.POST.get("points_values", "")
+                    if raw.strip():
+                        championship.points_values = [
+                            int(v.strip()) for v in raw.split(",") if v.strip()
+                        ]
+                    else:
+                        championship.points_values = []
 
                 championship.save()
 
