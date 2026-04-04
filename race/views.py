@@ -4974,10 +4974,8 @@ def lock_transponder_assignments(request, race_id):
                 status=400,
             )
 
-        # Mark all as confirmed and lock the race
+        # Mark all as confirmed
         RaceTransponderAssignment.objects.filter(race=race).update(confirmed=True)
-        race.grid_locked = True
-        race.save(update_fields=["grid_locked"])
 
         return JsonResponse(
             {
