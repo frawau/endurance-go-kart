@@ -2478,8 +2478,13 @@ def championship_standings(request):
                 championship=selected, results_confirmed=True
             ).order_by("start")
         )
-        teams = championship_team.objects.filter(championship=selected).select_related(
-            "team"
+        teams = (
+            championship_team.objects.filter(
+                championship=selected,
+                standings__round__in=confirmed_rounds,
+            )
+            .select_related("team")
+            .distinct()
         )
 
         for ct in teams:
