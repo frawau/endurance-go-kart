@@ -20,6 +20,7 @@ from django.db.models import Count
 # Arguments: round_id (int)
 race_end_requested = Signal()
 
+
 # Function to update all connected clients
 def update_empty_teams(round_id):
     # Get the channel layer
@@ -124,10 +125,13 @@ def _build_round_update_payload(cround):
     is_paused = cround.round_pause_set.filter(end__isnull=True).exists()
 
     if active:
-        remaining = round(
-            (active.duration - active.time_elapsed).total_seconds()
-            if active.started
-            else active.duration.total_seconds()
+        remaining = max(
+            0,
+            round(
+                (active.duration - active.time_elapsed).total_seconds()
+                if active.started
+                else active.duration.total_seconds()
+            ),
         )
         started = active.started is not None
         ready = active.ready

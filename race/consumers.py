@@ -1345,8 +1345,8 @@ class TimingConsumer(AsyncWebsocketConsumer):
 
             # Compute server-authoritative remaining time for client clock sync
             if race.started and not race.ended:
-                remaining_seconds = round(
-                    (race.duration - race.time_elapsed).total_seconds()
+                remaining_seconds = max(
+                    0, round((race.duration - race.time_elapsed).total_seconds())
                 )
             else:
                 remaining_seconds = None
@@ -1579,7 +1579,9 @@ class LeaderboardConsumer(AsyncWebsocketConsumer):
             standings = race.calculate_race_standings()
             remaining = None
             if race.started and not race.ended:
-                remaining = round((race.duration - race.time_elapsed).total_seconds())
+                remaining = max(
+                    0, round((race.duration - race.time_elapsed).total_seconds())
+                )
             return standings, remaining
         except Race.DoesNotExist:
             return [], None
