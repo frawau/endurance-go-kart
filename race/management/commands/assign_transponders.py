@@ -21,7 +21,9 @@ class Command(BaseCommand):
             hour=0, minute=0, second=0
         )
         return (
-            Round.objects.filter(start__gte=yesterday_start).order_by("start").first()
+            Round.objects.filter(start__gte=yesterday_start, ended__isnull=True)
+            .order_by("start")
+            .first()
         )
 
     def add_arguments(self, parser):
