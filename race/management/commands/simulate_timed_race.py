@@ -48,7 +48,6 @@ from race.models import (
 )
 from race.utils import dataencode
 
-
 # ── Coordinator ──────────────────────────────────────────────────────────────
 
 
@@ -142,11 +141,21 @@ class Command(BaseCommand):
             help="Specific Race.id to simulate (default: first unstarted race in active round)",
         )
         parser.add_argument("--verbose", action="store_true")
+        parser.add_argument(
+            "--no-laps",
+            action="store_true",
+            help="Disable decoder agent (no transponder passings) and force 1x speed. "
+            "Use when a real timing station is connected.",
+        )
 
     # ── Entry point ───────────────────────────────────────────────────────────
 
     def handle(self, *args, **options):
         self.verbose = options["verbose"]
+        self.no_laps = options["no_laps"]
+        if self.no_laps:
+            options["speed"] = 1.0
+            self.log("--no-laps: decoder agent disabled, speed forced to 1x")
         self.speed = options["speed"]
 
         cround = self._find_round()
@@ -170,13 +179,21 @@ class Command(BaseCommand):
                 "Switch the race to IMMEDIATE mode."
             )
 
-        transponder_map, team_transponder = self._build_transponder_map(active_race)
-        if not transponder_map:
-            self.log("No transponder assignments found — creating random assignments…")
-            self._create_random_transponder_assignments(cround, active_race)
+        if self.no_laps:
+            transponder_map, team_transponder = {}, {}
+            self.log("Transponder passings disabled (--no-laps)")
+        else:
             transponder_map, team_transponder = self._build_transponder_map(active_race)
-        self.log(f"Transponder assignments: {len(transponder_map)} teams")
-        self._ensure_assignments_confirmed(active_race)
+            if not transponder_map:
+                self.log(
+                    "No transponder assignments found — creating random assignments…"
+                )
+                self._create_random_transponder_assignments(cround, active_race)
+                transponder_map, team_transponder = self._build_transponder_map(
+                    active_race
+                )
+            self.log(f"Transponder assignments: {len(transponder_map)} teams")
+            self._ensure_assignments_confirmed(active_race)
 
         queue_client, change_client = self._setup_scanner_clients()
         self._register_first_drivers(cround, active_race)
@@ -203,13 +220,15 @@ class Command(BaseCommand):
     ):
         from core.asgi import application  # imported here to avoid Django setup races
 
-        await asyncio.gather(
+        agents = [
             self._director_agent(coord, cround, active_race, options),
-            self._decoder_agent(coord, active_race, options, application),
             self._pit_lane_agent(
                 coord, cround, active_race, queue_client, change_client, options
             ),
-        )
+        ]
+        if not self.no_laps:
+            agents.append(self._decoder_agent(coord, active_race, options, application))
+        await asyncio.gather(*agents)
 
     # ── Director agent ────────────────────────────────────────────────────────
 
