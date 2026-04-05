@@ -228,7 +228,9 @@ class Command(BaseCommand):
             ),
         ]
         if self.no_laps:
-            agents.append(self._stopandgo_agent(coord, options, application))
+            agents.append(
+                self._stopandgo_agent(coord, active_race, options, application)
+            )
         else:
             agents.append(self._decoder_agent(coord, active_race, options, application))
         await asyncio.gather(*agents)
@@ -428,65 +430,115 @@ class Command(BaseCommand):
 
     # ── Stop & Go station agent ───────────────────────────────────────────────
 
-    async def _stopandgo_agent(self, coord, options, application):
-        """Simulate a S&G station: receive penalty_required, wait, send penalty_served."""
+    async def _stopandgo_agent(self, coord, active_race, options, application):
+        """Simulate a S&G station driven by real crossing data from the leaderboard."""
         hmac_secret = settings.STOPANDGO_HMAC_SECRET
-        avg_lap = options["avg_lap"]
 
-        communicator = WebsocketCommunicator(application, "/ws/stopandgo/")
-        connected, _ = await communicator.connect()
-        if not connected:
-            self.log("[S&G] Failed to connect — agent exiting")
+        # Connect to the S&G consumer (station role)
+        sg_comm = WebsocketCommunicator(application, "/ws/stopandgo/")
+        sg_ok, _ = await sg_comm.connect()
+        if not sg_ok:
+            self.log("[S&G] Failed to connect to stopandgo WS — agent exiting")
             return
-        self.log("[S&G] Station connected")
+
+        # Connect to the leaderboard to observe crossings
+        race_id = active_race.id
+        lb_comm = WebsocketCommunicator(application, f"/ws/leaderboard/{race_id}/")
+        lb_ok, _ = await lb_comm.connect()
+        if not lb_ok:
+            self.log("[S&G] Failed to connect to leaderboard WS — agent exiting")
+            await sg_comm.disconnect()
+            return
+        # Drain the initial standings_update
+        try:
+            await asyncio.wait_for(lb_comm.receive_from(), timeout=3.0)
+        except asyncio.TimeoutError:
+            pass
+
+        self.log("[S&G] Station connected (listening for crossings)")
+
+        # State: the penalty currently being tracked
+        pending_team = None  # team number waiting to pit
+        pending_duration = None
+        crossings_needed = 0  # how many more crossings before pit entry
+        serving = False
 
         try:
             while not coord.all_done.is_set():
+                # ── Poll S&G commands (penalty_required from consumer) ──
                 try:
-                    raw = await asyncio.wait_for(
-                        communicator.receive_from(), timeout=2.0
-                    )
+                    raw = await asyncio.wait_for(sg_comm.receive_from(), timeout=0.1)
+                    msg = json.loads(raw)
+                    if (
+                        msg.get("type") == "command"
+                        and msg.get("command") == "penalty_required"
+                        and pending_team is None
+                    ):
+                        pending_team = msg["team"]
+                        pending_duration = msg["duration"]
+                        crossings_needed = random.randint(1, 3)
+                        serving = False
+                        self.log(
+                            f"[S&G] Penalty for team {pending_team}: {pending_duration}s "
+                            f"— waiting for {crossings_needed} crossing(s)"
+                        )
                 except asyncio.TimeoutError:
-                    continue
+                    pass
 
-                msg = json.loads(raw)
-                msg_type = msg.get("type")
-                command = msg.get("command")
+                # ── Poll leaderboard for crossings ──
+                try:
+                    raw = await asyncio.wait_for(lb_comm.receive_from(), timeout=0.5)
+                    if pending_team is not None and not serving:
+                        msg = json.loads(raw)
+                        if (
+                            msg.get("type") == "standings_update"
+                            and msg.get("flash_team_number") == pending_team
+                        ):
+                            crossings_needed -= 1
+                            if crossings_needed <= 0:
+                                # Team arrives at S&G box ~10s after crossing
+                                pit_delay = random.uniform(5.0, 15.0)
+                                self.log(
+                                    f"[S&G] Team {pending_team} last crossing before pit — "
+                                    f"arriving in ~{pit_delay:.0f}s"
+                                )
+                                serving = True
+                                await asyncio.sleep(pit_delay)
 
-                if msg_type == "command" and command == "penalty_required":
-                    team = msg["team"]
-                    duration = msg["duration"]
-                    # Simulate delay: team finishes 1-3 more laps then comes to S&G box
-                    laps_before_pit = random.randint(1, 3)
-                    delay = laps_before_pit * avg_lap + random.uniform(5.0, 15.0)
-                    self.log(
-                        f"[S&G] Penalty for team {team}: {duration}s — "
-                        f"arriving in ~{delay:.0f}s ({laps_before_pit} laps + pit entry)"
-                    )
-                    await asyncio.sleep(delay)
+                                # Serve the countdown
+                                self.log(
+                                    f"[S&G] Team {pending_team} serving "
+                                    f"{pending_duration}s Stop & Go"
+                                )
+                                await asyncio.sleep(float(pending_duration))
 
-                    # Simulate countdown
-                    self.log(f"[S&G] Team {team} serving {duration}s Stop & Go")
-                    await asyncio.sleep(float(duration))
+                                # Send penalty_served
+                                response = {
+                                    "type": "response",
+                                    "response": "penalty_served",
+                                    "team": pending_team,
+                                    "timestamp": dt.datetime.now().isoformat(),
+                                }
+                                signed = _sign(response, hmac_secret)
+                                await sg_comm.send_to(json.dumps(signed))
+                                self.log(f"[S&G] Team {pending_team} penalty served")
 
-                    # Send penalty_served response (signed like the real station)
-                    response = {
-                        "type": "response",
-                        "response": "penalty_served",
-                        "team": team,
-                        "timestamp": dt.datetime.now().isoformat(),
-                    }
-                    signed = _sign(response, hmac_secret)
-                    await communicator.send_to(json.dumps(signed))
-                    self.log(f"[S&G] Team {team} penalty served")
+                                # Wait for acknowledgment
+                                try:
+                                    await asyncio.wait_for(
+                                        sg_comm.receive_from(), timeout=5.0
+                                    )
+                                except asyncio.TimeoutError:
+                                    pass
 
-                    # Wait for acknowledgment (non-blocking drain)
-                    try:
-                        await asyncio.wait_for(communicator.receive_from(), timeout=5.0)
-                    except asyncio.TimeoutError:
-                        pass
+                                pending_team = None
+                                pending_duration = None
+                                serving = False
+                except asyncio.TimeoutError:
+                    pass
         finally:
-            await communicator.disconnect()
+            await lb_comm.disconnect()
+            await sg_comm.disconnect()
             self.log("[S&G] Station disconnected")
 
     # ── Decoder agent ─────────────────────────────────────────────────────────
