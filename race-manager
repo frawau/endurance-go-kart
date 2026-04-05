@@ -447,7 +447,7 @@ configure_stations() {
         missing=1
     fi
 
-    # Stop-and-go station
+    # Stop-and-go station (always remote — derive port/secure from SSL_MODE)
     if [ -f "$stopandgo_toml" ]; then
         if [ -n "${APP_HOSTNAME:-}" ]; then
             sed -i "s|^server = .*|server = \"${APP_HOSTNAME}\"|" "$stopandgo_toml"
@@ -455,16 +455,24 @@ configure_stations() {
         if [ -n "${STOPANDGO_HMAC_SECRET:-}" ]; then
             sed -i "s|^hmac_secret = .*|hmac_secret = \"${STOPANDGO_HMAC_SECRET}\"|" "$stopandgo_toml"
         fi
-        if [ -n "${STOPANDGO_PORT:-}" ]; then
-            sed -i "s|^port = .*|port = ${STOPANDGO_PORT}|" "$stopandgo_toml"
+        # Derive port and secure from SSL_MODE unless explicitly overridden
+        local sg_port="${STOPANDGO_PORT:-}"
+        local sg_secure="${STOPANDGO_SECURE:-}"
+        if [ -z "$sg_port" ] || [ -z "$sg_secure" ]; then
+            if [ "${SSL_MODE:-none}" = "none" ]; then
+                sg_port="${sg_port:-${APP_PORT:-5085}}"
+                sg_secure="${sg_secure:-false}"
+            else
+                sg_port="${sg_port:-443}"
+                sg_secure="${sg_secure:-true}"
+            fi
         fi
-        if [ -n "${STOPANDGO_SECURE:-}" ]; then
-            sed -i "s|^secure = .*|secure = ${STOPANDGO_SECURE}|" "$stopandgo_toml"
-        fi
+        sed -i "s|^port = .*|port = ${sg_port}|" "$stopandgo_toml"
+        sed -i "s|^secure = .*|secure = ${sg_secure}|" "$stopandgo_toml"
         if [ -n "${STOPANDGO_LOG_LEVEL:-}" ]; then
             sed -i "s|^level = .*|level = \"${STOPANDGO_LOG_LEVEL}\"|" "$stopandgo_toml"
         fi
-        log_success "Updated $stopandgo_toml"
+        log_success "Updated $stopandgo_toml (port=${sg_port}, secure=${sg_secure})"
     else
         log_warning "Stop-and-go config not found at $stopandgo_toml"
     fi
