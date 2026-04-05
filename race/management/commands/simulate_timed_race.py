@@ -497,7 +497,7 @@ class Command(BaseCommand):
                             crossings_needed -= 1
                             if crossings_needed <= 0:
                                 # Team arrives at S&G box ~10s after crossing
-                                pit_delay = random.uniform(5.0, 15.0)
+                                pit_delay = random.uniform(8.0, 12.0)
                                 self.log(
                                     f"[S&G] Team {pending_team} last crossing before pit — "
                                     f"arriving in ~{pit_delay:.0f}s"
