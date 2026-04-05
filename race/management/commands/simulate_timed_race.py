@@ -37,6 +37,7 @@ from rest_framework.test import APIClient
 
 from race.models import (
     ChampionshipPenalty,
+    PenaltyQueue,
     Race,
     RaceTransponderAssignment,
     Round,
@@ -226,7 +227,9 @@ class Command(BaseCommand):
                 coord, cround, active_race, queue_client, change_client, options
             ),
         ]
-        if not self.no_laps:
+        if self.no_laps:
+            agents.append(self._stopandgo_agent(coord, options, application))
+        else:
             agents.append(self._decoder_agent(coord, active_race, options, application))
         await asyncio.gather(*agents)
 
@@ -375,14 +378,17 @@ class Command(BaseCommand):
                 f"[Director] Penalty: {penalty.penalty.name} → team {team.number}"
                 + (f" (victim: {victim.number})" if victim else "")
             )
-            # For S&G/self-S&G: suppress crossings then auto-serve
+            # For S&G/self-S&G: queue or auto-serve
             if penalty.sanction in ("S", "D"):
-                stop_wall = float(penalty.value) / speed
-                coord.stopped_teams[team.id] = loop.time() + stop_wall
-                # Schedule auto-serve
-                asyncio.run_coroutine_threadsafe(
-                    self._serve_penalty_after(rp.id, stop_wall), loop
-                )
+                if self.no_laps:
+                    # Queue through proper PenaltyQueue → S&G station flow
+                    self._queue_penalty(cround, rp, team)
+                else:
+                    stop_wall = float(penalty.value) / speed
+                    coord.stopped_teams[team.id] = loop.time() + stop_wall
+                    asyncio.run_coroutine_threadsafe(
+                        self._serve_penalty_after(rp.id, stop_wall), loop
+                    )
 
     async def _serve_penalty_after(self, penalty_id, delay_wall):
         await asyncio.sleep(delay_wall)
@@ -396,6 +402,92 @@ class Command(BaseCommand):
             rp.save()
         except RoundPenalty.DoesNotExist:
             pass
+
+    def _queue_penalty(self, cround, rp, team):
+        """Create PenaltyQueue entry and trigger S&G station via channel layer."""
+        from channels.layers import get_channel_layer
+        from asgiref.sync import async_to_sync
+
+        was_empty = not PenaltyQueue.objects.filter(
+            round_penalty__round_id=cround.id
+        ).exists()
+        PenaltyQueue.objects.create(round_penalty=rp, timestamp=dt.datetime.now())
+        self.log(f"[Director] Queued S&G for team {team.number} (value={rp.value}s)")
+
+        if was_empty:
+            channel_layer = get_channel_layer()
+            async_to_sync(channel_layer.group_send)(
+                "stopandgo",
+                {
+                    "type": "penalty_required",
+                    "team": team.team.number,
+                    "duration": rp.value,
+                    "penalty_id": rp.id,
+                },
+            )
+
+    # ── Stop & Go station agent ───────────────────────────────────────────────
+
+    async def _stopandgo_agent(self, coord, options, application):
+        """Simulate a S&G station: receive penalty_required, wait, send penalty_served."""
+        hmac_secret = settings.STOPANDGO_HMAC_SECRET
+        avg_lap = options["avg_lap"]
+
+        communicator = WebsocketCommunicator(application, "/ws/stopandgo/")
+        connected, _ = await communicator.connect()
+        if not connected:
+            self.log("[S&G] Failed to connect — agent exiting")
+            return
+        self.log("[S&G] Station connected")
+
+        try:
+            while not coord.all_done.is_set():
+                try:
+                    raw = await asyncio.wait_for(
+                        communicator.receive_from(), timeout=2.0
+                    )
+                except asyncio.TimeoutError:
+                    continue
+
+                msg = json.loads(raw)
+                msg_type = msg.get("type")
+                command = msg.get("command")
+
+                if msg_type == "command" and command == "penalty_required":
+                    team = msg["team"]
+                    duration = msg["duration"]
+                    # Simulate delay: team finishes 1-3 more laps then comes to S&G box
+                    laps_before_pit = random.randint(1, 3)
+                    delay = laps_before_pit * avg_lap + random.uniform(5.0, 15.0)
+                    self.log(
+                        f"[S&G] Penalty for team {team}: {duration}s — "
+                        f"arriving in ~{delay:.0f}s ({laps_before_pit} laps + pit entry)"
+                    )
+                    await asyncio.sleep(delay)
+
+                    # Simulate countdown
+                    self.log(f"[S&G] Team {team} serving {duration}s Stop & Go")
+                    await asyncio.sleep(float(duration))
+
+                    # Send penalty_served response (signed like the real station)
+                    response = {
+                        "type": "response",
+                        "response": "penalty_served",
+                        "team": team,
+                        "timestamp": dt.datetime.now().isoformat(),
+                    }
+                    signed = _sign(response, hmac_secret)
+                    await communicator.send_to(json.dumps(signed))
+                    self.log(f"[S&G] Team {team} penalty served")
+
+                    # Wait for acknowledgment (non-blocking drain)
+                    try:
+                        await asyncio.wait_for(communicator.receive_from(), timeout=5.0)
+                    except asyncio.TimeoutError:
+                        pass
+        finally:
+            await communicator.disconnect()
+            self.log("[S&G] Station disconnected")
 
     # ── Decoder agent ─────────────────────────────────────────────────────────
 
