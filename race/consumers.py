@@ -1436,9 +1436,12 @@ class TimingConsumer(AsyncWebsocketConsumer):
         """
         Estimate how many laps a crossing represents.
         Returns (suggested, max) where:
-          suggested = round(lap_time / median)
-          max       = int(lap_time / median) + 1  (physical upper bound)
+          suggested = round(effective_time / median)
+          max       = int(effective_time / median) + 1  (physical upper bound)
         Both are >= 1; suggested >= 2 means suspicious.
+
+        If a penalty was served or a driver change occurred during this lap,
+        the extra time is subtracted before computing the ratio.
         """
         try:
             filters = {
@@ -1462,6 +1465,41 @@ class TimingConsumer(AsyncWebsocketConsumer):
                 return 1, 1
 
             lap_secs = lap_time.total_seconds()
+
+            # Subtract time from events that legitimately extend this lap
+            if team:
+                last_crossing = (
+                    LapCrossing.objects.filter(race=race, team=team, is_valid=True)
+                    .order_by("-crossing_time")
+                    .first()
+                )
+                if last_crossing:
+                    window_start = last_crossing.crossing_time
+                    window_end = window_start + lap_time
+
+                    # Penalty served during this lap
+                    served_penalties = RoundPenalty.objects.filter(
+                        round=race.round,
+                        offender=team,
+                        served__gte=window_start,
+                        served__lte=window_end,
+                    )
+                    for rp in served_penalties:
+                        lap_secs -= float(rp.value)
+
+                    # Driver change during this lap (session ended = old driver out)
+                    changes = Session.objects.filter(
+                        driver__team=team,
+                        race=race,
+                        end__gte=window_start,
+                        end__lte=window_end,
+                    ).count()
+                    if changes > 0:
+                        # Allow ~30s per driver change
+                        lap_secs -= changes * 30.0
+
+                    lap_secs = max(lap_secs, 0)
+
             suggested = max(1, round(lap_secs / median_time))
             max_count = int(lap_secs // median_time) + 1
             return suggested, max_count
