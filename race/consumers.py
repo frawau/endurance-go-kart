@@ -1466,8 +1466,9 @@ class TimingConsumer(AsyncWebsocketConsumer):
 
             lap_secs = lap_time.total_seconds()
 
-            # Subtract time from events that legitimately extend this lap
-            # Window: from previous crossing to this crossing
+            # Build the threshold: 1.9x median + time for known events
+            # that legitimately extend this lap
+            event_extra = 0.0
             if team and crossing_time:
                 window_start = crossing_time - lap_time
                 window_end = crossing_time
@@ -1481,7 +1482,7 @@ class TimingConsumer(AsyncWebsocketConsumer):
                 )
                 for rp in served_penalties:
                     # Penalty duration + 10s for slowdown/speedup
-                    lap_secs -= float(rp.value) + 10.0
+                    event_extra += float(rp.value) + 10.0
 
                 # Driver change during this lap (session ended = old driver out)
                 changes = Session.objects.filter(
@@ -1491,14 +1492,11 @@ class TimingConsumer(AsyncWebsocketConsumer):
                     end__lte=window_end,
                 ).count()
                 if changes > 0:
-                    # Allow ~30s per driver change
-                    lap_secs -= changes * 30.0
+                    event_extra += changes * 30.0
 
-                lap_secs = max(lap_secs, 0)
-
-            # Only flag as suspicious if lap exceeds 1.9x the median
-            # (allows for driver skill variation and minor delays)
-            if lap_secs <= median_time * 1.9:
+            # Only flag as suspicious if lap exceeds threshold
+            threshold = median_time * 1.9 + event_extra
+            if lap_secs <= threshold:
                 return 1, 1
             suggested = max(2, round(lap_secs / median_time))
             max_count = int(lap_secs // median_time) + 1
