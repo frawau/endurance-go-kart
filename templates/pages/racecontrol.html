@@ -474,7 +474,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     // Handle lap updates — never affect button/badge state
                     if (data.type === 'race_lap_update') {
                         if (data.is_suspicious && data.crossing_id) {
-                            showSuspiciousLapAlert(data.team_number, data.lap_number, data.crossing_id, data.suggested_split, data.max_split);
+                            showSuspiciousLapAlert(data.team_number, data.lap_number, data.crossing_id, data.suggested_split, data.max_split, data.lap_time);
                         }
                         // Sync countdown timer from server on every crossing
                         if (data.remaining_seconds !== undefined && data.remaining_seconds !== null) {

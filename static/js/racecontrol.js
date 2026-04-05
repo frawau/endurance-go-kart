@@ -205,7 +205,7 @@ function addSystemMessage(message, tag) {
  * Show a persistent warning alert for a suspicious (possibly double) lap.
  * The race director can split the lap at the midpoint or dismiss the alert.
  */
-function showSuspiciousLapAlert(teamNumber, lapNumber, crossingId, suggestedSplit, maxSplit) {
+function showSuspiciousLapAlert(teamNumber, lapNumber, crossingId, suggestedSplit, maxSplit, lapTime) {
   const alertId = `suspicious-lap-${crossingId}`;
   if (document.getElementById(alertId)) return; // already shown
 
@@ -216,13 +216,14 @@ function showSuspiciousLapAlert(teamNumber, lapNumber, crossingId, suggestedSpli
   const max = maxSplit && maxSplit > 1 ? maxSplit : count;
   const countId = `split-count-${crossingId}`;
   const maxAttr = `data-max="${max}"`;
+  const timeStr = lapTime ? ` (${lapTime})` : '';
 
   const alertDiv = document.createElement("div");
   alertDiv.id = alertId;
   alertDiv.className = "alert alert-warning alert-dismissible fade show m-2";
   alertDiv.setAttribute("role", "alert");
   alertDiv.innerHTML =
-    `<strong>Suspicious lap:</strong> Team #${teamNumber}, Lap ${lapNumber} — ` +
+    `<strong>Suspicious lap:</strong> Team #${teamNumber}, Lap ${lapNumber}${timeStr} — ` +
     `possible missed crossing(s). ` +
     `<span class="ms-2">Split into: ` +
     `<button class="btn btn-sm btn-outline-secondary py-0" onclick="adjustSplitCount('${countId}', -1)">−</button>` +
