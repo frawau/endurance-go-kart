@@ -1286,7 +1286,7 @@ class TimingConsumer(AsyncWebsocketConsumer):
             max_split = 1
             if lap_time and should_count:
                 suggested_split, max_split = self.estimate_lap_count(
-                    race, lap_time, team
+                    race, lap_time, team, crossing_time
                 )
                 if suggested_split > 1:
                     crossing.is_suspicious = True
@@ -1432,7 +1432,7 @@ class TimingConsumer(AsyncWebsocketConsumer):
             print(f"Timing: Error handling lap crossing: {e}")
             return None
 
-    def estimate_lap_count(self, race, lap_time, team=None):
+    def estimate_lap_count(self, race, lap_time, team=None, crossing_time=None):
         """
         Estimate how many laps a crossing represents.
         Returns (suggested, max) where:
@@ -1467,39 +1467,34 @@ class TimingConsumer(AsyncWebsocketConsumer):
             lap_secs = lap_time.total_seconds()
 
             # Subtract time from events that legitimately extend this lap
-            if team:
-                last_crossing = (
-                    LapCrossing.objects.filter(race=race, team=team, is_valid=True)
-                    .order_by("-crossing_time")
-                    .first()
+            # Window: from previous crossing to this crossing
+            if team and crossing_time:
+                window_start = crossing_time - lap_time
+                window_end = crossing_time
+
+                # Penalty served during this lap
+                served_penalties = RoundPenalty.objects.filter(
+                    round=race.round,
+                    offender=team,
+                    served__gte=window_start,
+                    served__lte=window_end,
                 )
-                if last_crossing:
-                    window_start = last_crossing.crossing_time
-                    window_end = window_start + lap_time
+                for rp in served_penalties:
+                    # Penalty duration + 10s for slowdown/speedup
+                    lap_secs -= float(rp.value) + 10.0
 
-                    # Penalty served during this lap
-                    served_penalties = RoundPenalty.objects.filter(
-                        round=race.round,
-                        offender=team,
-                        served__gte=window_start,
-                        served__lte=window_end,
-                    )
-                    for rp in served_penalties:
-                        # Penalty duration + 10s for slowdown/speedup
-                        lap_secs -= float(rp.value) + 10.0
+                # Driver change during this lap (session ended = old driver out)
+                changes = Session.objects.filter(
+                    driver__team=team,
+                    race=race,
+                    end__gte=window_start,
+                    end__lte=window_end,
+                ).count()
+                if changes > 0:
+                    # Allow ~30s per driver change
+                    lap_secs -= changes * 30.0
 
-                    # Driver change during this lap (session ended = old driver out)
-                    changes = Session.objects.filter(
-                        driver__team=team,
-                        race=race,
-                        end__gte=window_start,
-                        end__lte=window_end,
-                    ).count()
-                    if changes > 0:
-                        # Allow ~30s per driver change
-                        lap_secs -= changes * 30.0
-
-                    lap_secs = max(lap_secs, 0)
+                lap_secs = max(lap_secs, 0)
 
             suggested = max(1, round(lap_secs / median_time))
             max_count = int(lap_secs // median_time) + 1
