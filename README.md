@@ -675,6 +675,69 @@ python manage.py initialisedb
 - **Use `./race-manager manage`** for easiest execution
 - **Use `generate_test_data`** for easiest setup - it runs all commands in the correct order
 
+### Race Simulation (`simulate_timed_race`)
+
+A full end-to-end race simulator that exercises the entire stack. It runs three
+(or four) concurrent agents that manage the race lifecycle, transponder
+crossings, driver changes and penalties.
+
+#### Standard mode (fully simulated)
+
+```bash
+./race-manager manage simulate_timed_race
+./race-manager manage simulate_timed_race --speed 20 --avg-lap 60
+```
+
+Runs at accelerated speed (default 10x). The simulator handles everything:
+transponder crossings via the timing WebSocket, driver changes via the HTTP
+API, and penalties with automatic serving. It will auto-create transponder
+assignments if none exist.
+
+**Prerequisites:** a round with teams, drivers (weight > 10 kg) and team
+members assigned. The simulator takes care of pre-race check, driver
+registration, grid and transponder setup.
+
+| Option | Default | Description |
+|---|---|---|
+| `--speed` | 10.0 | Race-seconds per wall-second |
+| `--avg-lap` | 90.0 | Average lap time in race-seconds |
+| `--lap-variance` | 5.0 | Lap time variability |
+| `--penalty-prob` | 0.1 | Penalty probability per team per race-hour |
+| `--timing-mode` | duration | Raw timing value mode (`interval`, `duration`, `time_of_day`, `own_time`) |
+| `--race-id` | (auto) | Specific Race.id to simulate |
+| `--verbose` | off | Detailed logging |
+
+#### No-laps mode (with a real timing station)
+
+```bash
+./race-manager manage simulate_timed_race --no-laps
+```
+
+Use this when a **real timing station** (or the timing station with the
+simulator plugin) is handling transponder crossings. The `--no-laps` flag:
+
+- Forces speed to **1x** (real time)
+- Disables the decoder agent (no simulated transponder crossings)
+- Enables a **simulated Stop & Go station** that listens for actual crossings
+  via the leaderboard WebSocket and serves penalties realistically (1-3
+  crossings after the penalty is given, then 8-12 s pit entry, then the
+  countdown)
+
+The simulator still manages:
+- Race lifecycle (pre-race check, start, end)
+- Initial driver registration (one random driver per team)
+- Driver changes throughout the race
+- Penalty creation and queueing (through the proper `PenaltyQueue` flow)
+
+**Prerequisites (must be done via the UI before running):**
+
+1. **Teams and members** assigned to the round with driver weights > 10 kg
+2. **Transponder assignments** confirmed (the real timing station needs them)
+3. **Grid positions** set (via Grid Management or auto-assign from qualifying)
+4. **Timing station** running and connected
+
+The simulator handles pre-race check and driver registration automatically.
+
 ## 📊 Features Not Yet Implemented
 
 - **Live Timing Displays**: Real-time lap time leaderboards
