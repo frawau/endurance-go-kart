@@ -727,6 +727,26 @@ class Command(BaseCommand):
         avg_lap = options["avg_lap"]
         loop = asyncio.get_event_loop()
 
+        # In --no-laps mode, connect to leaderboard to count real crossings
+        lb_comm = None
+        crossing_counts = {}  # team_number → crossings since entering lane
+        if self.no_laps:
+            from core.asgi import application
+
+            lb_comm = WebsocketCommunicator(
+                application, f"/ws/leaderboard/{active_race.id}/"
+            )
+            lb_ok, _ = await lb_comm.connect()
+            if not lb_ok:
+                self.log("[PitLane] WARNING: could not connect to leaderboard WS")
+                lb_comm = None
+            else:
+                # Drain initial standings_update
+                try:
+                    await asyncio.wait_for(lb_comm.receive_from(), timeout=3.0)
+                except asyncio.TimeoutError:
+                    pass
+
         await coord.race_started.wait()
         race_start_wall = loop.time()
 
@@ -778,6 +798,30 @@ class Command(BaseCommand):
             await asyncio.sleep(0.25)
             elapsed_race = (loop.time() - race_start_wall) * speed
             pit_open = pit_open_at <= elapsed_race <= pit_close_at
+
+            # In --no-laps mode, drain leaderboard crossings to count laps
+            if lb_comm:
+                while True:
+                    try:
+                        raw = await asyncio.wait_for(
+                            lb_comm.receive_from(), timeout=0.0
+                        )
+                        msg = json.loads(raw)
+                        if msg.get("type") == "standings_update":
+                            flash = msg.get("flash_team_number")
+                            if flash and flash in crossing_counts:
+                                crossing_counts[flash] += 1
+                                # Find team stats by number and decrement
+                                for tid, st in team_stats.items():
+                                    if (
+                                        st["team"].number == flash
+                                        and st.get("laps_remaining", 0) > 0
+                                    ):
+                                        st["laps_remaining"] -= 1
+                                        break
+                    except (asyncio.TimeoutError, Exception):
+                        break
+
             if not pit_open:
                 continue
 
@@ -821,18 +865,26 @@ class Command(BaseCommand):
                         laps_wait = random.choices(
                             [1, 2, 3, 4, 5, 6], weights=[15, 30, 50, 3, 1, 1]
                         )[0]
-                        stats["change_race_time"] = elapsed_race + avg_lap * laps_wait
+                        if self.no_laps:
+                            stats["laps_remaining"] = laps_wait
+                            crossing_counts[team.number] = 0
+                        else:
+                            stats["change_race_time"] = (
+                                elapsed_race + avg_lap * laps_wait
+                            )
                         self.log(
                             f"[PitLane] Team {team.number}: reached lane "
                             f"— change in {laps_wait} lap(s)"
                         )
 
                 # ── Perform driver change ──
-                if (
-                    stats["has_queued"]
-                    and stats["in_lane"]
-                    and elapsed_race >= stats["change_race_time"]
-                ):
+                ready_to_change = False
+                if stats["has_queued"] and stats["in_lane"]:
+                    if self.no_laps:
+                        ready_to_change = stats.get("laps_remaining", 0) <= 0
+                    else:
+                        ready_to_change = elapsed_race >= stats["change_race_time"]
+                if ready_to_change:
                     current = await sync_to_async(self._get_current_driver)(
                         cround, team
                     )
@@ -869,6 +921,8 @@ class Command(BaseCommand):
                         # No current driver yet — retry next cycle
                         stats["change_race_time"] = elapsed_race + avg_lap * 0.5
 
+        if lb_comm:
+            await lb_comm.disconnect()
         self.log("[PitLane] Done")
 
     # ── Helpers ───────────────────────────────────────────────────────────────
