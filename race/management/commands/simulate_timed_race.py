@@ -266,7 +266,7 @@ class Command(BaseCommand):
             self.log("[Director] FIRST_CROSSING mode — waiting for first crossing…")
             await sync_to_async(_notify_timing_race_started)(active_race, cround)
             # Also set cround.started so sessions are associated
-            await sync_to_async(self._prepare_first_crossing_start)(cround)
+            await sync_to_async(self._prepare_first_crossing_start)(cround, active_race)
             while True:
                 started = await sync_to_async(
                     lambda: Race.objects.filter(
@@ -334,19 +334,20 @@ class Command(BaseCommand):
             race.ready = True
             race.save()
 
-    def _prepare_first_crossing_start(self, cround):
-        """Set cround.started so sessions get associated when the consumer starts the race."""
+    def _prepare_first_crossing_start(self, cround, active_race):
+        """Set cround.started and associate sessions with the race so the consumer
+        can adjust their start times on the first crossing."""
         now = dt.datetime.now()
         if cround.started is None:
             cround.started = now
             cround.save(update_fields=["started"])
-        # Start pending sessions so they're associated with the round
         sessions = cround.session_set.filter(
             register__isnull=False, start__isnull=True, end__isnull=True
         )
         for s in sessions:
             s.start = now
-            s.save(update_fields=["start"])
+            s.race = active_race
+            s.save(update_fields=["start", "race"])
 
     def _do_race_start(self, cround, active_race, now):
         """Replicate race_start view logic for IMMEDIATE mode."""
