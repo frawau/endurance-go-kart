@@ -7,6 +7,7 @@ from race.models import (
     round_pause,
     ChangeLane,
     RoundPenalty,
+    RoundStanding,
     PenaltyQueue,
     LapCrossing,
     RaceTransponderAssignment,
@@ -57,6 +58,7 @@ class Command(BaseCommand):
             round_penalty__round=cround
         ).count()
         penalties_count = RoundPenalty.objects.filter(round=cround).count()
+        standings_count = RoundStanding.objects.filter(round=cround).count()
         crossings_count = LapCrossing.objects.filter(race__in=races).count()
         assignments_count = RaceTransponderAssignment.objects.filter(
             race__in=races
@@ -71,6 +73,7 @@ class Command(BaseCommand):
             f"Found {penalty_queue_count} penalty queue entries to delete"
         )
         self.stdout.write(f"Found {penalties_count} penalties to delete")
+        self.stdout.write(f"Found {standings_count} championship standings to delete")
         self.stdout.write(f"Found {crossings_count} lap crossings to delete")
         self.stdout.write(
             f"Found {assignments_count} transponder assignments to delete"
@@ -84,6 +87,7 @@ class Command(BaseCommand):
                     "\nDRY RUN — would reset the current round by:\n"
                     "- Deleting all sessions, pauses, pit lanes\n"
                     "- Deleting all penalty queue entries and penalties\n"
+                    "- Deleting all championship standings for this round\n"
                     "- Deleting all lap crossings and transponder assignments\n"
                     "- Deleting all grid positions\n"
                     "- Resetting all race flags (started/ended/ready/grid_locked)\n"
@@ -112,6 +116,11 @@ class Command(BaseCommand):
                 n, _ = RoundPenalty.objects.filter(round=cround).delete()
                 self.stdout.write(self.style.SUCCESS(f"Deleted {n} penalties"))
 
+                n, _ = RoundStanding.objects.filter(round=cround).delete()
+                self.stdout.write(
+                    self.style.SUCCESS(f"Deleted {n} championship standings")
+                )
+
                 n, _ = LapCrossing.objects.filter(race__in=races).delete()
                 self.stdout.write(self.style.SUCCESS(f"Deleted {n} lap crossings"))
 
@@ -132,6 +141,7 @@ class Command(BaseCommand):
                 cround.started = None
                 cround.ended = None
                 cround.post_race_check_completed = False
+                cround.results_confirmed = False
                 cround.save()
 
                 self.stdout.write(
