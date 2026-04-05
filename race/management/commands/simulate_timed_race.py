@@ -174,10 +174,10 @@ class Command(BaseCommand):
             f"Race: {active_race.get_race_type_display()} "
             f"(id={active_race.id}, start_mode={active_race.start_mode})"
         )
-        if active_race.start_mode == "FIRST_CROSSING":
+        if active_race.start_mode == "FIRST_CROSSING" and not self.no_laps:
             raise CommandError(
-                "FIRST_CROSSING start mode is not yet supported by this simulator. "
-                "Switch the race to IMMEDIATE mode."
+                "FIRST_CROSSING start mode is not supported without --no-laps. "
+                "Use --no-laps with a real timing station, or switch to IMMEDIATE mode."
             )
 
         if self.no_laps:
@@ -258,11 +258,33 @@ class Command(BaseCommand):
         await asyncio.sleep(0.5)  # brief pause before start
 
         # ── Start race ──
-        self.log("[Director] Starting race…")
-        now = dt.datetime.now()
-        await sync_to_async(self._do_race_start)(cround, active_race, now)
-        coord.race_started.set()
-        self.log("[Director] Race started ✓")
+        if self.no_laps and active_race.start_mode == "FIRST_CROSSING":
+            # Notify timing station so it has assignments, then wait for
+            # the first crossing to trigger race start via the consumer.
+            from race.views import _notify_timing_race_started
+
+            self.log("[Director] FIRST_CROSSING mode — waiting for first crossing…")
+            await sync_to_async(_notify_timing_race_started)(active_race, cround)
+            # Also set cround.started so sessions are associated
+            await sync_to_async(self._prepare_first_crossing_start)(cround)
+            while True:
+                started = await sync_to_async(
+                    lambda: Race.objects.filter(
+                        pk=active_race.pk, started__isnull=False
+                    ).exists()
+                )()
+                if started:
+                    break
+                await asyncio.sleep(0.3)
+            await sync_to_async(active_race.refresh_from_db)()
+            coord.race_started.set()
+            self.log("[Director] Race started (first crossing detected) ✓")
+        else:
+            self.log("[Director] Starting race…")
+            now = dt.datetime.now()
+            await sync_to_async(self._do_race_start)(cround, active_race, now)
+            coord.race_started.set()
+            self.log("[Director] Race started ✓")
 
         race_start_wall = loop.time()
         race_duration_s = await sync_to_async(
@@ -311,6 +333,20 @@ class Command(BaseCommand):
         if not race.ready:
             race.ready = True
             race.save()
+
+    def _prepare_first_crossing_start(self, cround):
+        """Set cround.started so sessions get associated when the consumer starts the race."""
+        now = dt.datetime.now()
+        if cround.started is None:
+            cround.started = now
+            cround.save(update_fields=["started"])
+        # Start pending sessions so they're associated with the round
+        sessions = cround.session_set.filter(
+            register__isnull=False, start__isnull=True, end__isnull=True
+        )
+        for s in sessions:
+            s.start = now
+            s.save(update_fields=["start"])
 
     def _do_race_start(self, cround, active_race, now):
         """Replicate race_start view logic for IMMEDIATE mode."""
