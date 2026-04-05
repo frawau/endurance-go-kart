@@ -1485,7 +1485,8 @@ class TimingConsumer(AsyncWebsocketConsumer):
                         served__lte=window_end,
                     )
                     for rp in served_penalties:
-                        lap_secs -= float(rp.value)
+                        # Penalty duration + 10s for slowdown/speedup
+                        lap_secs -= float(rp.value) + 10.0
 
                     # Driver change during this lap (session ended = old driver out)
                     changes = Session.objects.filter(
