@@ -750,12 +750,21 @@ class Command(BaseCommand):
         # Start a background crossing listener for --no-laps mode
         async def _crossing_listener():
             """Continuously listen for crossings and update laps_remaining."""
+            msg_count = 0
             while not coord.all_done.is_set():
                 try:
                     raw = await asyncio.wait_for(lb_comm.receive_from(), timeout=1.0)
                     msg = json.loads(raw)
-                    if msg.get("type") == "standings_update":
+                    msg_type = msg.get("type")
+                    if msg_type == "standings_update":
                         flash = msg.get("flash_team_number")
+                        msg_count += 1
+                        if msg_count <= 3 and self.verbose:
+                            self.log(
+                                f"[PitLane/LB] msg #{msg_count} flash={flash} "
+                                f"type={type(flash).__name__} "
+                                f"tracked={list(crossing_counts.keys())[:5]}"
+                            )
                         if flash is not None and flash in crossing_counts:
                             crossing_counts[flash] += 1
                             for tid, st in team_stats.items():
@@ -764,15 +773,15 @@ class Command(BaseCommand):
                                     and st.get("laps_remaining", 0) > 0
                                 ):
                                     st["laps_remaining"] -= 1
-                                    if self.verbose:
-                                        self.log(
-                                            f"[PitLane] Team {flash}: "
-                                            f"{st['laps_remaining']} lap(s) remaining"
-                                        )
+                                    self.log(
+                                        f"[PitLane] Team {flash}: "
+                                        f"{st['laps_remaining']} lap(s) remaining"
+                                    )
                                     break
                 except asyncio.TimeoutError:
                     continue
-                except Exception:
+                except Exception as e:
+                    self.log(f"[PitLane/LB] Listener error: {e}")
                     break
 
         lb_task = None
@@ -1195,5 +1204,3 @@ class Command(BaseCommand):
     def log(self, message):
         ts = dt.datetime.now().strftime("%H:%M:%S")
         self.stdout.write(f"[{ts}] {message}")
-        if self.verbose:
-            print(f"[{ts}] {message}")
