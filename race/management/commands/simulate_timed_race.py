@@ -727,65 +727,48 @@ class Command(BaseCommand):
         avg_lap = options["avg_lap"]
         loop = asyncio.get_event_loop()
 
-        # In --no-laps mode, connect to leaderboard to count real crossings
-        lb_comm = None
+        # In --no-laps mode, subscribe to crossing events via channel layer
         crossing_counts = {}  # team_number → crossings since entering lane
-        if self.no_laps:
-            from core.asgi import application
-
-            lb_comm = WebsocketCommunicator(
-                application, f"/ws/leaderboard/{active_race.id}/"
-            )
-            lb_ok, _ = await lb_comm.connect()
-            if not lb_ok:
-                self.log("[PitLane] WARNING: could not connect to leaderboard WS")
-                lb_comm = None
-            else:
-                # Drain initial standings_update
-                try:
-                    await asyncio.wait_for(lb_comm.receive_from(), timeout=3.0)
-                except asyncio.TimeoutError:
-                    pass
-
-        # Start a background crossing listener for --no-laps mode
-        async def _crossing_listener():
-            """Continuously listen for crossings and update laps_remaining."""
-            msg_count = 0
-            while not coord.all_done.is_set():
-                try:
-                    raw = await asyncio.wait_for(lb_comm.receive_from(), timeout=1.0)
-                    msg = json.loads(raw)
-                    msg_type = msg.get("type")
-                    if msg_type == "standings_update":
-                        flash = msg.get("flash_team_number")
-                        msg_count += 1
-                        if msg_count <= 3 and self.verbose:
-                            self.log(
-                                f"[PitLane/LB] msg #{msg_count} flash={flash} "
-                                f"type={type(flash).__name__} "
-                                f"tracked={list(crossing_counts.keys())[:5]}"
-                            )
-                        if flash is not None and flash in crossing_counts:
-                            crossing_counts[flash] += 1
-                            for tid, st in team_stats.items():
-                                if (
-                                    st["team"].number == flash
-                                    and st.get("laps_remaining", 0) > 0
-                                ):
-                                    st["laps_remaining"] -= 1
-                                    self.log(
-                                        f"[PitLane] Team {flash}: "
-                                        f"{st['laps_remaining']} lap(s) remaining"
-                                    )
-                                    break
-                except asyncio.TimeoutError:
-                    continue
-                except Exception as e:
-                    self.log(f"[PitLane/LB] Listener error: {e}")
-                    break
-
         lb_task = None
-        if lb_comm:
+        if self.no_laps:
+            from channels.layers import get_channel_layer
+
+            channel_layer = get_channel_layer()
+            # Create a unique channel and join the leaderboard group
+            lb_channel = await channel_layer.new_channel()
+            lb_group = f"leaderboard_{active_race.id}"
+            await channel_layer.group_add(lb_group, lb_channel)
+            self.log(f"[PitLane] Subscribed to {lb_group} via channel layer")
+
+            async def _crossing_listener():
+                """Listen for lap_crossing_update events on the channel layer."""
+                while not coord.all_done.is_set():
+                    try:
+                        msg = await asyncio.wait_for(
+                            channel_layer.receive(lb_channel), timeout=1.0
+                        )
+                        if msg.get("type") == "lap_crossing_update":
+                            flash = msg.get("crossing_data", {}).get("team_number")
+                            if flash is not None and flash in crossing_counts:
+                                crossing_counts[flash] += 1
+                                for tid, st in team_stats.items():
+                                    if (
+                                        st["team"].number == flash
+                                        and st.get("laps_remaining", 0) > 0
+                                    ):
+                                        st["laps_remaining"] -= 1
+                                        self.log(
+                                            f"[PitLane] Team {flash}: "
+                                            f"{st['laps_remaining']} lap(s) remaining"
+                                        )
+                                        break
+                    except asyncio.TimeoutError:
+                        continue
+                    except Exception as e:
+                        self.log(f"[PitLane/LB] Listener error: {e}")
+                        break
+                await channel_layer.group_discard(lb_group, lb_channel)
+
             lb_task = asyncio.ensure_future(_crossing_listener())
 
         await coord.race_started.wait()
@@ -945,8 +928,6 @@ class Command(BaseCommand):
                 await lb_task
             except asyncio.CancelledError:
                 pass
-        if lb_comm:
-            await lb_comm.disconnect()
         self.log("[PitLane] Done")
 
     # ── Helpers ───────────────────────────────────────────────────────────────
