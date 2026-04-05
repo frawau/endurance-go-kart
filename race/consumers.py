@@ -1496,7 +1496,11 @@ class TimingConsumer(AsyncWebsocketConsumer):
 
                 lap_secs = max(lap_secs, 0)
 
-            suggested = max(1, round(lap_secs / median_time))
+            # Only flag as suspicious if lap exceeds 1.9x the median
+            # (allows for driver skill variation and minor delays)
+            if lap_secs <= median_time * 1.9:
+                return 1, 1
+            suggested = max(2, round(lap_secs / median_time))
             max_count = int(lap_secs // median_time) + 1
             return suggested, max_count
 
