@@ -327,6 +327,11 @@ class Command(BaseCommand):
             s.race = active_race
             s.save()
 
+        # Notify timing station via channel layer (same as race_start view)
+        from race.views import _notify_timing_race_started
+
+        _notify_timing_race_started(active_race, cround)
+
     def _do_race_end(self, cround, active_race, now):
         """End the race via the canonical Race.end_this_race() path.
 
