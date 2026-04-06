@@ -324,10 +324,17 @@ class StopAndGoStation:
         return message_data
 
     async def handle_message(self, data):
-        # Verify HMAC signature for all incoming messages
+        # Only command and penalty_acknowledged messages are HMAC-signed.
+        # Other messages (penalty_queue_update, penalty_served, fence_status)
+        # are race-control broadcasts — ignore them silently.
+        msg_type = data.get("type")
+        if msg_type not in ("command", "penalty_acknowledged"):
+            logging.debug(f"Ignoring broadcast message: {msg_type}")
+            return
+
         provided_signature = data.pop("hmac_signature", None)
         if not provided_signature:
-            logging.warning(f"Received message without HMAC signature: {data}")
+            logging.warning(f"Received {msg_type} without HMAC signature")
             return
 
         if not self.verify_hmac(data, provided_signature):
