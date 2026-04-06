@@ -295,20 +295,23 @@ class Command(BaseCommand):
         penalty_wall_interval = 300.0 / speed  # check every 5 race-minutes
         last_penalty_wall = 0.0
 
-        # ── Wait for race duration ──
+        # ── Wait for race to end ──
+        # In --no-laps mode with ending modes like CROSS_AFTER_LEADER,
+        # the TimingConsumer ends the race when appropriate. The director
+        # only force-ends when it controls crossings (standard mode).
         while True:
             await asyncio.sleep(0.3)
             elapsed_wall = loop.time() - race_start_wall
             elapsed_race = elapsed_wall * speed
 
-            # Check if race was ended externally
+            # Check if race was ended (by consumer or externally)
             ended = await sync_to_async(
                 lambda: Race.objects.filter(
                     pk=active_race.pk, ended__isnull=False
                 ).exists()
             )()
             if ended:
-                self.log("[Director] Race ended externally.")
+                self.log("[Director] Race ended.")
                 coord.all_done.set()
                 return
 
@@ -319,10 +322,12 @@ class Command(BaseCommand):
                 )
                 last_penalty_wall = elapsed_wall
 
-            if elapsed_race >= race_duration_s:
+            # In standard mode (not --no-laps), force-end after duration
+            # since the simulator controls crossings and no consumer will end it.
+            if not self.no_laps and elapsed_race >= race_duration_s:
                 break
 
-        # ── End race ──
+        # ── Force-end race (standard mode only) ──
         self.log("[Director] Ending race…")
         now = dt.datetime.now()
         await sync_to_async(self._do_race_end)(cround, active_race, now)
