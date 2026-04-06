@@ -13,5 +13,11 @@ fence = 24   # Physical pin 24 (GPIO8)
 # HMAC secret for message authentication
 hmac_secret = "__STOPANDGO_HMAC_SECRET__"
 
+# I2C relay configuration
+[relay]
+address = 0x10   # I2C address of the relay board
+index = 1        # Relay channel (1-based)
+bus = 1          # I2C bus number
+
 [logging]
 level = "INFO"  # DEBUG, INFO, WARNING, ERROR

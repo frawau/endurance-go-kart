@@ -21,10 +21,6 @@ from smbus2_asyncio import SMBus2Asyncio
 DEFAULT_BUTTON_PIN = 18  # Physical pin 18 (GPIO24)
 DEFAULT_SENSOR_PIN = 24  # Physical pin 24 (GPIO8)
 
-# I2C settings
-I2C_BUS = 1
-RELAY_ADDRESS = 0x10  # Adjust based on your relay board
-
 # Font sizes - doubled for better visibility
 COUNTDOWN_FONT_SIZE = 400
 TEAM_FONT_SIZE = 400
@@ -32,9 +28,10 @@ STATUS_FONT_SIZE = 200  # Smaller font for status messages
 
 
 class I2CRelay:
-    def __init__(self, bus=I2C_BUS, address=RELAY_ADDRESS):
+    def __init__(self, address=0x10, index=1, bus=1):
         self.bus_num = bus
         self.address = address
+        self.register = index + 1  # DFRobot relay register = index + 1
         self.handle = None
 
     async def open(self):
@@ -45,7 +42,7 @@ class I2CRelay:
         try:
             if self.handle is None:
                 await self.open()
-            await self.handle.write_byte_data(self.address, 0, 0xFF)
+            await self.handle.write_byte_data(self.address, self.register, 0xFF)
         except Exception as e:
             logging.error(f"I2C relay on error: {e}")
 
@@ -53,7 +50,7 @@ class I2CRelay:
         try:
             if self.handle is None:
                 await self.open()
-            await self.handle.write_byte_data(self.address, 0, 0x00)
+            await self.handle.write_byte_data(self.address, self.register, 0x00)
         except Exception as e:
             logging.error(f"I2C relay off error: {e}")
 
@@ -194,13 +191,18 @@ class FramebufferDisplay:
 
 
 class StopAndGoStation:
-    def __init__(self, websocket_url, button_pin, sensor_pin, hmac_secret):
+    def __init__(self, websocket_url, button_pin, sensor_pin, hmac_secret, relay_config=None):
         self.websocket_url = websocket_url
         self.button_pin = button_pin
         self.sensor_pin = sensor_pin
         self.hmac_secret = hmac_secret.encode("utf-8")  # Convert to bytes
         self.display = FramebufferDisplay()
-        self.relay = I2CRelay()
+        rc = relay_config or {}
+        self.relay = I2CRelay(
+            address=rc.get("address", 0x10),
+            index=rc.get("index", 1),
+            bus=rc.get("bus", 1),
+        )
         self.current_team = None
         self.current_duration = None
         self.last_team = None  # Track team for acknowledgment handling
@@ -747,6 +749,9 @@ def parse_arguments():
         else:
             setattr(args, key, config_value)
 
+    # Read [relay] section
+    args._relay_config = config.get("relay", {})
+
     # Read [logging] section (new format) — CLI flags still override
     log_section = config.get("logging", {})
     args._config_log_level = log_section.get("level", None)
@@ -777,7 +782,16 @@ async def main():
     logging.info(f"Connecting to: {websocket_url}")
     logging.info(f"Button pin: {args.button}, Fence sensor pin: {args.fence}")
 
-    station = StopAndGoStation(websocket_url, args.button, args.fence, args.hmac_secret)
+    relay_config = getattr(args, "_relay_config", {})
+    logging.info(
+        f"Relay: address=0x{relay_config.get('address', 0x10):02x}, "
+        f"index={relay_config.get('index', 1)}, "
+        f"bus={relay_config.get('bus', 1)}"
+    )
+
+    station = StopAndGoStation(
+        websocket_url, args.button, args.fence, args.hmac_secret, relay_config
+    )
     await station.run()
 
 
