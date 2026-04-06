@@ -759,12 +759,13 @@ reset_system() {
         echo "  5. docker compose $profiles up -d"
         echo "     Start all services (migrations run automatically)"
         echo ""
-        echo "  6. docker compose exec appseed-app python manage.py createsuperuser"
+        echo "  6. $0 manage createsuperuser"
         echo "     Recreate the admin user (interactive)"
         echo ""
-        echo "  After reset you will also need to:"
-        echo "    - Recreate 'Admin' and 'Race Director' groups via /admin/"
-        echo "    - Reload nginx if using SSL:  docker compose exec nginx nginx -s reload"
+        echo "  User groups (Admin, Race Director, etc.) are created automatically on startup."
+        if [ "${SSL_MODE}" != "none" ] && [ -n "${SSL_MODE}" ]; then
+        echo "  You may need to reload nginx for SSL:  docker compose exec nginx nginx -s reload"
+        fi
         echo ""
         log_warning "To execute, run:  $0 reset --commit-reset"
         echo ""
@@ -803,13 +804,10 @@ reset_system() {
 
     echo ""
     log_success "System reset complete! Database is empty, migrations applied."
+    log_success "User groups (Admin, Race Director, etc.) created automatically."
     echo ""
     log_info "Create the admin user:"
     echo "  $0 manage createsuperuser"
-    echo ""
-    log_info "Then log in to /admin/ and create these groups:"
-    echo "  - Admin"
-    echo "  - Race Director"
     echo ""
     if [ "${SSL_MODE}" != "none" ] && [ -n "${SSL_MODE}" ]; then
         log_info "Reload nginx to pick up SSL certificates:"
