@@ -10,10 +10,7 @@
     <link href="{% static 'css/timer-widget.css' %}" rel="stylesheet">
     <script src="{% static 'js/timer-widget.js' %}"></script>
     <style>
-        :root {
-            /* Auto-scaled by JS based on team count and viewport height */
-            --row-scale: 1;
-        }
+        :root { --row-scale: 1; }
 
         body {
             background: #0a0e1a;
@@ -22,9 +19,35 @@
             overflow: hidden;
         }
 
+        .scale-controls {
+            position: fixed;
+            top: 8px;
+            right: 12px;
+            z-index: 100;
+            display: flex;
+            gap: 4px;
+            opacity: 0.25;
+            transition: opacity 0.3s;
+        }
+        .scale-controls:hover { opacity: 0.9; }
+        .scale-btn {
+            width: 28px; height: 28px;
+            border: 1px solid #555;
+            border-radius: 4px;
+            background: rgba(30,30,50,0.8);
+            color: #ccc;
+            font-size: 1.1rem;
+            line-height: 26px;
+            text-align: center;
+            cursor: pointer;
+            user-select: none;
+        }
+        .scale-btn:hover { background: rgba(60,60,90,0.9); color: #fff; }
+
         .leaderboard-header {
             background: #111827;
-            padding: 10px 20px;
+            padding: 15px 20px;
+            margin-bottom: 10px;
             border-bottom: 3px solid #ffd700;
             display: flex;
             justify-content: space-between;
@@ -32,7 +55,7 @@
         }
 
         .leaderboard-title {
-            font-size: 1.4rem;
+            font-size: 2rem;
             font-weight: bold;
             text-transform: uppercase;
             letter-spacing: 2px;
@@ -62,11 +85,10 @@
         }
 
         .standings-table th {
-            padding: 8px 10px;
+            padding: 12px 15px;
             border-bottom: 2px solid #ffd700;
             color: #ffffff;
             font-weight: bold;
-            font-size: 0.9rem;
         }
 
         .standings-table tbody tr {
@@ -80,7 +102,7 @@
         }
 
         .standings-table td {
-            padding: calc(4px * var(--row-scale)) calc(10px * var(--row-scale));
+            padding: calc(6px * var(--row-scale)) calc(10px * var(--row-scale));
             color: #e8e8e8;
         }
 
@@ -110,9 +132,9 @@
 
         .position-badge {
             display: inline-block;
-            width: calc(32px * var(--row-scale));
-            height: calc(32px * var(--row-scale));
-            line-height: calc(32px * var(--row-scale));
+            width: calc(30px * var(--row-scale));
+            height: calc(30px * var(--row-scale));
+            line-height: calc(30px * var(--row-scale));
             border-radius: 50%;
             background: rgba(255, 255, 255, 0.12);
             text-align: center;
@@ -177,6 +199,10 @@
     {% if not race %}
     {% include 'layout/no_race_today.html' %}
     {% else %}
+    <div class="scale-controls">
+        <div class="scale-btn" id="scaleDown" title="Smaller rows">−</div>
+        <div class="scale-btn" id="scaleUp" title="Larger rows">+</div>
+    </div>
     <div class="container-fluid">
         <div class="leaderboard-header">
             <span id="wsStatus" class="ws-status ws-disconnected" style="display:inline-block;width:120px;"><i class="fas fa-circle"></i> Disconnected</span>
@@ -387,9 +413,6 @@
                     flashRow.addEventListener('animationend', () => flashRow.classList.remove('row-flash'), { once: true });
                 }
             }
-
-            // Re-scale if team count changed (e.g. page loaded before race started)
-            if (typeof autoScale === 'function') autoScale();
         }
 
         // Countdown timer — reuse the existing TimerWidget
@@ -414,24 +437,31 @@
 
         connect();
 
-        // Auto-scale table body rows to fit all teams in the viewport
-        function autoScale() {
-            const tbody = document.getElementById('standingsBody');
-            const teamCount = tbody ? tbody.children.length : 0;
-            if (teamCount === 0) return;
-            const header = document.querySelector('.leaderboard-header');
-            const thead = document.querySelector('.standings-table thead');
-            const fixedHeight = (header ? header.offsetHeight : 0)
-                              + (thead ? thead.offsetHeight : 0);
-            const available = window.innerHeight - fixedHeight;
-            // Target: each row gets an equal share of available space
-            const targetRowHeight = available / teamCount;
-            // At scale=1, a row is roughly 36px (8px padding + ~20px font/badge)
-            const scale = Math.min(3, Math.max(0.6, targetRowHeight / 36));
-            document.documentElement.style.setProperty('--row-scale', scale.toFixed(3));
-        }
-        autoScale();
-        window.addEventListener('resize', autoScale);
+        // Manual row scaling with localStorage persistence
+        (function() {
+            const STORAGE_KEY = 'leaderboard_row_scale';
+            const STEP = 0.1;
+            const MIN = 0.4;
+            const MAX = 2.5;
+            let scale = parseFloat(localStorage.getItem(STORAGE_KEY)) || 1.0;
+
+            function applyScale() {
+                scale = Math.round(scale * 10) / 10; // avoid float drift
+                scale = Math.max(MIN, Math.min(MAX, scale));
+                document.documentElement.style.setProperty('--row-scale', scale);
+                localStorage.setItem(STORAGE_KEY, scale);
+            }
+            applyScale();
+
+            document.getElementById('scaleDown').addEventListener('click', function() {
+                scale -= STEP;
+                applyScale();
+            });
+            document.getElementById('scaleUp').addEventListener('click', function() {
+                scale += STEP;
+                applyScale();
+            });
+        })();
 
         // Resync standings and timer when tab regains focus — browsers
         // throttle background tabs so timers and WS messages can lag.
