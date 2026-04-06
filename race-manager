@@ -93,6 +93,8 @@ show_help() {
     echo "Utility:"
     echo "  generate-secret    Generate secure random secrets for .env file"
     echo "  configure-stations Write .env values (hostname, HMAC secrets) into station TOML files"
+    echo "  reset              Show steps to fully reset the database and rebuild"
+    echo "  reset --commit-reset  Actually perform the full reset (destructive!)"
     echo "  help               Show this help message"
     echo ""
     echo "Examples:"
@@ -724,6 +726,97 @@ proxy_status() {
     systemctl status nettag-proxy --no-pager 2>/dev/null || true
 }
 
+reset_system() {
+    local commit="${1:-}"
+
+    # Get compose project name for volume naming
+    local project_name
+    project_name=$(docker compose config --format json 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('name',''))" 2>/dev/null || basename "$(pwd)")
+    local db_volume="${project_name}_postgres_data"
+
+    local profiles
+    profiles=$(get_compose_profiles)
+
+    if [ "$commit" != "--commit-reset" ]; then
+        echo ""
+        log_info "Full system reset — this will DESTROY the database and rebuild from scratch."
+        log_info "SSL certificates and configuration (.env) are preserved."
+        echo ""
+        echo "  The following steps will be performed:"
+        echo ""
+        echo "  1. docker compose $(get_all_profiles) down"
+        echo "     Stop and remove all containers"
+        echo ""
+        echo "  2. docker volume rm ${db_volume}"
+        echo "     Delete the PostgreSQL database volume"
+        echo ""
+        echo "  3. docker compose $profiles build"
+        echo "     Rebuild the application image"
+        echo ""
+        echo "  4. docker image prune -f"
+        echo "     Clean up unused images"
+        echo ""
+        echo "  5. docker compose $profiles up -d"
+        echo "     Start all services (migrations run automatically)"
+        echo ""
+        echo "  6. docker compose exec appseed-app python manage.py createsuperuser"
+        echo "     Recreate the admin user (interactive)"
+        echo ""
+        echo "  After reset you will also need to:"
+        echo "    - Recreate 'Admin' and 'Race Director' groups via /admin/"
+        echo "    - Reload nginx if using SSL:  docker compose exec nginx nginx -s reload"
+        echo ""
+        log_warning "To execute, run:  $0 reset --commit-reset"
+        echo ""
+        return
+    fi
+
+    log_warning "FULL SYSTEM RESET — this will destroy the database!"
+    echo ""
+    read -p "Type YES to confirm: " confirm
+    if [ "$confirm" != "YES" ]; then
+        log_info "Aborted."
+        return
+    fi
+
+    # Set HTTP_PORT for rebuild
+    if [ "${SSL_MODE}" = "none" ] || [ -z "${SSL_MODE}" ]; then
+        export HTTP_PORT=${APP_PORT:-5085}
+    else
+        export HTTP_PORT=80
+    fi
+
+    log_info "Step 1/5: Stopping all containers..."
+    docker compose $(get_all_profiles) down
+
+    log_info "Step 2/5: Removing database volume (${db_volume})..."
+    docker volume rm "${db_volume}" 2>/dev/null || log_warning "Volume not found (may already be removed)"
+
+    log_info "Step 3/5: Rebuilding application..."
+    docker compose $profiles build
+
+    log_info "Step 4/5: Cleaning up images..."
+    docker image prune -f
+
+    log_info "Step 5/5: Starting services..."
+    docker compose $profiles up -d
+
+    echo ""
+    log_success "System reset complete! Database is empty, migrations applied."
+    echo ""
+    log_info "Create the admin user:"
+    echo "  $0 manage createsuperuser"
+    echo ""
+    log_info "Then log in to /admin/ and create these groups:"
+    echo "  - Admin"
+    echo "  - Race Director"
+    echo ""
+    if [ "${SSL_MODE}" != "none" ] && [ -n "${SSL_MODE}" ]; then
+        log_info "Reload nginx to pick up SSL certificates:"
+        echo "  docker compose exec nginx nginx -s reload"
+    fi
+}
+
 # Main command handling
 case "${1:-help}" in
     "start")
@@ -780,6 +873,10 @@ case "${1:-help}" in
         ;;
     "configure-stations")
         configure_stations
+        ;;
+    "reset")
+        shift
+        reset_system "${1:-}"
         ;;
     "deploy-timing")
         deploy_timing
