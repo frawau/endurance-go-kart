@@ -863,9 +863,7 @@ class Command(BaseCommand):
                     )
                     if in_lane:
                         stats["in_lane"] = True
-                        laps_wait = random.choices(
-                            [1, 2, 3, 4, 5, 6], weights=[15, 30, 50, 3, 1, 1]
-                        )[0]
+                        laps_wait = random.choices([1, 2, 3], weights=[30, 50, 20])[0]
                         if self.no_laps:
                             stats["laps_remaining"] = laps_wait
                             crossing_counts[team.number] = 0
@@ -1091,21 +1089,23 @@ class Command(BaseCommand):
         for team in cround.round_team_set.select_related("team", "team__team").filter(
             retired=False
         ):
+            num_drivers = team.team_member_set.filter(driver=True).count()
             if is_qualifying:
-                # Qualifying: pit always open but changes are rare — mostly nobody changes.
                 target = 1 if random.random() < 0.15 else 0
             else:
-                v = random.random()
-                target = required_changes + (
-                    1 if v < 0.6 else random.randint(2, 4) if v < 0.8 else 0
-                )
+                # Ensure we meet required changes AND cycle through all drivers.
+                # minimum = max(required_changes, num_drivers - 1) so every driver
+                # gets at least one stint.
+                minimum = max(required_changes, num_drivers - 1)
+                target = minimum + random.choices([0, 1, 2], weights=[30, 50, 20])[0]
             window = max(pit_close_at - pit_open_at, avg_lap)
             initial_queue = pit_open_at + random.uniform(
-                0, min(avg_lap * 2, window * 0.2)
+                0, min(avg_lap * 2, window * 0.1)
             )
             stats[team.id] = {
                 "team": team,
                 "target_changes": target,
+                "num_drivers": num_drivers,
                 "completed_changes": 0,
                 "has_queued": False,
                 "in_lane": False,
@@ -1134,12 +1134,20 @@ class Command(BaseCommand):
         if remaining <= 0:
             return float("inf")
         remaining_window = pit_close_at - current_race
-        if remaining_window <= avg_lap:  # not enough time for another change
+        if remaining_window <= 0:
             return float("inf")
-        optimal = remaining_window / remaining
-        return current_race + optimal * random.uniform(0.85, 1.15)
+        # Spread remaining changes evenly, but leave room for pit stop duration
+        # (~2 laps per change: queue + lane wait + physical stop)
+        change_cost = avg_lap * 2
+        usable_window = remaining_window - change_cost
+        if usable_window <= 0:
+            # Tight but try immediately
+            return current_race + random.uniform(0, avg_lap * 0.5)
+        optimal = usable_window / remaining
+        return current_race + optimal * random.uniform(0.7, 1.0)
 
     def _pick_next_driver(self, cround, team):
+        """Pick the available driver with the least driving time."""
         active_ids = Session.objects.filter(
             round=cround,
             driver__team=team,
@@ -1154,19 +1162,15 @@ class Command(BaseCommand):
             start__isnull=True,
             end__isnull=True,
         ).values_list("driver_id", flat=True)
-        available = (
+        available = list(
             team.team_member_set.select_related("member")
             .filter(driver=True)
             .exclude(id__in=list(active_ids) + list(queued_ids))
         )
-        if not available.exists():
+        if not available:
             return None
-        undriven = available.exclude(
-            id__in=Session.objects.filter(round=cround, end__isnull=False).values(
-                "driver"
-            )
-        )
-        return (undriven if undriven.exists() else available).order_by("?").first()
+        # Pick the driver with the least time_spent (ensures fair rotation)
+        return min(available, key=lambda d: d.time_spent.total_seconds())
 
     def _get_current_driver(self, cround, team):
         s = (
