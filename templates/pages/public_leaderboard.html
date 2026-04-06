@@ -419,12 +419,21 @@
             const tbody = document.getElementById('standingsBody');
             const teamCount = tbody ? tbody.children.length : 0;
             if (teamCount === 0) return;
-            // Header ~60px, thead ~40px, leave some margin
-            const available = window.innerHeight - 110;
-            const idealRowHeight = available / teamCount;
-            // Base row height at scale=1 is ~50px (padding + font + badge)
-            const scale = Math.min(2, Math.max(0.5, idealRowHeight / 50));
-            document.documentElement.style.setProperty('--row-scale', scale.toFixed(2));
+            // Reset to scale=1 to measure true element heights
+            document.documentElement.style.setProperty('--row-scale', '1');
+            // Force reflow so measurements reflect scale=1
+            void document.body.offsetHeight;
+            const header = document.querySelector('.leaderboard-header');
+            const thead = document.querySelector('.standings-table thead');
+            const fixedHeight = (header ? header.offsetHeight : 0)
+                              + (thead ? thead.offsetHeight : 0);
+            const available = window.innerHeight - fixedHeight;
+            // Measure one row at scale=1 as the baseline
+            const sampleRow = tbody.children[0];
+            const baseRowHeight = sampleRow ? sampleRow.offsetHeight : 50;
+            const totalNeeded = baseRowHeight * teamCount;
+            const scale = Math.min(2, Math.max(0.5, available / totalNeeded));
+            document.documentElement.style.setProperty('--row-scale', scale.toFixed(3));
         }
         autoScale();
         window.addEventListener('resize', autoScale);
