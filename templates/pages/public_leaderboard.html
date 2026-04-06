@@ -24,8 +24,7 @@
 
         .leaderboard-header {
             background: #111827;
-            padding: calc(8px * var(--row-scale)) 20px;
-            margin-bottom: calc(5px * var(--row-scale));
+            padding: 10px 20px;
             border-bottom: 3px solid #ffd700;
             display: flex;
             justify-content: space-between;
@@ -33,7 +32,7 @@
         }
 
         .leaderboard-title {
-            font-size: calc(1.4rem * var(--row-scale));
+            font-size: 1.4rem;
             font-weight: bold;
             text-transform: uppercase;
             letter-spacing: 2px;
@@ -63,10 +62,11 @@
         }
 
         .standings-table th {
-            padding: calc(6px * var(--row-scale)) calc(10px * var(--row-scale));
+            padding: 8px 10px;
             border-bottom: 2px solid #ffd700;
             color: #ffffff;
             font-weight: bold;
+            font-size: 0.9rem;
         }
 
         .standings-table tbody tr {
@@ -414,25 +414,20 @@
 
         connect();
 
-        // Auto-scale rows to fit all teams in the viewport
+        // Auto-scale table body rows to fit all teams in the viewport
         function autoScale() {
             const tbody = document.getElementById('standingsBody');
             const teamCount = tbody ? tbody.children.length : 0;
             if (teamCount === 0) return;
-            // Reset to scale=1 to measure true element heights
-            document.documentElement.style.setProperty('--row-scale', '1');
-            // Force reflow so measurements reflect scale=1
-            void document.body.offsetHeight;
             const header = document.querySelector('.leaderboard-header');
             const thead = document.querySelector('.standings-table thead');
             const fixedHeight = (header ? header.offsetHeight : 0)
                               + (thead ? thead.offsetHeight : 0);
             const available = window.innerHeight - fixedHeight;
-            // Measure one row at scale=1 as the baseline
-            const sampleRow = tbody.children[0];
-            const baseRowHeight = sampleRow ? sampleRow.offsetHeight : 50;
-            const totalNeeded = baseRowHeight * teamCount;
-            const scale = Math.min(2, Math.max(0.5, available / totalNeeded));
+            // Target: each row gets an equal share of available space
+            const targetRowHeight = available / teamCount;
+            // At scale=1, a row is roughly 36px (8px padding + ~20px font/badge)
+            const scale = Math.min(3, Math.max(0.6, targetRowHeight / 36));
             document.documentElement.style.setProperty('--row-scale', scale.toFixed(3));
         }
         autoScale();
