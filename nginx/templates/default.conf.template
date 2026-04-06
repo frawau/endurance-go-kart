@@ -80,7 +80,9 @@ server {
 
     # Security headers
     add_header Strict-Transport-Security "max-age=63072000" always;
-    add_header X-Frame-Options DENY always;
+    # Disabled: conflicts with legitimate iframe use (kiosk displays, embedded leaderboard).
+    # Django handles frame options per-view via @xframe_options_exempt where needed.
+    # add_header X-Frame-Options DENY always;
     add_header X-Content-Type-Options nosniff always;
 
     # Regular HTTP traffic
