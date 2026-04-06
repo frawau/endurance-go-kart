@@ -14,7 +14,9 @@ fence = 24   # Physical pin 24 (GPIO8)
 hmac_secret = "__STOPANDGO_HMAC_SECRET__"
 
 # I2C relay configuration
+# Set enabled = false to disable, or leave true for auto-detection
 [relay]
+enabled = true   # Set to false to disable relay entirely
 address = 0x10   # I2C address of the relay board
 index = 0        # Relay channel (0-based)
 bus = 1          # I2C bus number

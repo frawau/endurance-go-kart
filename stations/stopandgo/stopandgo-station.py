@@ -27,6 +27,19 @@ TEAM_FONT_SIZE = 400
 STATUS_FONT_SIZE = 200  # Smaller font for status messages
 
 
+class NullRelay:
+    """No-op relay when I2C is disabled or not detected."""
+
+    async def turn_on(self):
+        pass
+
+    async def turn_off(self):
+        pass
+
+    def close(self):
+        pass
+
+
 class I2CRelay:
     def __init__(self, address=0x10, index=0, bus=1):
         self.bus_num = bus
@@ -56,6 +69,39 @@ class I2CRelay:
 
     def close(self):
         pass
+
+    @staticmethod
+    def detect(address=0x10, bus=1):
+        """Probe the I2C bus for a device at the given address."""
+        try:
+            import smbus2
+
+            with smbus2.SMBus(bus) as b:
+                b.read_byte(address)
+            return True
+        except Exception:
+            return False
+
+
+def create_relay(relay_config):
+    """Create an I2CRelay or NullRelay based on config and hardware detection."""
+    enabled = relay_config.get("enabled", True)
+    address = relay_config.get("address", 0x10)
+    index = relay_config.get("index", 0)
+    bus = relay_config.get("bus", 1)
+
+    if not enabled:
+        logging.info("Relay disabled in config")
+        return NullRelay()
+
+    if I2CRelay.detect(address, bus):
+        logging.info(f"I2C relay detected at 0x{address:02x} on bus {bus}, index {index}")
+        return I2CRelay(address, index, bus)
+    else:
+        logging.warning(
+            f"No I2C device at 0x{address:02x} on bus {bus} — relay disabled"
+        )
+        return NullRelay()
 
 
 class FramebufferDisplay:
@@ -197,12 +243,7 @@ class StopAndGoStation:
         self.sensor_pin = sensor_pin
         self.hmac_secret = hmac_secret.encode("utf-8")  # Convert to bytes
         self.display = FramebufferDisplay()
-        rc = relay_config or {}
-        self.relay = I2CRelay(
-            address=rc.get("address", 0x10),
-            index=rc.get("index", 0),
-            bus=rc.get("bus", 1),
-        )
+        self.relay = create_relay(relay_config or {})
         self.current_team = None
         self.current_duration = None
         self.last_team = None  # Track team for acknowledgment handling
