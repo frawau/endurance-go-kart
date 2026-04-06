@@ -46,8 +46,8 @@
 
         .leaderboard-header {
             background: #111827;
-            padding: 15px 20px;
-            margin-bottom: 10px;
+            padding: calc(15px * min(1, var(--row-scale))) 20px;
+            margin-bottom: calc(10px * min(1, var(--row-scale)));
             border-bottom: 3px solid #ffd700;
             display: flex;
             justify-content: space-between;
@@ -55,7 +55,7 @@
         }
 
         .leaderboard-title {
-            font-size: 2rem;
+            font-size: calc(2rem * min(1, var(--row-scale)));
             font-weight: bold;
             text-transform: uppercase;
             letter-spacing: 2px;
