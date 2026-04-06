@@ -106,6 +106,11 @@ def index(request):
             {"label": "All Pit Lanes", "url": "/all_pitlanes/"},
             {"label": "Round Penalties", "url": "/round_penalties/"},
         ],
+        [
+            {"label": "Leaderboard", "url": "/leaderboard/"},
+            {"label": "Round Result", "url": "/round_result/"},
+            {"label": "Championship Standings", "url": "/championship/standings/"},
+        ],
     ]
     cround = current_round()
     return render(
