@@ -28,7 +28,7 @@ STATUS_FONT_SIZE = 200  # Smaller font for status messages
 
 
 class I2CRelay:
-    def __init__(self, address=0x10, index=1, bus=1):
+    def __init__(self, address=0x10, index=0, bus=1):
         self.bus_num = bus
         self.address = address
         self.register = index + 1  # DFRobot relay register = index + 1
@@ -200,7 +200,7 @@ class StopAndGoStation:
         rc = relay_config or {}
         self.relay = I2CRelay(
             address=rc.get("address", 0x10),
-            index=rc.get("index", 1),
+            index=rc.get("index", 0),
             bus=rc.get("bus", 1),
         )
         self.current_team = None
@@ -785,7 +785,7 @@ async def main():
     relay_config = getattr(args, "_relay_config", {})
     logging.info(
         f"Relay: address=0x{relay_config.get('address', 0x10):02x}, "
-        f"index={relay_config.get('index', 1)}, "
+        f"index={relay_config.get('index', 0)}, "
         f"bus={relay_config.get('bus', 1)}"
     )
 

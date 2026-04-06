@@ -16,7 +16,7 @@ hmac_secret = "__STOPANDGO_HMAC_SECRET__"
 # I2C relay configuration
 [relay]
 address = 0x10   # I2C address of the relay board
-index = 1        # Relay channel (1-based)
+index = 0        # Relay channel (0-based)
 bus = 1          # I2C bus number
 
 [logging]
