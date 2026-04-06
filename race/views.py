@@ -4536,6 +4536,7 @@ def auto_assign_from_championship(request, race_id):
 # ============================================================
 
 
+@xframe_options_exempt
 def public_leaderboard(request):
     """Public full-screen leaderboard — always shows the current round's active race."""
     cround = Round.objects.filter(ended__isnull=True).order_by("start").first()
