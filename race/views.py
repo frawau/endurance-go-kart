@@ -216,6 +216,7 @@ def get_team_card(request):
     return JsonResponse({"html": html})
 
 
+@xframe_options_exempt
 def changelane_info(request, lane_number):
     try:
         cround = current_round()
@@ -241,6 +242,7 @@ def changelane_info(request, lane_number):
     )
 
 
+@xframe_options_exempt
 def changelane_detail(request, lane_number):
     cround = current_round()
     change_lane = get_object_or_404(ChangeLane, round=cround, lane=lane_number)
@@ -249,6 +251,7 @@ def changelane_detail(request, lane_number):
     )
 
 
+@xframe_options_exempt
 def changelane_vdetail(request, lane_number):
     """Large detail view for all_pitlanes"""
     cround = current_round()
@@ -267,6 +270,7 @@ def update_change_lane(request, lane_number):
     return render(request, "layout/changelane_info.html", {"change_lane": change_lane})
 
 
+@xframe_options_exempt
 def changedriver_info(request):
     try:
         cround = current_round()
