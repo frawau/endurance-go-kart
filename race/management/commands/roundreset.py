@@ -34,12 +34,50 @@ class Command(BaseCommand):
             action="store_true",
             help="Show what would be reset without actually doing it",
         )
+        parser.add_argument(
+            "--round-id",
+            type=int,
+            default=None,
+            help="Reset a specific round by ID (default: current round)",
+        )
+        parser.add_argument(
+            "--list",
+            action="store_true",
+            help="List all rounds with their IDs and exit",
+        )
 
     def handle(self, *args, **options):
-        cround = self.get_current_round()
+        if options["list"]:
+            rounds = Round.objects.select_related("championship").order_by("-start")
+            if not rounds:
+                self.stdout.write("No rounds found.")
+                return
+            self.stdout.write(
+                f"{'ID':>4}  {'Started':<8} {'Ended':<8}  {'Round':<20}  Championship"
+            )
+            self.stdout.write("-" * 80)
+            for r in rounds:
+                started = "yes" if r.started else "no"
+                ended = "yes" if r.ended else "no"
+                self.stdout.write(
+                    f"{r.id:>4}  {started:<8} {ended:<8}  {r.name:<20}  {r.championship.name}"
+                )
+            return
+
+        if options["round_id"]:
+            try:
+                cround = Round.objects.get(pk=options["round_id"])
+            except Round.DoesNotExist:
+                self.stdout.write(
+                    self.style.ERROR(f"Round {options['round_id']} not found.")
+                )
+                return
+        else:
+            cround = self.get_current_round()
 
         if not cround:
             self.stdout.write(self.style.ERROR("No current round found."))
+            self.stdout.write("Use --list to see available rounds, or --round-id N.")
             return
 
         self.stdout.write(f"Round:        {cround.name}")
