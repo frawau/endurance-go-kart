@@ -3062,6 +3062,14 @@ def edit_round_view(request):
             round_id = request.POST.get("round_id")
             round_obj = get_object_or_404(Round, id=round_id)
 
+            if round_obj.ready:
+                return JsonResponse(
+                    {
+                        "success": False,
+                        "error": "This round can no longer be modified (already ready).",
+                    }
+                )
+
             # Update round fields
             round_obj.name = request.POST.get("name")
             round_obj.start = request.POST.get("start")
@@ -3078,6 +3086,12 @@ def edit_round_view(request):
                     elif len(parts) == 2:  # MM:SS
                         minutes, seconds = map(int, parts)
                         return dt.timedelta(minutes=minutes, seconds=seconds)
+                # Try to parse as plain minutes
+                try:
+                    minutes = float(duration_str)
+                    return dt.timedelta(minutes=minutes)
+                except (ValueError, TypeError):
+                    pass
                 return dt.timedelta(0)
 
             round_obj.duration = parse_duration(request.POST.get("duration"))
@@ -3086,6 +3100,9 @@ def edit_round_view(request):
             )
             round_obj.pitlane_close_before = parse_duration(
                 request.POST.get("pitlane_close_before")
+            )
+            round_obj.limit_time_min = parse_duration(
+                request.POST.get("limit_time_min", "01:00")
             )
             round_obj.allow_quali_changes = (
                 request.POST.get("allow_quali_changes") == "on"
