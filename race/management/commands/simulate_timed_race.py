@@ -287,9 +287,10 @@ class Command(BaseCommand):
             self.log("[Director] Race started ✓")
 
         race_start_wall = loop.time()
-        race_duration_s = await sync_to_async(
-            lambda: active_race.duration.total_seconds()
-        )()
+        # Use cround.duration (the configured endurance length) — Race.duration
+        # falls through to championship.default_time_limit or a 4h fallback,
+        # which doesn't reflect the actual configured race length.
+        race_duration_s = await sync_to_async(lambda: cround.duration.total_seconds())()
         race_wall_s = race_duration_s / speed
 
         penalty_wall_interval = 300.0 / speed  # check every 5 race-minutes
@@ -779,9 +780,6 @@ class Command(BaseCommand):
         await coord.race_started.wait()
         race_start_wall = loop.time()
 
-        race_duration_s = await sync_to_async(
-            lambda: active_race.duration.total_seconds()
-        )()
         # Use cround.duration (the configured endurance length) for the pit window,
         # matching the real pit_lane_open property which also uses cround.duration.
         round_duration_s = await sync_to_async(
