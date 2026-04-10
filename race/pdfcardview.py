@@ -380,10 +380,6 @@ class GenerateCardPDF(View):
             "cards_per_page": cards_per_page,
         }
 
-        # Draw crop marks on first page if more than 2 cards fit
-        if cards_per_page > 2:
-            self.draw_crop_marks(p, pagesize)
-
         # Handle different input types
         if "round_team_id" in data:
             # Single round_team
@@ -426,6 +422,14 @@ class GenerateCardPDF(View):
 
     def _draw_card(self, p, tm, card_pos):
         """Helper method to handle card drawing logic"""
+        # Draw crop marks once at the start of each page
+        if (
+            card_pos["curcol"] == 0
+            and card_pos["currow"] == 0
+            and card_pos["cards_per_page"] > 2
+        ):
+            self.draw_crop_marks(p, p._pagesize)
+
         if self.rotate:
             x_offset = self.card_height * card_pos["curcol"]
             y_offset = self.card_width * card_pos["currow"]
@@ -441,8 +445,5 @@ class GenerateCardPDF(View):
             card_pos["currow"] = (card_pos["currow"] + 1) % card_pos["cards_per_row"]
             if card_pos["currow"] == 0:
                 p.showPage()
-                # Draw crop marks on the new page
-                if card_pos["cards_per_page"] > 2:
-                    self.draw_crop_marks(p, p._pagesize)
 
         return card_pos
