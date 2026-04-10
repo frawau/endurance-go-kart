@@ -5,7 +5,7 @@ from langdetect import detect, LangDetectException
 from reportlab.pdfgen import canvas
 import reportlab.lib.pagesizes as pagesz
 from reportlab.lib.units import mm
-from reportlab.lib.colors import black, darkred, white
+from reportlab.lib.colors import black, darkred, white, Color
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab_qrcode import QRCodeImage
@@ -65,6 +65,45 @@ class GenerateCardPDF(View):
                 return fontsize
             fontsize -= 1
         return fontsize
+
+    def draw_crop_marks(self, canvas, pagesize):
+        """Draw small crop marks at card boundaries on the page edges."""
+        mark_len = 3 * mm
+        mark_offset = 1 * mm  # gap between mark and printable area
+        gray = Color(0, 0, 0, 0.6)
+        canvas.saveState()
+        canvas.setStrokeColor(gray)
+        canvas.setLineWidth(0.25)
+
+        page_w, page_h = pagesize
+
+        if self.rotate:
+            x_step = self.card_height
+            y_step = self.card_width
+        else:
+            x_step = self.card_width
+            y_step = self.card_height
+
+        cols = int(page_w / x_step)
+        rows = int(page_h / y_step)
+
+        # Vertical cut lines: at each column boundary (skip left and right page edges)
+        for c in range(1, cols):
+            x = x_step * c
+            # Bottom edge
+            canvas.line(x, 0, x, mark_len)
+            # Top edge
+            canvas.line(x, page_h, x, page_h - mark_len)
+
+        # Horizontal cut lines: at each row boundary (skip top and bottom page edges)
+        for r in range(1, rows):
+            y = y_step * r
+            # Left edge
+            canvas.line(0, y, mark_len, y)
+            # Right edge
+            canvas.line(page_w, y, page_w - mark_len, y)
+
+        canvas.restoreState()
 
     def draw_drivercard(self, canvas, teammember, x, y):
         """This card is designed for A5, with a 3mm margin. Let's scale things"""
@@ -332,12 +371,18 @@ class GenerateCardPDF(View):
             cards_per_col = int(pagesize[0] / self.card_width)
 
         # Initialize card position tracking
+        cards_per_page = cards_per_row * cards_per_col
         card_pos = {
             "currow": 0,
             "curcol": 0,
             "cards_per_row": cards_per_row,
             "cards_per_col": cards_per_col,
+            "cards_per_page": cards_per_page,
         }
+
+        # Draw crop marks on first page if more than 2 cards fit
+        if cards_per_page > 2:
+            self.draw_crop_marks(p, pagesize)
 
         # Handle different input types
         if "round_team_id" in data:
@@ -396,5 +441,8 @@ class GenerateCardPDF(View):
             card_pos["currow"] = (card_pos["currow"] + 1) % card_pos["cards_per_row"]
             if card_pos["currow"] == 0:
                 p.showPage()
+                # Draw crop marks on the new page
+                if card_pos["cards_per_page"] > 2:
+                    self.draw_crop_marks(p, p._pagesize)
 
         return card_pos
