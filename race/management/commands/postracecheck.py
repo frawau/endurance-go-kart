@@ -6,7 +6,8 @@ import datetime as dt
 class Command(BaseCommand):
     help = (
         "Simulate the post-race check for a round: show the penalties it "
-        "would create and why, without modifying anything."
+        "would create and why. Pass --apply to actually create them when "
+        "the round has not yet had its post-race check run."
     )
 
     def get_current_round(self):
@@ -29,6 +30,15 @@ class Command(BaseCommand):
             "--list",
             action="store_true",
             help="List all rounds with their IDs and exit",
+        )
+        parser.add_argument(
+            "--apply",
+            action="store_true",
+            help=(
+                "After showing the simulation, run the real post-race check "
+                "if the round has not already had one. Refuses to run if "
+                "post_race_check_completed is already True."
+            ),
         )
 
     def _fmt_td(self, td):
@@ -224,4 +234,27 @@ class Command(BaseCommand):
                 f"would be created, totalling {total_laps} post-race lap(s)."
             )
         )
-        self.stdout.write("No changes were made to the database.")
+
+        if not options["apply"]:
+            self.stdout.write("No changes were made to the database.")
+            return
+
+        if cround.post_race_check_completed:
+            self.stdout.write(
+                self.style.ERROR(
+                    "\n--apply refused: post_race_check_completed is already True "
+                    "for this round. Nothing applied."
+                )
+            )
+            return
+
+        self.stdout.write("")
+        self.stdout.write(
+            self.style.WARNING("--apply set: running real post-race check...")
+        )
+        created = cround.post_race_check()
+        self.stdout.write(
+            self.style.SUCCESS(
+                f"Post-race check applied: {created} penalty record(s) created."
+            )
+        )
