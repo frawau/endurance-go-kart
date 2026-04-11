@@ -794,7 +794,20 @@ class Round(models.Model):
             "message": f"This should not have happened!",
             "status": "error",
         }
-        if self.started and not self.pit_lane_open:
+
+        # "race is live" means the active race has actually started and not
+        # yet ended. Between races (e.g. after quali finished, before MAIN
+        # starts) Round.started is still set but the active race has not,
+        # and we must still allow initial driver queuing — identical to the
+        # pre-quali flow. Legacy rounds with no active race fall back to the
+        # round-level flag.
+        active = self.active_race
+        if active is not None:
+            race_is_live = active.started is not None and active.ended is None
+        else:
+            race_is_live = bool(self.started)
+
+        if race_is_live and not self.pit_lane_open:
             raise ValidationError("The pit lane is closed.")
 
         if not driver.driver:
@@ -822,7 +835,7 @@ class Round(models.Model):
             driver=driver, register__isnull=False, start__isnull=True, end__isnull=True
         ).first()
         if session:
-            if self.started and session in top_sessions:
+            if race_is_live and session in top_sessions:
                 return {
                     "message": f"Driver {driver.member.nickname} from team {driver.team.number} is due in pit lane. Cannot be removed.",
                     "status": "error",
@@ -838,13 +851,13 @@ class Round(models.Model):
                 driver=driver,
                 round=self,
                 register=now,
-                race=self.active_race,
+                race=active,
             )
             retval = {
                 "message": f"Driver {driver.member.nickname} from team {driver.team.number} registered.",
                 "status": "ok",
             }
-        if self.started:
+        if race_is_live:
             alane = (
                 ChangeLane.objects.filter(round=self, driver__isnull=True)
                 .order_by("lane")
