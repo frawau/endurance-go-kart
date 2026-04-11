@@ -2440,7 +2440,16 @@ def confirm_round_results(request, round_id):
                 )
         rnd.results_confirmed = True
         rnd.points_factor = factor
-        rnd.save(update_fields=["results_confirmed", "points_factor"])
+        # Confirming results locks in the post-race check: no further penalty
+        # recomputation should be possible for this round.
+        rnd.post_race_check_completed = True
+        rnd.save(
+            update_fields=[
+                "results_confirmed",
+                "points_factor",
+                "post_race_check_completed",
+            ]
+        )
 
     labels = {"1": "full", "0.5": "half", "0": "no"}
     label = labels.get(factor_str, factor_str)
