@@ -25,7 +25,7 @@ from .models import (
 )
 from django.template.loader import render_to_string
 from channels.db import database_sync_to_async
-from django.db.models import Count, Q
+from django.db.models import Count, F, Q
 
 # Import your models
 
@@ -1285,18 +1285,95 @@ class TimingConsumer(AsyncWebsocketConsumer):
             # Check for suspicious lap time
             suggested_split = 1
             max_split = 1
+            is_suspicious = False
             if lap_time and should_count:
                 suggested_split, max_split = self.estimate_lap_count(
                     race, lap_time, team, crossing_time
                 )
                 if suggested_split > 1:
-                    crossing.is_suspicious = True
-                    crossing.save(update_fields=["is_suspicious"])
-                    print(
-                        f"Suspicious lap: Team {team_number}, "
-                        f"Lap {lap_number}, Time {lap_time}, "
-                        f"suggested split: {suggested_split}, max: {max_split}"
-                    )
+                    is_suspicious = True
+
+                    # Check if this is a pit-bypass suspicious lap (driver change
+                    # happened during this lap window)
+                    cround = race.round
+                    pit_change = False
+                    if cround.auto_handle_pit_suspicious:
+                        window_start = crossing_time - lap_time
+                        pit_change = Session.objects.filter(
+                            driver__team=team,
+                            race=race,
+                            end__gte=window_start,
+                            end__lte=crossing_time,
+                        ).exists()
+
+                    if pit_change:
+                        action = cround.pit_suspicious_action
+                        if action == "dismiss":
+                            is_suspicious = False
+                            print(
+                                f"Auto-dismissed pit suspicious lap: Team {team_number}, "
+                                f"Lap {lap_number}, Time {lap_time}"
+                            )
+                        elif action == "split":
+                            # Auto-split: create evenly-spaced laps
+                            count = suggested_split
+                            prev = (
+                                LapCrossing.objects.filter(
+                                    race=race,
+                                    team=team,
+                                    lap_number__lt=lap_number,
+                                )
+                                .order_by("-lap_number")
+                                .first()
+                            )
+                            if prev:
+                                time_delta = crossing_time - prev.crossing_time
+                                slice_dur = time_delta / count
+                                # Shift subsequent laps
+                                LapCrossing.objects.filter(
+                                    race=race,
+                                    team=team,
+                                    lap_number__gt=lap_number,
+                                ).update(lap_number=F("lap_number") + (count - 1))
+                                # Create split laps
+                                for i in range(count):
+                                    ct = (
+                                        prev.crossing_time + slice_dur * (i + 1)
+                                        if i < count - 1
+                                        else crossing_time
+                                    )
+                                    LapCrossing.objects.create(
+                                        race=race,
+                                        team=team,
+                                        transponder=crossing.transponder,
+                                        lap_number=lap_number + i,
+                                        crossing_time=ct,
+                                        lap_time=slice_dur,
+                                        is_valid=True,
+                                        is_suspicious=False,
+                                        was_split=True,
+                                        split_from=crossing,
+                                        counted_during_suspension=crossing.counted_during_suspension,
+                                        session=crossing.session,
+                                    )
+                                # Mark original as invalid
+                                crossing.is_valid = False
+                                crossing.save()
+                                is_suspicious = False
+                                # Update lap_number for broadcast
+                                lap_number = lap_number + count - 1
+                                print(
+                                    f"Auto-split pit suspicious lap: Team {team_number}, "
+                                    f"into {count} laps"
+                                )
+                    else:
+                        crossing.is_suspicious = True
+                        crossing.save(update_fields=["is_suspicious"])
+                        print(
+                            f"Suspicious lap: Team {team_number}, "
+                            f"Lap {lap_number}, Time {lap_time}, "
+                            f"suggested split: {suggested_split}, max: {max_split}"
+                        )
 
             print(
                 f"Lap recorded: Team {team_number}, Lap {lap_number}, "
@@ -1391,9 +1468,9 @@ class TimingConsumer(AsyncWebsocketConsumer):
                 "team_number": team_number,
                 "lap_number": lap_number,
                 "lap_time": lap_time,
-                "is_suspicious": crossing.is_suspicious,
-                "suggested_split": suggested_split if crossing.is_suspicious else 1,
-                "max_split": max_split if crossing.is_suspicious else 1,
+                "is_suspicious": is_suspicious,
+                "suggested_split": suggested_split if is_suspicious else 1,
+                "max_split": max_split if is_suspicious else 1,
                 "crossing_id": crossing.id,
                 "race_finished": race_finished,
                 "race_type": race.race_type if race_finished else None,

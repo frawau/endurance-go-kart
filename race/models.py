@@ -306,6 +306,23 @@ class Round(models.Model):
         help_text="Override championship default time limit for this round",
     )
 
+    PIT_SUSPICIOUS_ACTIONS = (
+        ("dismiss", "Dismiss (keep as one lap)"),
+        ("split", "Auto-split into estimated laps"),
+    )
+    auto_handle_pit_suspicious = models.BooleanField(
+        default=True,
+        verbose_name="Auto-Handle Pit Suspicious Laps",
+        help_text="Automatically handle suspicious laps caused by driver changes bypassing the loop",
+    )
+    pit_suspicious_action = models.CharField(
+        max_length=8,
+        choices=PIT_SUSPICIOUS_ACTIONS,
+        default="dismiss",
+        verbose_name="Pit Suspicious Action",
+        help_text="What to do with suspicious laps after driver changes",
+    )
+
     # No user serviceable parts below
     ready = models.BooleanField(default=False)
     started = models.DateTimeField(null=True, blank=True)

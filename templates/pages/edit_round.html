@@ -141,6 +141,33 @@
                     </div>
                 </div>
 
+                <!-- Pit Suspicious Lap Handling -->
+                <div class="row" id="pit-suspicious-container" style="display: none;">
+                    <div class="col-md-6">
+                        <div class="form-group mb-3">
+                            <div class="form-check">
+                                <input type="checkbox" class="form-check-input" id="auto_handle_pit_suspicious"
+                                       name="auto_handle_pit_suspicious">
+                                <label class="form-check-label" for="auto_handle_pit_suspicious">
+                                    Auto-Handle Pit Suspicious Laps
+                                </label>
+                                <small class="form-text text-muted d-block">
+                                    Automatically handle suspicious laps caused by driver changes bypassing the timing loop.
+                                </small>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="form-group mb-3">
+                            <label for="pit_suspicious_action">Action:</label>
+                            <select class="form-control" id="pit_suspicious_action" name="pit_suspicious_action">
+                                <option value="dismiss">Dismiss (keep as one lap)</option>
+                                <option value="split">Auto-split into estimated laps</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Qualifying Configuration -->
                 <div id="qualifying-config-container" style="display: none;">
                     <div class="row">
@@ -322,7 +349,9 @@ document.addEventListener('DOMContentLoaded', function() {
                             data-qualifying-cutoffs='${JSON.stringify(round.qualifying_cutoffs || {})}'
                             data-quali-start-mode="${round.quali_start_mode || 'IMMEDIATE'}"
                             data-race-start-mode="${round.race_start_mode || 'FIRST_CROSSING'}"
-                            data-allow-quali-changes="${round.allow_quali_changes !== false}">
+                            data-allow-quali-changes="${round.allow_quali_changes !== false}"
+                            data-auto-handle-pit-suspicious="${round.auto_handle_pit_suspicious !== false}"
+                            data-pit-suspicious-action="${round.pit_suspicious_action || 'dismiss'}">
                             ${round.name}
                         </option>`);
                     });
@@ -368,13 +397,17 @@ document.addEventListener('DOMContentLoaded', function() {
                 $('#ending-mode-container').show();
                 $('#qualifying-config-container').show();
                 $('#race-start-mode-container').show();
+                $('#pit-suspicious-container').show();
                 $('#ending_mode').val(selectedOption.data('ending-mode') || 'CROSS_AFTER_TIME');
                 $('#race_start_mode').val(selectedOption.data('race-start-mode') || 'FIRST_CROSSING');
                 $('#quali_start_mode').val(selectedOption.data('quali-start-mode') || 'IMMEDIATE');
+                $('#auto_handle_pit_suspicious').prop('checked', selectedOption.data('auto-handle-pit-suspicious') !== false);
+                $('#pit_suspicious_action').val(selectedOption.data('pit-suspicious-action') || 'dismiss');
             } else {
                 $('#ending-mode-container').hide();
                 $('#qualifying-config-container').hide();
                 $('#race-start-mode-container').hide();
+                $('#pit-suspicious-container').hide();
             }
 
             // Qualifying config
@@ -445,10 +478,12 @@ document.addEventListener('DOMContentLoaded', function() {
             $('#ending-mode-container').show();
             $('#qualifying-config-container').show();
             $('#race-start-mode-container').show();
+            $('#pit-suspicious-container').show();
         } else {
             $('#ending-mode-container').hide();
             $('#qualifying-config-container').hide();
             $('#race-start-mode-container').hide();
+            $('#pit-suspicious-container').hide();
         }
     });
 

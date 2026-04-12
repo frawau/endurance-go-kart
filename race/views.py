@@ -1186,6 +1186,12 @@ def update_round(request, round_id):
                 request.POST.get("pitlane_close_before")
             )
             cround.allow_quali_changes = request.POST.get("allow_quali_changes") == "on"
+            cround.auto_handle_pit_suspicious = (
+                request.POST.get("auto_handle_pit_suspicious") == "on"
+            )
+            cround.pit_suspicious_action = request.POST.get(
+                "pit_suspicious_action", "dismiss"
+            )
             cround.quali_start_mode = request.POST.get("quali_start_mode", "IMMEDIATE")
             cround.race_start_mode = request.POST.get(
                 "race_start_mode", "FIRST_CROSSING"
@@ -3122,6 +3128,12 @@ def edit_round_view(request):
             round_obj.allow_quali_changes = (
                 request.POST.get("allow_quali_changes") == "on"
             )
+            round_obj.auto_handle_pit_suspicious = (
+                request.POST.get("auto_handle_pit_suspicious") == "on"
+            )
+            round_obj.pit_suspicious_action = request.POST.get(
+                "pit_suspicious_action", "dismiss"
+            )
             round_obj.quali_start_mode = request.POST.get(
                 "quali_start_mode", "IMMEDIATE"
             )
@@ -3246,6 +3258,8 @@ def get_championship_rounds(request, championship_id):
                     "quali_start_mode": round_obj.quali_start_mode,
                     "race_start_mode": round_obj.race_start_mode,
                     "allow_quali_changes": round_obj.allow_quali_changes,
+                    "auto_handle_pit_suspicious": round_obj.auto_handle_pit_suspicious,
+                    "pit_suspicious_action": round_obj.pit_suspicious_action,
                     **_get_qualifying_info(round_obj),
                 }
             )
