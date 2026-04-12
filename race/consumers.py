@@ -1015,7 +1015,7 @@ class TimingConsumer(SafeSendMixin, AsyncWebsocketConsumer):
                 {"type": "grid_violation", **result["grid_violation"]},
             )
 
-        # Update penalty queue crossing count only if there are penalties queued
+        # Update penalty queue crossing count when penalties are queued
         from .signals import send_penalty_queue_update
 
         has_queue = await database_sync_to_async(
