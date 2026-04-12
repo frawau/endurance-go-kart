@@ -8,6 +8,7 @@ from race.models import (
     round_pause,
     ChangeLane,
     RoundPenalty,
+    RoundStanding,
     PenaltyQueue,
     LapCrossing,
     RaceTransponderAssignment,
@@ -194,6 +195,17 @@ class Command(BaseCommand):
                             f"Unlocked grid for {n_unlocked} subsequent non-started race(s)"
                         )
                     )
+
+                # Clear championship standings for this round
+                n, _ = RoundStanding.objects.filter(round=cround).delete()
+                if n:
+                    self.stdout.write(
+                        self.style.SUCCESS(f"Deleted {n} championship standings")
+                    )
+                if cround.results_confirmed:
+                    cround.results_confirmed = False
+                    cround.save(update_fields=["results_confirmed"])
+                    self.stdout.write(self.style.SUCCESS("Reset results_confirmed"))
 
                 # Reset Round.ended if it was set by this race ending
                 if cround.ended is not None:
