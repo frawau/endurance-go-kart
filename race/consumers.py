@@ -1015,16 +1015,10 @@ class TimingConsumer(SafeSendMixin, AsyncWebsocketConsumer):
                 {"type": "grid_violation", **result["grid_violation"]},
             )
 
-        # Update penalty queue crossing count only if there are penalties queued
+        # Update penalty queue crossing count (if any penalty is being served)
         from .signals import send_penalty_queue_update
 
-        has_queue = await database_sync_to_async(
-            lambda: PenaltyQueue.objects.filter(
-                round_penalty__round_id=round_id
-            ).exists()
-        )()
-        if has_queue:
-            await database_sync_to_async(send_penalty_queue_update)(round_id)
+        await database_sync_to_async(send_penalty_queue_update)(round_id)
 
         if result.get("race_started"):
             # FIRST_CROSSING mode: race just started on this crossing — schedule auto-end
