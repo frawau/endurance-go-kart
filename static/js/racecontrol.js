@@ -1418,18 +1418,17 @@ function handleStopAndGoMessage(data) {
   
   switch (data.type) {
     case 'penalty_queue_update':
-      // Update status display and action buttons only — never touch the form
+      // Update penalty queue UI (consolidated status and buttons)
       updatePenaltyQueueUI(data);
-
+      
       if (data && data.queue_count > 0) {
-        // Update internal state for serve/delay/cancel buttons
-        if (data.active_penalty) {
-          currentQueueId = data.active_penalty.queue_id;
-          currentRoundPenaltyId = data.active_penalty.penalty_id;
-        }
+        // Load current penalty details for management
+        loadQueueState();
       } else {
+        // Reset state when queue is empty
         currentQueueId = null;
         currentRoundPenaltyId = null;
+        resetStopAndGoForm();
       }
       break;
       
