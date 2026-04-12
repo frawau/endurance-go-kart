@@ -1,5 +1,11 @@
 from django.core.management.base import BaseCommand
-from race.models import Round, ChampionshipPenalty, RoundPenalty, team_member
+from race.models import (
+    Round,
+    ChampionshipPenalty,
+    MandatoryPenalty,
+    RoundPenalty,
+    team_member,
+)
 import datetime as dt
 
 
@@ -109,19 +115,16 @@ class Command(BaseCommand):
 
         championship = cround.championship
         penalties = {}
-        for key, pname in (
-            ("required_changes", "required changes"),
-            ("time_limit", "time limit"),
-            ("time_limit_min", "time limit min"),
-        ):
+        for mp_key in ("required_changes", "time_limit", "time_limit_min"):
             try:
-                penalties[key] = ChampionshipPenalty.objects.get(
+                mp = MandatoryPenalty.objects.get(key=mp_key)
+                penalties[mp_key] = ChampionshipPenalty.objects.get(
                     championship=championship,
-                    penalty__name=pname,
+                    penalty=mp.penalty,
                     sanction="P",
                 )
-            except ChampionshipPenalty.DoesNotExist:
-                penalties[key] = None
+            except (MandatoryPenalty.DoesNotExist, ChampionshipPenalty.DoesNotExist):
+                penalties[mp_key] = None
 
         self.stdout.write("\nConfigured Post-Race-Laps penalties:")
         for key, cp in penalties.items():

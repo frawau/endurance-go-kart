@@ -59,6 +59,7 @@ from .models import (
     LapCrossing,
     QualifyingKnockoutRule,
     RoundStanding,
+    MandatoryPenalty,
 )
 from .signals import race_end_requested
 from .serializers import ChangeLaneSerializer
@@ -574,10 +575,15 @@ def falsestart(request):
         LapCrossing.objects.filter(race=active_race).delete()
 
         # Delete grid order penalties created during this race
-        grid_order_penalty = ChampionshipPenalty.objects.filter(
-            championship=cround.championship,
-            penalty__name="grid order",
-        ).first()
+        mp_grid = MandatoryPenalty.objects.filter(key="grid_order").first()
+        grid_order_penalty = (
+            ChampionshipPenalty.objects.filter(
+                championship=cround.championship,
+                penalty=mp_grid.penalty,
+            ).first()
+            if mp_grid
+            else None
+        )
         if grid_order_penalty:
             RoundPenalty.objects.filter(
                 round=cround,
@@ -4081,8 +4087,9 @@ def delay_penalty(request):
             # as specified in requirements
             round_obj = queue_entry.round_penalty.round
             try:
+                mp_ig = MandatoryPenalty.objects.get(key="ignoring_sg")
                 ignoring_sg_penalty = ChampionshipPenalty.objects.get(
-                    championship=round_obj.championship, penalty__name="ignoring s&g"
+                    championship=round_obj.championship, penalty=mp_ig.penalty
                 )
 
                 # Apply ignoring s&g penalty to the offending team

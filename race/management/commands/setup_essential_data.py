@@ -1,6 +1,6 @@
 from django.core.management.base import BaseCommand
 from django.contrib.auth.models import Group
-from race.models import Config, Penalty
+from race.models import Config, Penalty, MandatoryPenalty
 
 
 class Command(BaseCommand):
@@ -31,14 +31,31 @@ class Command(BaseCommand):
             else:
                 self.stdout.write(f'Config "{key}" already exists')
 
-        # 3. Create Standard Penalties
-        penalties = [
-            ("time limit min", "Driving less than the minimum time required."),
-            ("time limit", "Driving more than the maximum drive time."),
-            ("required changes", "Too few driver changes."),
-            ("grid order", "Crossing the start line out of grid position order."),
-        ]
-        for name, description in penalties:
+        # 3. Create Standard Penalties and MandatoryPenalty links
+        # key → (default name, description)
+        mandatory_penalties = {
+            "required_changes": (
+                "required changes",
+                "Too few driver changes.",
+            ),
+            "time_limit": (
+                "time limit",
+                "Driving more than the maximum drive time.",
+            ),
+            "time_limit_min": (
+                "time limit min",
+                "Driving less than the minimum time required.",
+            ),
+            "grid_order": (
+                "grid order",
+                "Crossing the start line out of grid position order.",
+            ),
+            "ignoring_sg": (
+                "ignoring s&g",
+                "Ignoring a Stop & Go penalty.",
+            ),
+        }
+        for mp_key, (name, description) in mandatory_penalties.items():
             penalty, created = Penalty.objects.get_or_create(
                 name=name, defaults={"description": description}
             )
@@ -46,6 +63,17 @@ class Command(BaseCommand):
                 self.stdout.write(self.style.SUCCESS(f'Created penalty: "{name}"'))
             else:
                 self.stdout.write(f'Penalty "{name}" already exists')
+
+            # Link MandatoryPenalty → Penalty (only if not already linked)
+            mp, mp_created = MandatoryPenalty.objects.get_or_create(
+                key=mp_key, defaults={"penalty": penalty}
+            )
+            if mp_created:
+                self.stdout.write(
+                    self.style.SUCCESS(f'Linked mandatory key "{mp_key}" → "{name}"')
+                )
+            else:
+                self.stdout.write(f'Mandatory key "{mp_key}" already linked')
 
         self.stdout.write(
             self.style.SUCCESS("Essential data setup completed successfully!")

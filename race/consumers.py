@@ -21,6 +21,7 @@ from .models import (
     GridPosition,
     ChampionshipPenalty,
     RoundPenalty,
+    MandatoryPenalty,
 )
 from django.template.loader import render_to_string
 from channels.db import database_sync_to_async
@@ -1402,10 +1403,15 @@ class TimingConsumer(AsyncWebsocketConsumer):
 
             # Grid order check (MAIN race only, driven by ChampionshipPenalty)
             if lap_number == 0 and race.race_type == "MAIN":
-                grid_order_penalty = ChampionshipPenalty.objects.filter(
-                    championship=race.round.championship,
-                    penalty__name="grid order",
-                ).first()
+                mp_grid = MandatoryPenalty.objects.filter(key="grid_order").first()
+                grid_order_penalty = (
+                    ChampionshipPenalty.objects.filter(
+                        championship=race.round.championship,
+                        penalty=mp_grid.penalty,
+                    ).first()
+                    if mp_grid
+                    else None
+                )
                 if grid_order_penalty:
                     grid_pos = GridPosition.objects.filter(race=race, team=team).first()
                     crossing_order = LapCrossing.objects.filter(

@@ -601,33 +601,22 @@ class Round(models.Model):
         championship = self.championship
         penalties = {}
 
-        # Try to get all three penalties
-        try:
-            penalties["required_changes"] = ChampionshipPenalty.objects.get(
-                championship=championship,
-                penalty__name="required changes",
-                sanction="P",  # Post Race Laps
-            )
-        except ChampionshipPenalty.DoesNotExist:
-            penalties["required_changes"] = None
-
-        try:
-            penalties["time_limit"] = ChampionshipPenalty.objects.get(
-                championship=championship,
-                penalty__name="time limit",
-                sanction="P",  # Post Race Laps
-            )
-        except ChampionshipPenalty.DoesNotExist:
-            penalties["time_limit"] = None
-
-        try:
-            penalties["time_limit_min"] = ChampionshipPenalty.objects.get(
-                championship=championship,
-                penalty__name="time limit min",
-                sanction="P",  # Post Race Laps
-            )
-        except ChampionshipPenalty.DoesNotExist:
-            penalties["time_limit_min"] = None
+        # Look up penalties via MandatoryPenalty keys (name-independent)
+        mandatory_keys = {
+            "required_changes": "required_changes",
+            "time_limit": "time_limit",
+            "time_limit_min": "time_limit_min",
+        }
+        for dict_key, mp_key in mandatory_keys.items():
+            try:
+                mp = MandatoryPenalty.objects.get(key=mp_key)
+                penalties[dict_key] = ChampionshipPenalty.objects.get(
+                    championship=championship,
+                    penalty=mp.penalty,
+                    sanction="P",
+                )
+            except (MandatoryPenalty.DoesNotExist, ChampionshipPenalty.DoesNotExist):
+                penalties[dict_key] = None
 
         # If no penalties are configured, return early
         if not any(penalties.values()):
@@ -2512,6 +2501,24 @@ class Penalty(models.Model):
 
     def __str__(self):
         return self.name
+
+
+class MandatoryPenalty(models.Model):
+    """Immutable lookup table linking code keys to Penalty records.
+
+    The code uses these keys (e.g. 'required_changes') to find the right
+    penalty regardless of what the user renamed it to in the UI.
+    """
+
+    key = models.CharField(max_length=32, unique=True)
+    penalty = models.OneToOneField(Penalty, on_delete=models.PROTECT)
+
+    class Meta:
+        verbose_name = _("Mandatory Penalty")
+        verbose_name_plural = _("Mandatory Penalties")
+
+    def __str__(self):
+        return f"{self.key} → {self.penalty.name}"
 
 
 class ChampionshipPenalty(models.Model):
