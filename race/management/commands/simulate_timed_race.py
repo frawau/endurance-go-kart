@@ -268,6 +268,8 @@ class Command(BaseCommand):
         # ── Pre-race check ──
         if self.pre_checked:
             self.log("[Director] Pre-race check already done — skipping")
+            # Ensure pit lanes exist (may have been deleted by a race reset)
+            await sync_to_async(self._ensure_change_lanes)(cround)
             await sync_to_async(self._set_race_ready)(active_race)
             coord.race_ready.set()
         else:
@@ -361,6 +363,14 @@ class Command(BaseCommand):
         await sync_to_async(self._do_race_end)(cround, active_race, now)
         self.log("[Director] Race ended ✓")
         coord.all_done.set()
+
+    def _ensure_change_lanes(self, cround):
+        """Create ChangeLane objects if they don't exist (e.g. after a race reset)."""
+        existing = ChangeLane.objects.filter(round=cround).count()
+        if existing < cround.change_lanes:
+            for i in range(existing, cround.change_lanes):
+                ChangeLane.objects.create(driver=None, round=cround, lane=i + 1)
+            self.log(f"[Director] Created {cround.change_lanes - existing} pit lane(s)")
 
     def _set_race_ready(self, race):
         if not race.ready:
