@@ -223,7 +223,7 @@ class ChangeDriverConsumer(AsyncWebsocketConsumer):
 
 class RoundConsumer(AsyncWebsocketConsumer):
     async def connect(self):
-        print("Round Consumer connection")
+        _log.info("Round Consumer connection")
         self.round_id = self.scope["url_route"]["kwargs"]["round_id"]
         self.round_group_name = f"round_{self.round_id}"
 
@@ -231,7 +231,7 @@ class RoundConsumer(AsyncWebsocketConsumer):
         await self.channel_layer.group_add(self.round_group_name, self.channel_name)
 
         await self.accept()
-        print(f"Round Consumer connection to {self.round_group_name} accepted.")
+        _log.info(f"Round Consumer connection to {self.round_group_name} accepted.")
 
     async def disconnect(self, close_code):
         # Leave room group
@@ -409,14 +409,14 @@ class StopAndGoConsumer(AsyncWebsocketConsumer):
         # Join room group
         await self.channel_layer.group_add(self.stopandgo_group_name, self.channel_name)
         await self.accept()
-        print("Stop and Go station connected")
+        _log.info("Stop and Go station connected")
 
     async def disconnect(self, close_code):
         # Leave room group
         await self.channel_layer.group_discard(
             self.stopandgo_group_name, self.channel_name
         )
-        print("Stop and Go station disconnected")
+        _log.info("Stop and Go station disconnected")
 
     async def receive(self, text_data):
         try:
@@ -425,11 +425,11 @@ class StopAndGoConsumer(AsyncWebsocketConsumer):
             # Verify HMAC signature for all incoming messages
             provided_signature = data.pop("hmac_signature", None)
             if not provided_signature:
-                print("Received message without HMAC signature")
+                _log.warning("Received message without HMAC signature")
                 return
 
             if not self.verify_hmac(data, provided_signature):
-                print("HMAC verification failed - rejecting message")
+                _log.warning("HMAC verification failed - rejecting message")
                 return
 
             # Handle both race control commands and station responses
@@ -442,7 +442,7 @@ class StopAndGoConsumer(AsyncWebsocketConsumer):
                 if response_type == "penalty_served":
                     team_number = data.get("team")
                     if team_number:
-                        print(f"Penalty served by team {team_number}")
+                        _log.info(f"Penalty served by team {team_number}")
 
                         # Send signed acknowledgment back to station
                         message = {
@@ -475,7 +475,7 @@ class StopAndGoConsumer(AsyncWebsocketConsumer):
                 elif response_type == "penalty_completed":
                     team_number = data.get("team")
                     if team_number:
-                        print(f"Penalty force completed for team {team_number}")
+                        _log.info(f"Penalty force completed for team {team_number}")
                         await self.channel_layer.group_send(
                             self.stopandgo_group_name,
                             {"type": "penalty_completed", "team": team_number},
@@ -484,7 +484,9 @@ class StopAndGoConsumer(AsyncWebsocketConsumer):
                 # Handle penalty acknowledgment from race control
                 team_number = data.get("team")
                 if team_number:
-                    print(f"Race control acknowledged penalty for team {team_number}")
+                    _log.info(
+                        f"Race control acknowledged penalty for team {team_number}"
+                    )
                     # Send penalty_acknowledged message to station (not as command)
                     message = {
                         "type": "penalty_acknowledged",
@@ -528,7 +530,7 @@ class StopAndGoConsumer(AsyncWebsocketConsumer):
                     )
 
         except json.JSONDecodeError:
-            print("Invalid JSON received from stop and go connection")
+            _log.warning("Invalid JSON received from stop and go connection")
 
     async def penalty_required(self, event):
         # Send signed penalty required command to station
@@ -658,7 +660,7 @@ class StopAndGoConsumer(AsyncWebsocketConsumer):
             )()
 
             if active_penalty:
-                print(
+                _log.info(
                     f"Processing station-reported penalty served for team {team_number}"
                 )
 
@@ -692,12 +694,12 @@ class StopAndGoConsumer(AsyncWebsocketConsumer):
                 # Trigger next penalty after 10 seconds
                 await self.trigger_next_penalty_after_delay(current_round.id)
             else:
-                print(
+                _log.info(
                     f"Ignoring station penalty_served for team {team_number} - penalty already processed or not found"
                 )
 
         except Exception as e:
-            print(f"Error handling penalty served from station: {e}")
+            _log.error(f"Error handling penalty served from station: {e}")
 
     @database_sync_to_async
     def get_current_round(self):
@@ -733,7 +735,7 @@ class StopAndGoConsumer(AsyncWebsocketConsumer):
                     "penalty_id": penalty_data["penalty_id"],
                 },
             )
-            print(f"Triggered next penalty for team {penalty_data['team_number']}")
+            _log.info(f"Triggered next penalty for team {penalty_data['team_number']}")
 
     @database_sync_to_async
     def get_next_penalty_data(self, round_id):
@@ -791,7 +793,7 @@ async def handle_race_end_request(sender, round_id, **kwargs):
     Handle race end requests with proper async locking.
     This ensures only one end_race operation can run at a time per round.
     """
-    print(f"🏁 Race end requested for Round {round_id}")
+    _log.info(f"Race end requested for Round {round_id}")
 
     try:
         # Get the round instance
@@ -800,14 +802,14 @@ async def handle_race_end_request(sender, round_id, **kwargs):
         # Use the round's instance-level lock for thread safety
         async with round_instance._end_race_lock:
             if not round_instance.ended:
-                print(f"🔒 Ending race {round_id} with lock protection")
+                _log.info(f"Ending race {round_id} with lock protection")
                 await sync_to_async(round_instance.end_race)()
-                print(f"✅ Race {round_id} ended successfully")
+                _log.info(f"Race {round_id} ended successfully")
             else:
-                print(f"⚠️ Race {round_id} already ended - skipping")
+                _log.info(f"Race {round_id} already ended - skipping")
 
     except Exception as e:
-        print(f"❌ Error ending race {round_id}: {e}")
+        _log.error(f"Error ending race {round_id}: {e}")
 
 
 class TimingConsumer(AsyncWebsocketConsumer):
@@ -856,14 +858,14 @@ class TimingConsumer(AsyncWebsocketConsumer):
 
         await self.channel_layer.group_add(self.timing_group_name, self.channel_name)
         await self.accept()
-        print("Timing daemon connected")
+        _log.info("Timing daemon connected")
 
     async def disconnect(self, close_code):
         self._station_connected = False
         await self.channel_layer.group_discard(
             self.timing_group_name, self.channel_name
         )
-        print("Timing daemon disconnected")
+        _log.info("Timing daemon disconnected")
 
     async def receive(self, text_data):
         try:
@@ -871,11 +873,11 @@ class TimingConsumer(AsyncWebsocketConsumer):
 
             provided_signature = data.pop("hmac_signature", None)
             if not provided_signature:
-                print("Timing: Received message without HMAC signature")
+                _log.warning("Timing: Received message without HMAC signature")
                 return
 
             if not self.verify_hmac(data, provided_signature):
-                print("Timing: HMAC verification failed - rejecting message")
+                _log.warning("Timing: HMAC verification failed - rejecting message")
                 return
 
             message_type = data.get("type")
@@ -883,19 +885,23 @@ class TimingConsumer(AsyncWebsocketConsumer):
             if message_type == "connected":
                 timing_mode = data.get("timing_mode", "duration")
                 if timing_mode not in self.VALID_TIMING_MODES:
-                    print(f"Timing: Invalid timing_mode '{timing_mode}', rejecting")
+                    _log.warning(
+                        f"Timing: Invalid timing_mode '{timing_mode}', rejecting"
+                    )
                     return
                 self._timing_mode = timing_mode
                 self._rollover_seconds = float(data.get("rollover_seconds", 360000.0))
                 self._station_connected = True
-                print(
+                _log.info(
                     f"Timing station connected: plugin={data.get('plugin_type')} "
                     f"mode={self._timing_mode} rollover={self._rollover_seconds}"
                 )
 
             elif message_type == "lap_crossing":
                 if not self._station_connected:
-                    print("Timing: lap_crossing before connected message, ignoring")
+                    _log.warning(
+                        "Timing: lap_crossing before connected message, ignoring"
+                    )
                     return
                 # Broadcast raw transponder detection for scan listeners
                 await self.channel_layer.group_send(
@@ -915,15 +921,15 @@ class TimingConsumer(AsyncWebsocketConsumer):
                     await self._broadcast_crossing(result)
 
             elif message_type == "warning":
-                print(f"Timing warning: {data.get('message')}")
+                _log.debug(f"Timing warning: {data.get('message')}")
 
             elif message_type == "response":
-                print(f"Timing response: {data.get('response')}")
+                _log.debug(f"Timing response: {data.get('response')}")
 
         except json.JSONDecodeError:
-            print("Timing: Invalid JSON received")
+            _log.warning("Timing: Invalid JSON received")
         except Exception as e:
-            print(f"Timing: Error processing message: {e}")
+            _log.error(f"Timing: Error processing message: {e}")
 
     async def send_ack(self, message_id):
         """Send ACK for a processed crossing back to the station."""
@@ -1004,7 +1010,7 @@ class TimingConsumer(AsyncWebsocketConsumer):
             asyncio.ensure_future(self._schedule_auto_end(race_id))
 
         if result.get("race_finished"):
-            print(f"Race {race_id} finished!")
+            _log.info(f"Race {race_id} finished!")
             await self.channel_layer.group_send(
                 f"round_{round_id}",
                 {
@@ -1030,11 +1036,11 @@ class TimingConsumer(AsyncWebsocketConsumer):
         )
         if delay is None:
             return
-        print(f"Race {race_id}: auto-end scheduled in {delay:.1f}s")
+        _log.info(f"Race {race_id}: auto-end scheduled in {delay:.1f}s")
         await asyncio.sleep(delay)
         ended = await database_sync_to_async(self._do_auto_end_race)(race_id)
         if ended:
-            print(f"Race {race_id}: auto-ended after time limit")
+            _log.info(f"Race {race_id}: auto-ended after time limit")
 
     @staticmethod
     def _get_auto_end_delay(race_id, modes):
@@ -1128,7 +1134,9 @@ class TimingConsumer(AsyncWebsocketConsumer):
                     msg_uuid
                     and LapCrossing.objects.filter(message_id=msg_uuid).exists()
                 ):
-                    print(f"Timing: Duplicate message_id {message_id[:8]}, skipping")
+                    _log.debug(
+                        f"Timing: Duplicate message_id {message_id[:8]}, skipping"
+                    )
                     return None
             else:
                 msg_uuid = None
@@ -1139,7 +1147,7 @@ class TimingConsumer(AsyncWebsocketConsumer):
             ).first()
 
             if not transponder:
-                print(f"Timing: Unknown transponder {transponder_id}")
+                _log.debug(f"Timing: Unknown transponder {transponder_id}")
                 return None
 
             # Update transponder last_seen
@@ -1159,7 +1167,7 @@ class TimingConsumer(AsyncWebsocketConsumer):
             )
 
             if not assignment:
-                print(
+                _log.debug(
                     f"Timing: No active race assignment for transponder {transponder_id}"
                 )
                 return None
@@ -1174,7 +1182,7 @@ class TimingConsumer(AsyncWebsocketConsumer):
                 race.ready and race.start_mode != "IMMEDIATE"
             )
             if not race_accepts_crossing:
-                print(
+                _log.debug(
                     f"Timing: Race {race.race_type} not armed/started — "
                     f"dropping crossing for team {team.number}"
                 )
@@ -1184,7 +1192,7 @@ class TimingConsumer(AsyncWebsocketConsumer):
             # This freezes positions at the moment the race ended — equivalent to
             # the race director pressing "End Race" which behaves as mode 1.
             if race.ended is not None:
-                print(
+                _log.debug(
                     f"Timing: Race {race.race_type} already ended — "
                     f"dropping crossing for team {team.number}"
                 )
@@ -1200,7 +1208,7 @@ class TimingConsumer(AsyncWebsocketConsumer):
                 - dt.timedelta(seconds=TRANSPONDER_DEDUP_SECONDS),
                 crossing_time__lte=crossing_time,
             ).exists():
-                print(
+                _log.debug(
                     f"Timing: Transponder dedup — team {team.number} "
                     f"already crossed within {TRANSPONDER_DEDUP_SECONDS}s, skipping"
                 )
@@ -1243,7 +1251,7 @@ class TimingConsumer(AsyncWebsocketConsumer):
                     race=race, team=team, crossing_time__gte=finish_boundary
                 ).exists()
                 if already_finished:
-                    print(
+                    _log.debug(
                         f"Timing: Post-expiry crossing for team {team.number} "
                         f"({race.race_type}/{race.ending_mode}) — already has "
                         f"finishing crossing, dropping"
@@ -1372,13 +1380,13 @@ class TimingConsumer(AsyncWebsocketConsumer):
                     else:
                         crossing.is_suspicious = True
                         crossing.save(update_fields=["is_suspicious"])
-                        print(
+                        _log.warning(
                             f"Suspicious lap: Team {team_number}, "
                             f"Lap {lap_number}, Time {lap_time}, "
                             f"suggested split: {suggested_split}, max: {max_split}"
                         )
 
-            print(
+            _log.info(
                 f"Lap recorded: Team {team_number}, Lap {lap_number}, "
                 f"Time: {lap_time}, raw={raw_time}"
             )
@@ -1515,7 +1523,7 @@ class TimingConsumer(AsyncWebsocketConsumer):
             return result
 
         except Exception as e:
-            print(f"Timing: Error handling lap crossing: {e}")
+            _log.error(f"Timing: Error handling lap crossing: {e}")
             return None
 
     def estimate_lap_count(self, race, lap_time, team=None, crossing_time=None):
