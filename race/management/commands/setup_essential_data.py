@@ -56,6 +56,15 @@ class Command(BaseCommand):
             ),
         }
         for mp_key, (name, description) in mandatory_penalties.items():
+            # If already linked, skip penalty creation (name may have been changed)
+            existing_mp = MandatoryPenalty.objects.filter(key=mp_key).first()
+            if existing_mp:
+                self.stdout.write(
+                    f'Mandatory key "{mp_key}" already linked → "{existing_mp.penalty.name}"'
+                )
+                continue
+
+            # Create penalty and link it
             penalty, created = Penalty.objects.get_or_create(
                 name=name, defaults={"description": description}
             )
@@ -64,16 +73,10 @@ class Command(BaseCommand):
             else:
                 self.stdout.write(f'Penalty "{name}" already exists')
 
-            # Link MandatoryPenalty → Penalty (only if not already linked)
-            mp, mp_created = MandatoryPenalty.objects.get_or_create(
-                key=mp_key, defaults={"penalty": penalty}
+            MandatoryPenalty.objects.create(key=mp_key, penalty=penalty)
+            self.stdout.write(
+                self.style.SUCCESS(f'Linked mandatory key "{mp_key}" → "{name}"')
             )
-            if mp_created:
-                self.stdout.write(
-                    self.style.SUCCESS(f'Linked mandatory key "{mp_key}" → "{name}"')
-                )
-            else:
-                self.stdout.write(f'Mandatory key "{mp_key}" already linked')
 
         # 4. Verify all mandatory penalty keys are correctly linked
         self.stdout.write("\nMandatory penalty verification:")
