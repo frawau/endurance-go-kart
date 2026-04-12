@@ -601,6 +601,7 @@ class StopAndGoConsumer(AsyncWebsocketConsumer):
                     "type": "penalty_queue_update",
                     "serving_team": event["serving_team"],
                     "queue_count": event["queue_count"],
+                    "crossings_since_queued": event.get("crossings_since_queued", 0),
                     "round_id": event["round_id"],
                 }
             )
@@ -1004,6 +1005,11 @@ class TimingConsumer(AsyncWebsocketConsumer):
                 f"round_{round_id}",
                 {"type": "grid_violation", **result["grid_violation"]},
             )
+
+        # Update penalty queue crossing count (if any penalty is being served)
+        from .signals import send_penalty_queue_update
+
+        await database_sync_to_async(send_penalty_queue_update)(round_id)
 
         if result.get("race_started"):
             # FIRST_CROSSING mode: race just started on this crossing — schedule auto-end
