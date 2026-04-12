@@ -197,10 +197,19 @@ class Command(BaseCommand):
                 "Use --no-laps with a real timing station, or switch to IMMEDIATE mode."
             )
 
-        # Check if pre-race check was already performed (drivers scanned in)
-        self.pre_checked = cround.ready
+        # Check if drivers were already scanned in for this race
+        # (pending sessions: registered but not started/ended)
+        pending_sessions = Session.objects.filter(
+            round=cround,
+            register__isnull=False,
+            start__isnull=True,
+            end__isnull=True,
+        ).count()
+        self.pre_checked = pending_sessions > 0
         if self.pre_checked:
-            self.log("Round already ready — using existing scanned-in drivers")
+            self.log(
+                f"Found {pending_sessions} scanned-in driver(s) — skipping registration"
+            )
 
         if self.no_laps:
             transponder_map, team_transponder = {}, {}
