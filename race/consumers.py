@@ -30,19 +30,10 @@ from django.template.loader import render_to_string
 from channels.db import database_sync_to_async
 from django.db.models import Count, F, Q
 
-
-class SafeSendMixin:
-    """Mixin to catch sends to already-disconnected WebSocket clients."""
-
-    async def safe_send(self, text_data):
-        try:
-            await self.send(text_data=text_data)
-        except RuntimeError:
-            # Client disconnected before the message could be sent
-            pass
+# Import your models
 
 
-class EmptyTeamsConsumer(SafeSendMixin, AsyncWebsocketConsumer):
+class EmptyTeamsConsumer(AsyncWebsocketConsumer):
     async def connect(self):
         # Get the current round
         self.current_round = await self.get_current_round()
@@ -189,7 +180,7 @@ class EmptyTeamsConsumer(SafeSendMixin, AsyncWebsocketConsumer):
             return False
 
 
-class ChangeLaneConsumer(SafeSendMixin, AsyncWebsocketConsumer):
+class ChangeLaneConsumer(AsyncWebsocketConsumer):
     async def connect(self):
         self.lane_number = self.scope["url_route"]["kwargs"]["pitlane_number"]
         self.lane_group_name = f"lane_{self.lane_number}"
@@ -213,7 +204,7 @@ class ChangeLaneConsumer(SafeSendMixin, AsyncWebsocketConsumer):
         )
 
 
-class ChangeDriverConsumer(SafeSendMixin, AsyncWebsocketConsumer):
+class ChangeDriverConsumer(AsyncWebsocketConsumer):
     async def connect(self):
         self.driverc_group_name = "changedriver"
 
@@ -227,10 +218,10 @@ class ChangeDriverConsumer(SafeSendMixin, AsyncWebsocketConsumer):
 
     async def changedriver_update(self, event):
         driverc_html = event["driverc_html"]
-        await self.safe_send(json.dumps({"driverc_html": driverc_html}))
+        await self.send(text_data=json.dumps({"driverc_html": driverc_html}))
 
 
-class RoundConsumer(SafeSendMixin, AsyncWebsocketConsumer):
+class RoundConsumer(AsyncWebsocketConsumer):
     async def connect(self):
         _log.info("Round Consumer connection")
         self.round_id = self.scope["url_route"]["kwargs"]["round_id"]
@@ -253,7 +244,7 @@ class RoundConsumer(SafeSendMixin, AsyncWebsocketConsumer):
             if data.get("type") == "resync":
                 payload = await self._get_round_state()
                 if payload:
-                    await self.safe_send(json.dumps(payload))
+                    await self.send(text_data=json.dumps(payload))
         except json.JSONDecodeError:
             pass
 
@@ -368,7 +359,7 @@ class RoundConsumer(SafeSendMixin, AsyncWebsocketConsumer):
         }
         if event.get("remaining_seconds") is not None:
             msg["remaining_seconds"] = event["remaining_seconds"]
-        await self.safe_send(json.dumps(msg))
+        await self.send(text_data=json.dumps(msg))
 
     async def race_finished(self, event):
         """Broadcast race finished notification to race control"""
@@ -383,7 +374,7 @@ class RoundConsumer(SafeSendMixin, AsyncWebsocketConsumer):
         )
 
 
-class StopAndGoConsumer(SafeSendMixin, AsyncWebsocketConsumer):
+class StopAndGoConsumer(AsyncWebsocketConsumer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         # Get HMAC secret from settings or use default
@@ -460,7 +451,7 @@ class StopAndGoConsumer(SafeSendMixin, AsyncWebsocketConsumer):
                             "timestamp": dt.datetime.now().isoformat(),
                         }
                         signed_message = self.sign_message(message)
-                        await self.safe_send(json.dumps(signed_message))
+                        await self.send(text_data=json.dumps(signed_message))
 
                         # Mark penalty as served in database and handle queue
                         await self.handle_penalty_served_from_station(team_number)
@@ -503,7 +494,7 @@ class StopAndGoConsumer(SafeSendMixin, AsyncWebsocketConsumer):
                         "timestamp": dt.datetime.now().isoformat(),
                     }
                     signed_message = self.sign_message(message)
-                    await self.safe_send(json.dumps(signed_message))
+                    await self.send(text_data=json.dumps(signed_message))
             else:
                 # Handle race control commands
                 if message_type == "penalty_required":
@@ -551,7 +542,7 @@ class StopAndGoConsumer(SafeSendMixin, AsyncWebsocketConsumer):
             "timestamp": dt.datetime.now().isoformat(),
         }
         signed_message = self.sign_message(message)
-        await self.safe_send(json.dumps(signed_message))
+        await self.send(text_data=json.dumps(signed_message))
 
     async def set_fence(self, event):
         # Send signed fence enable/disable command to station
@@ -562,7 +553,7 @@ class StopAndGoConsumer(SafeSendMixin, AsyncWebsocketConsumer):
             "timestamp": dt.datetime.now().isoformat(),
         }
         signed_message = self.sign_message(message)
-        await self.safe_send(json.dumps(signed_message))
+        await self.send(text_data=json.dumps(signed_message))
 
     async def get_fence_status(self, event):
         # Send signed query for fence status from station
@@ -572,7 +563,7 @@ class StopAndGoConsumer(SafeSendMixin, AsyncWebsocketConsumer):
             "timestamp": dt.datetime.now().isoformat(),
         }
         signed_message = self.sign_message(message)
-        await self.safe_send(json.dumps(signed_message))
+        await self.send(text_data=json.dumps(signed_message))
 
     async def force_complete_penalty(self, event):
         # Send signed force complete penalty command to station
@@ -582,7 +573,7 @@ class StopAndGoConsumer(SafeSendMixin, AsyncWebsocketConsumer):
             "timestamp": dt.datetime.now().isoformat(),
         }
         signed_message = self.sign_message(message)
-        await self.safe_send(json.dumps(signed_message))
+        await self.send(text_data=json.dumps(signed_message))
 
     async def penalty_served(self, event):
         # Broadcast penalty served notification to race control interfaces
@@ -610,7 +601,6 @@ class StopAndGoConsumer(SafeSendMixin, AsyncWebsocketConsumer):
                     "type": "penalty_queue_update",
                     "serving_team": event["serving_team"],
                     "queue_count": event["queue_count"],
-                    "crossings_since_queued": event.get("crossings_since_queued", 0),
                     "round_id": event["round_id"],
                 }
             )
@@ -631,7 +621,7 @@ class StopAndGoConsumer(SafeSendMixin, AsyncWebsocketConsumer):
         }
         if event.get("remaining_seconds") is not None:
             msg["remaining_seconds"] = event["remaining_seconds"]
-        await self.safe_send(json.dumps(msg))
+        await self.send(text_data=json.dumps(msg))
 
     async def race_finished(self, event):
         """Broadcast race finished notification to race control"""
@@ -788,7 +778,7 @@ class StopAndGoConsumer(SafeSendMixin, AsyncWebsocketConsumer):
             "timestamp": dt.datetime.now().isoformat(),
         }
         signed_message = self.sign_message(message)
-        await self.safe_send(json.dumps(signed_message))
+        await self.send(text_data=json.dumps(signed_message))
 
 
 # Signal handler for race end requests - placed outside classes
@@ -822,7 +812,7 @@ async def handle_race_end_request(sender, round_id, **kwargs):
         _log.error(f"Error ending race {round_id}: {e}")
 
 
-class TimingConsumer(SafeSendMixin, AsyncWebsocketConsumer):
+class TimingConsumer(AsyncWebsocketConsumer):
     """
     WebSocket consumer for timing daemon communication.
 
@@ -945,7 +935,7 @@ class TimingConsumer(SafeSendMixin, AsyncWebsocketConsumer):
         """Send ACK for a processed crossing back to the station."""
         message = {"type": "ack", "message_id": message_id}
         signed = self.sign_message(message)
-        await self.safe_send(json.dumps(signed))
+        await self.send(text_data=json.dumps(signed))
 
     async def timing_race_started(self, event):
         """Forward race_started channel-layer event to the connected timing station."""
@@ -956,7 +946,7 @@ class TimingConsumer(SafeSendMixin, AsyncWebsocketConsumer):
             "round_id": event["round_id"],
             "assignments": event["assignments"],
         }
-        await self.safe_send(json.dumps(self.sign_message(command)))
+        await self.send(text_data=json.dumps(self.sign_message(command)))
         # Schedule server-side auto-end for time-only modes (QUALIFYING, etc.)
         asyncio.ensure_future(self._schedule_auto_end(event["race_id"]))
 
@@ -968,7 +958,7 @@ class TimingConsumer(SafeSendMixin, AsyncWebsocketConsumer):
             "team_number": event["team_number"],
             "extra_seconds": event["extra_seconds"],
         }
-        await self.safe_send(json.dumps(self.sign_message(command)))
+        await self.send(text_data=json.dumps(self.sign_message(command)))
 
     async def _broadcast_crossing(self, result):
         """Broadcast crossing data to leaderboard and race control groups."""
@@ -1014,17 +1004,6 @@ class TimingConsumer(SafeSendMixin, AsyncWebsocketConsumer):
                 f"round_{round_id}",
                 {"type": "grid_violation", **result["grid_violation"]},
             )
-
-        # Update penalty queue crossing count only if there are penalties queued
-        from .signals import send_penalty_queue_update
-
-        has_queue = await database_sync_to_async(
-            lambda: PenaltyQueue.objects.filter(
-                round_penalty__round_id=round_id
-            ).exists()
-        )()
-        if has_queue:
-            await database_sync_to_async(send_penalty_queue_update)(round_id)
 
         if result.get("race_started"):
             # FIRST_CROSSING mode: race just started on this crossing — schedule auto-end
@@ -1624,10 +1603,10 @@ class TimingConsumer(SafeSendMixin, AsyncWebsocketConsumer):
         """Send command to timing daemon"""
         message = {"type": "command", "command": command_type, **kwargs}
         signed = self.sign_message(message)
-        await self.safe_send(json.dumps(signed))
+        await self.send(text_data=json.dumps(signed))
 
 
-class LeaderboardConsumer(SafeSendMixin, AsyncWebsocketConsumer):
+class LeaderboardConsumer(AsyncWebsocketConsumer):
     """
     WebSocket consumer for real-time leaderboard updates.
     Broadcasts standings updates when lap crossings occur.
@@ -1656,7 +1635,7 @@ class LeaderboardConsumer(SafeSendMixin, AsyncWebsocketConsumer):
         msg = {"type": "standings_update", "standings": standings}
         if remaining is not None:
             msg["remaining_seconds"] = remaining
-        await self.safe_send(json.dumps(msg))
+        await self.send(text_data=json.dumps(msg))
 
     async def disconnect(self, close_code):
         # Leave race leaderboard group
@@ -1675,7 +1654,7 @@ class LeaderboardConsumer(SafeSendMixin, AsyncWebsocketConsumer):
                 msg = {"type": "standings_update", "standings": standings}
                 if remaining is not None:
                     msg["remaining_seconds"] = remaining
-                await self.safe_send(json.dumps(msg))
+                await self.send(text_data=json.dumps(msg))
         except json.JSONDecodeError:
             pass
 
@@ -1692,7 +1671,7 @@ class LeaderboardConsumer(SafeSendMixin, AsyncWebsocketConsumer):
         }
         if remaining is not None:
             msg["remaining_seconds"] = remaining
-        await self.safe_send(json.dumps(msg))
+        await self.send(text_data=json.dumps(msg))
 
     async def race_ended(self, event):
         """Called when pre-race check fires for next race. Redirect this leaderboard."""
@@ -1739,7 +1718,7 @@ class LeaderboardConsumer(SafeSendMixin, AsyncWebsocketConsumer):
         msg = {"type": "standings_update", "standings": standings}
         if remaining is not None:
             msg["remaining_seconds"] = remaining
-        await self.safe_send(json.dumps(msg))
+        await self.send(text_data=json.dumps(msg))
 
     async def round_update(self, event):
         """Forward round state changes (started, ended) to the leaderboard client."""
@@ -1771,7 +1750,7 @@ class LeaderboardConsumer(SafeSendMixin, AsyncWebsocketConsumer):
             return [], None
 
 
-class TransponderScanConsumer(SafeSendMixin, AsyncWebsocketConsumer):
+class TransponderScanConsumer(AsyncWebsocketConsumer):
     """
     Read-only WebSocket consumer for transponder scan detection.
     UI pages connect here to auto-detect transponder IDs when a transponder

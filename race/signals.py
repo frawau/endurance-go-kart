@@ -306,29 +306,10 @@ def send_penalty_queue_update(round_id):
     # Count total penalties in queue for this round
     queue_count = PenaltyQueue.objects.filter(round_penalty__round_id=round_id).count()
 
-    # Get serving team number and crossings since queued
+    # Get serving team number if there's an active penalty
     serving_team = None
-    crossings_since_queued = 0
     if next_penalty and next_penalty.round_penalty.offender:
         serving_team = next_penalty.round_penalty.offender.team.number
-        team = next_penalty.round_penalty.offender
-        # Count crossings for this team since the penalty reached top of queue
-        from .models import LapCrossing, Race
-
-        active_race = (
-            Race.objects.filter(
-                round_id=round_id, started__isnull=False, ended__isnull=True
-            )
-            .order_by("sequence_number")
-            .first()
-        )
-        if active_race:
-            crossings_since_queued = LapCrossing.objects.filter(
-                race=active_race,
-                team=team,
-                is_valid=True,
-                crossing_time__gte=next_penalty.timestamp,
-            ).count()
 
     # Send update to stopandgo channel
     async_to_sync(channel_layer.group_send)(
@@ -337,7 +318,6 @@ def send_penalty_queue_update(round_id):
             "type": "penalty_queue_update",
             "serving_team": serving_team,
             "queue_count": queue_count,
-            "crossings_since_queued": crossings_since_queued,
             "round_id": round_id,
         },
     )
