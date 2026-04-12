@@ -75,13 +75,8 @@ class Command(BaseCommand):
         crossings_count = LapCrossing.objects.filter(race=race).count()
         sessions_count = Session.objects.filter(round=cround, race=race).count()
 
-        # Penalties imposed while this race was running
+        # All penalties for this round (includes post-race penalties created after race ended)
         penalties_qs = RoundPenalty.objects.filter(round=cround)
-        if race_started:
-            penalties_qs = penalties_qs.filter(
-                imposed__gte=race_started,
-                imposed__lte=race_ended or now,
-            )
         penalties_count = penalties_qs.count()
         penalty_queue_count = PenaltyQueue.objects.filter(
             round_penalty__in=penalties_qs
