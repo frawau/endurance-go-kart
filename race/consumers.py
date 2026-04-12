@@ -1,11 +1,14 @@
 import asyncio
 import json
+import logging
 import time
 import uuid
 import datetime as dt
 import hmac
 import hashlib
 from django.conf import settings
+
+_log = logging.getLogger(__name__)
 from channels.generic.websocket import AsyncWebsocketConsumer
 from .models import (
     ChangeLane,
@@ -1310,7 +1313,7 @@ class TimingConsumer(AsyncWebsocketConsumer):
                         action = cround.pit_suspicious_action
                         if action == "dismiss":
                             is_suspicious = False
-                            print(
+                            _log.warning(
                                 f"Auto-dismissed pit suspicious lap: Team {team_number}, "
                                 f"Lap {lap_number}, Time {lap_time}"
                             )
@@ -1362,7 +1365,7 @@ class TimingConsumer(AsyncWebsocketConsumer):
                                 is_suspicious = False
                                 # Update lap_number for broadcast
                                 lap_number = lap_number + count - 1
-                                print(
+                                _log.warning(
                                     f"Auto-split pit suspicious lap: Team {team_number}, "
                                     f"into {count} laps"
                                 )

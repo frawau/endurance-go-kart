@@ -67,6 +67,9 @@ class Coordinator:
     change_windows: Dict[int, float] = field(default_factory=dict)
     stopped_teams: Dict[int, float] = field(default_factory=dict)
 
+    # team_ids that should skip their next crossing (pit-bypass)
+    skip_next_crossing: set = field(default_factory=set)
+
     # asyncio events for inter-agent sync
     race_ready: asyncio.Event = field(default_factory=asyncio.Event)
     race_started: asyncio.Event = field(default_factory=asyncio.Event)
@@ -80,6 +83,10 @@ class Coordinator:
                 if now < bucket[team_id]:
                     return True
                 del bucket[team_id]
+        # Pit-bypass: skip one crossing after driver change
+        if team_id in self.skip_next_crossing:
+            self.skip_next_crossing.discard(team_id)
+            return True
         return False
 
 
@@ -148,15 +155,24 @@ class Command(BaseCommand):
             help="Disable decoder agent (no transponder passings) and force 1x speed. "
             "Use when a real timing station is connected.",
         )
+        parser.add_argument(
+            "--pit-bypass",
+            action="store_true",
+            help="Simulate pit lane bypassing the timing loop: suppress one crossing "
+            "after each driver change (decoder only, no effect with --no-laps).",
+        )
 
     # ── Entry point ───────────────────────────────────────────────────────────
 
     def handle(self, *args, **options):
         self.verbose = options["verbose"]
         self.no_laps = options["no_laps"]
+        self.pit_bypass = options["pit_bypass"]
         if self.no_laps:
             options["speed"] = 1.0
             self.log("--no-laps: decoder agent disabled, speed forced to 1x")
+        if self.pit_bypass:
+            self.log("--pit-bypass: crossings suppressed after driver changes")
         self.speed = options["speed"]
 
         cround = self._find_round()
@@ -180,6 +196,11 @@ class Command(BaseCommand):
                 "Use --no-laps with a real timing station, or switch to IMMEDIATE mode."
             )
 
+        # Check if pre-race check was already performed (drivers scanned in)
+        self.pre_checked = cround.ready
+        if self.pre_checked:
+            self.log("Round already ready — using existing scanned-in drivers")
+
         if self.no_laps:
             transponder_map, team_transponder = {}, {}
             self.log("Transponder passings disabled (--no-laps)")
@@ -197,7 +218,8 @@ class Command(BaseCommand):
             self._ensure_assignments_confirmed(active_race)
 
         queue_client, change_client = self._setup_scanner_clients()
-        self._register_first_drivers(cround, active_race)
+        if not self.pre_checked:
+            self._register_first_drivers(cround, active_race)
 
         coord = Coordinator(
             speed=self.speed,
@@ -244,16 +266,21 @@ class Command(BaseCommand):
         penalty_prob = options["penalty_prob"]
 
         # ── Pre-race check ──
-        self.log("[Director] Pre-race check…")
-        errors = await sync_to_async(cround.pre_race_check)()
-        if errors:
-            self.log(f"[Director] Pre-race check failed: {errors}")
-            coord.all_done.set()
-            return
-        await sync_to_async(cround.activate_race_ready)()
-        await sync_to_async(self._set_race_ready)(active_race)
-        coord.race_ready.set()
-        self.log("[Director] Race ready ✓")
+        if self.pre_checked:
+            self.log("[Director] Pre-race check already done — skipping")
+            await sync_to_async(self._set_race_ready)(active_race)
+            coord.race_ready.set()
+        else:
+            self.log("[Director] Pre-race check…")
+            errors = await sync_to_async(cround.pre_race_check)()
+            if errors:
+                self.log(f"[Director] Pre-race check failed: {errors}")
+                coord.all_done.set()
+                return
+            await sync_to_async(cround.activate_race_ready)()
+            await sync_to_async(self._set_race_ready)(active_race)
+            coord.race_ready.set()
+            self.log("[Director] Race ready ✓")
 
         await asyncio.sleep(0.5)  # brief pause before start
 
@@ -908,6 +935,8 @@ class Command(BaseCommand):
                             stats["next_queue_race_time"] = self._next_queue_time(
                                 elapsed_race, stats, pit_close_at, avg_lap
                             )
+                            if self.pit_bypass:
+                                coord.skip_next_crossing.add(team_id)
                             self.log(
                                 f"[PitLane] Team {team.number}: "
                                 f"change #{stats['completed_changes']} done"
