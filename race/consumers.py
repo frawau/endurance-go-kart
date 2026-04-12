@@ -957,6 +957,7 @@ class TimingConsumer(AsyncWebsocketConsumer):
             "command": "team_delay",
             "team_number": event["team_number"],
             "extra_seconds": event["extra_seconds"],
+            "skip_crossing": event.get("skip_crossing", False),
         }
         await self.send(text_data=json.dumps(self.sign_message(command)))
 

@@ -892,12 +892,14 @@ def change_kart_driver(request):
             from channels.layers import get_channel_layer
             from asgiref.sync import async_to_sync
 
+            skip = cround.auto_handle_pit_suspicious
             async_to_sync(get_channel_layer().group_send)(
                 "timing",
                 {
                     "type": "timing_team_delay",
                     "team_number": tmember.team.number,
                     "extra_seconds": 30.0,
+                    "skip_crossing": skip,
                 },
             )
         except Exception:

@@ -72,6 +72,8 @@ class SimulatorPlugin(TimingPlugin):
         self._team_transponder: Dict[int, str] = {}
         # transponder_id → extra seconds to add to the next lap sleep
         self._extra_delay: Dict[str, float] = {}
+        # transponder_ids that should skip their next crossing (pit bypass)
+        self._skip_next: set = set()
         self._tod_offset: float = 0.0
 
         # Asyncio coordination
@@ -240,21 +242,27 @@ class SimulatorPlugin(TimingPlugin):
             )
             self._race_end_event.set()
 
-    async def on_team_delay(self, team_number: int, extra_seconds: float):
+    async def on_team_delay(
+        self, team_number: int, extra_seconds: float, skip_crossing: bool = False
+    ):
         """
         Inject extra lap time for a team (S&G penalty or driver change).
 
         The next time that team's transponder wakes from its lap sleep it
         will additionally sleep `extra_seconds` before reporting the crossing.
+        If skip_crossing is True, the crossing after the delay is suppressed
+        (simulating pit lane bypassing the timing loop).
         """
         tid = self._team_transponder.get(team_number)
         if tid is None:
             print(f"Simulator: team_delay for unknown team {team_number}, ignoring")
             return
         self._extra_delay[tid] = self._extra_delay.get(tid, 0.0) + extra_seconds
+        if skip_crossing:
+            self._skip_next.add(tid)
         print(
             f"Simulator: +{extra_seconds:.1f} s injected for team {team_number} "
-            f"(transponder {tid})"
+            f"(transponder {tid}){' [skip crossing]' if skip_crossing else ''}"
         )
 
     # ── Simulation loops ──────────────────────────────────────────────────────
@@ -331,6 +339,11 @@ class SimulatorPlugin(TimingPlugin):
                 total = round(lap_time + extra, 3)
                 cumulative = round(cumulative + total, 3)
                 pending_interval = round(pending_interval + total, 3)
+
+                # Pit bypass: skip this crossing (kart went through pit lane)
+                if transponder_id in self._skip_next:
+                    self._skip_next.discard(transponder_id)
+                    continue  # no crossing fired, time accumulates
 
                 if random.random() < self.miss_probability:
                     continue  # missed — accumulate for interval mode

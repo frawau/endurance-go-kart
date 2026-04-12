@@ -254,6 +254,7 @@ class TimingStation:
                         self.plugin.on_team_delay(
                             command.get("team_number"),
                             float(command.get("extra_seconds", 0)),
+                            skip_crossing=bool(command.get("skip_crossing", False)),
                         )
                     )
 
