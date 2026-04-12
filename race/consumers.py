@@ -1601,8 +1601,10 @@ class TimingConsumer(SafeSendMixin, AsyncWebsocketConsumer):
             threshold = median_time * 1.9 + event_extra
             if lap_secs <= threshold:
                 return 1, 1
-            suggested = max(2, round(lap_secs / median_time))
-            max_count = int(lap_secs // median_time) + 1
+            # Subtract known event time before estimating lap count
+            effective_secs = max(0, lap_secs - event_extra)
+            suggested = max(2, round(effective_secs / median_time))
+            max_count = int(effective_secs // median_time) + 1
             return suggested, max_count
 
         except Exception:
