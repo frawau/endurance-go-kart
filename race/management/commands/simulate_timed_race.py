@@ -36,6 +36,7 @@ from rest_framework.authtoken.models import Token
 from rest_framework.test import APIClient
 
 from race.models import (
+    ChangeLane,
     ChampionshipPenalty,
     PenaltyQueue,
     Race,
