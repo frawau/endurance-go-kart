@@ -75,6 +75,38 @@ class Command(BaseCommand):
             else:
                 self.stdout.write(f'Mandatory key "{mp_key}" already linked')
 
-        self.stdout.write(
-            self.style.SUCCESS("Essential data setup completed successfully!")
-        )
+        # 4. Verify all mandatory penalty keys are correctly linked
+        self.stdout.write("\nMandatory penalty verification:")
+        expected_keys = set(mandatory_penalties.keys())
+        existing = {
+            mp.key: mp.penalty.name
+            for mp in MandatoryPenalty.objects.select_related("penalty").all()
+        }
+        ok = True
+        for key in expected_keys:
+            if key in existing:
+                self.stdout.write(
+                    self.style.SUCCESS(f'  ✓ "{key}" → "{existing[key]}"')
+                )
+            else:
+                self.stdout.write(
+                    self.style.ERROR(
+                        f'  ✗ "{key}" — MISSING! Link it via /admin/ → Mandatory Penalties'
+                    )
+                )
+                ok = False
+        # Warn about unexpected keys
+        for key in sorted(set(existing.keys()) - expected_keys):
+            self.stdout.write(
+                self.style.WARNING(f'  ? "{key}" → "{existing[key]}" (unexpected key)')
+            )
+        if ok:
+            self.stdout.write(
+                self.style.SUCCESS("\nEssential data setup completed successfully!")
+            )
+        else:
+            self.stdout.write(
+                self.style.WARNING(
+                    "\nSetup completed with warnings — fix missing mandatory penalties above"
+                )
+            )
