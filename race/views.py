@@ -4003,6 +4003,11 @@ def serve_penalty(request):
             round_id = queue_entry.round_penalty.round.id
             queue_entry.delete()
 
+            # Reset next penalty's timestamp so crossing count starts fresh
+            from .signals import reset_next_penalty_timestamp
+
+            reset_next_penalty_timestamp(round_id)
+
             # Reset the station and handle queue progression
             from channels.layers import get_channel_layer
             from asgiref.sync import async_to_sync
@@ -4098,6 +4103,11 @@ def delay_penalty(request):
 
             # Move to end of queue
             queue_entry.delay_penalty()
+
+            # Reset next penalty's timestamp so crossing count starts fresh
+            from .signals import reset_next_penalty_timestamp
+
+            reset_next_penalty_timestamp(round_id)
 
             # Check if this was a delayed penalty and apply "ignoring s&g" penalty
             # as specified in requirements

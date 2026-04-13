@@ -296,6 +296,20 @@ def handle_session_change(sender, instance, **kwargs):
     )
 
 
+def reset_next_penalty_timestamp(round_id):
+    """Reset the next-in-queue penalty's timestamp to now, so the crossing
+    count starts fresh when a new team reaches the top of the queue."""
+    import datetime as dt
+
+    next_penalty = PenaltyQueue.get_next_penalty(round_id)
+    if next_penalty:
+        next_penalty.timestamp = dt.datetime.now()
+        # Use update to avoid triggering post_save signal loop
+        PenaltyQueue.objects.filter(pk=next_penalty.pk).update(
+            timestamp=next_penalty.timestamp
+        )
+
+
 def send_penalty_queue_update(round_id):
     """Send penalty queue status update to WebSocket clients"""
     channel_layer = get_channel_layer()

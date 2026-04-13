@@ -691,6 +691,13 @@ class StopAndGoConsumer(SafeSendMixin, AsyncWebsocketConsumer):
                 # Remove from queue
                 await database_sync_to_async(lambda: active_penalty.delete())()
 
+                # Reset next penalty's timestamp so crossing count starts fresh
+                from .signals import reset_next_penalty_timestamp
+
+                await database_sync_to_async(reset_next_penalty_timestamp)(
+                    current_round.id
+                )
+
                 # Notify simulator: S&G stop adds penalty_duration + 5 s to current lap
                 await self.channel_layer.group_send(
                     "timing",
