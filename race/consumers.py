@@ -12,6 +12,7 @@ _log = logging.getLogger(__name__)
 from channels.generic.websocket import AsyncWebsocketConsumer
 from .models import (
     ChangeLane,
+    Config,
     round_team,
     team_member,
     championship_team,
@@ -698,13 +699,16 @@ class StopAndGoConsumer(SafeSendMixin, AsyncWebsocketConsumer):
                     current_round.id
                 )
 
-                # Notify simulator: S&G stop adds penalty_duration + 5 s to current lap
+                # Notify simulator: S&G stop adds penalty_duration + extra to current lap
+                sg_extra = await database_sync_to_async(Config.get_float)(
+                    "sg penalty extra delay", 5.0
+                )
                 await self.channel_layer.group_send(
                     "timing",
                     {
                         "type": "timing_team_delay",
                         "team_number": team_number,
-                        "extra_seconds": float(penalty_duration) + 5.0,
+                        "extra_seconds": float(penalty_duration) + sg_extra,
                     },
                 )
 
@@ -1603,11 +1607,14 @@ class TimingConsumer(SafeSendMixin, AsyncWebsocketConsumer):
                     served__gte=window_start,
                     served__lte=window_end,
                 )
+                sg_buffer = Config.get_float("sg penalty suspicious buffer", 10.0)
                 for rp in served_penalties:
-                    # Penalty duration + 10s for slowdown/speedup
-                    event_extra += float(rp.value) + 10.0
+                    event_extra += float(rp.value) + sg_buffer
 
                 # Driver change during this lap (session ended = old driver out)
+                change_buffer = Config.get_float(
+                    "driver change suspicious buffer", 30.0
+                )
                 changes = Session.objects.filter(
                     driver__team=team,
                     race=race,
@@ -1615,7 +1622,7 @@ class TimingConsumer(SafeSendMixin, AsyncWebsocketConsumer):
                     end__lte=window_end,
                 ).count()
                 if changes > 0:
-                    event_extra += changes * 30.0
+                    event_extra += changes * change_buffer
 
             # Only flag as suspicious if lap exceeds threshold
             threshold = median_time * 1.9 + event_extra

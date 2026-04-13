@@ -49,6 +49,14 @@ class Config(models.Model):
     def __str__(self):
         return f"Config {self.name} is {self.value}"
 
+    @staticmethod
+    def get_float(name, default=0.0):
+        """Get a config value as float, returning default if not found."""
+        try:
+            return float(Config.objects.get(name=name).value)
+        except (Config.DoesNotExist, ValueError):
+            return default
+
 
 def mugshot_path(instance, filename):
     # file will be uploaded to MEDIA_ROOT/user_<id>/<filename>

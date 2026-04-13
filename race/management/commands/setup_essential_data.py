@@ -19,7 +19,15 @@ class Command(BaseCommand):
                 self.stdout.write(f'Group "{group_name}" already exists')
 
         # 2. Create Default Configs
-        configs = [("page size", "A4"), ("card size", "A6"), ("display timeout", "5")]
+        configs = [
+            ("page size", "A4"),
+            ("card size", "A6"),
+            ("display timeout", "5"),
+            ("driver change delay", "30"),
+            ("driver change suspicious buffer", "30"),
+            ("sg penalty suspicious buffer", "10"),
+            ("sg penalty extra delay", "5"),
+        ]
         for key, val in configs:
             config, created = Config.objects.get_or_create(
                 name=key, defaults={"value": val}
