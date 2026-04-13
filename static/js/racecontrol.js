@@ -1144,11 +1144,11 @@ function initializeDropdownLogic() {
  */
 function loadQueueState() {
   if (!currentRoundId) return;
-  
+
   fetch(`/api/round/${currentRoundId}/penalty-queue-status/`)
     .then(response => response.json())
     .then(data => {
-      // Update queue management state
+      // Update internal state only — UI is updated by penalty_queue_update WebSocket
       if (data.active_penalty) {
         currentQueueId = data.active_penalty.queue_id;
         currentRoundPenaltyId = data.active_penalty.penalty_id;
@@ -1156,12 +1156,6 @@ function loadQueueState() {
         currentQueueId = null;
         currentRoundPenaltyId = null;
       }
-      
-      // Update penalty queue UI (status and buttons)
-      updatePenaltyQueueUI({
-        serving_team: data.serving_team,
-        queue_count: data.queue_count
-      });
     })
     .catch(error => {
       console.error('Error loading queue state:', error);
