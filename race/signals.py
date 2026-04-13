@@ -4,6 +4,7 @@ from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 from .models import (
     ChangeLane,
+    Config,
     round_pause,
     team_member,
     round_team,
@@ -396,3 +397,9 @@ def handle_session_delete(sender, instance, **kwargs):
             "team number": driver.team.team.number,
         },
     )
+
+
+@receiver([post_save, post_delete], sender=Config)
+def config_changed(sender, instance, **kwargs):
+    """Clear Config cache when any config entry is modified."""
+    Config.clear_cache()

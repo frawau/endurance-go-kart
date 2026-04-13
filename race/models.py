@@ -49,13 +49,23 @@ class Config(models.Model):
     def __str__(self):
         return f"Config {self.name} is {self.value}"
 
+    _cache = {}
+
     @staticmethod
     def get_float(name, default=0.0):
-        """Get a config value as float, returning default if not found."""
+        """Get a config value as float, with in-memory cache."""
+        if name in Config._cache:
+            return Config._cache[name]
         try:
-            return float(Config.objects.get(name=name).value)
+            val = float(Config.objects.get(name=name).value)
         except (Config.DoesNotExist, ValueError):
-            return default
+            val = default
+        Config._cache[name] = val
+        return val
+
+    @staticmethod
+    def clear_cache():
+        Config._cache.clear()
 
 
 def mugshot_path(instance, filename):

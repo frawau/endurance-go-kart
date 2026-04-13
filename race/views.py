@@ -894,7 +894,7 @@ def change_kart_driver(request):
             from asgiref.sync import async_to_sync
 
             skip = cround.auto_handle_pit_suspicious
-            change_delay = Config.get_float("driver change delay", 30.0)
+            change_delay = Config.get_float("sim driver change delay", 30.0)
             async_to_sync(get_channel_layer().group_send)(
                 "timing",
                 {

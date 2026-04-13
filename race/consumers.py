@@ -701,7 +701,7 @@ class StopAndGoConsumer(SafeSendMixin, AsyncWebsocketConsumer):
 
                 # Notify simulator: S&G stop adds penalty_duration + extra to current lap
                 sg_extra = await database_sync_to_async(Config.get_float)(
-                    "sg penalty extra delay", 5.0
+                    "sim sg penalty extra delay", 5.0
                 )
                 await self.channel_layer.group_send(
                     "timing",
