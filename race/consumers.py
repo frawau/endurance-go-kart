@@ -1303,6 +1303,10 @@ class TimingConsumer(SafeSendMixin, AsyncWebsocketConsumer):
             # Calculate lap time from raw_time using timing mode
             previous_raw = last_crossing.raw_time if last_crossing else None
             lap_time = self._calculate_lap_time(raw_time, previous_raw)
+            # Fallback: if previous crossing was a split (no raw_time),
+            # compute lap time from crossing time difference
+            if lap_time is None and last_crossing:
+                lap_time = crossing_time - last_crossing.crossing_time
 
             # Check if race is suspended
             is_suspended = race.round.is_paused

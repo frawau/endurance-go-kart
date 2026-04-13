@@ -1908,8 +1908,15 @@ def round_result_team_laps(request, race_id, team_id):
         driver = get_driver(lap.crossing_time)
         show_driver = driver != prev_driver
 
-        if lap.lap_time is not None:
-            lap_secs = lap.lap_time.total_seconds()
+        # If lap_time is None (e.g. first crossing after a split),
+        # compute it from crossing time difference
+        effective_lap_time = lap.lap_time
+        if effective_lap_time is None and i > 0:
+            prev_crossing = laps[i - 1]
+            effective_lap_time = lap.crossing_time - prev_crossing.crossing_time
+
+        if effective_lap_time is not None:
+            lap_secs = effective_lap_time.total_seconds()
             if prev_lap_secs is not None:
                 diff = lap_secs - prev_lap_secs
                 diff_str = f"{diff:+.3f}s"
@@ -1936,7 +1943,7 @@ def round_result_team_laps(request, race_id, team_id):
             {
                 "lap_number": lap.lap_number,
                 "driver": driver if show_driver else "",
-                "lap_time": fmt(lap.lap_time),
+                "lap_time": fmt(effective_lap_time),
                 "diff": diff_str,
                 "position": pos if show_pos else None,
             }
