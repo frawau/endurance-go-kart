@@ -61,8 +61,8 @@ class EmptyTeamsConsumer(SafeSendMixin, AsyncWebsocketConsumer):
 
         # Send initial empty teams list
         empty_teams = await self.get_empty_teams(self.round_id)
-        await self.send(
-            text_data=json.dumps({"type": "empty_teams_list", "teams": empty_teams})
+        await self.safe_send(
+            json.dumps({"type": "empty_teams_list", "teams": empty_teams})
         )
 
     async def disconnect(self, close_code):
@@ -119,15 +119,15 @@ class EmptyTeamsConsumer(SafeSendMixin, AsyncWebsocketConsumer):
     # Receive message from room group
     async def empty_teams_list(self, event):
         # Send teams list to WebSocket
-        await self.send(
-            text_data=json.dumps({"type": "empty_teams_list", "teams": event["teams"]})
+        await self.safe_send(
+            json.dumps({"type": "empty_teams_list", "teams": event["teams"]})
         )
 
     # Send system message
     async def system_message(self, event):
         # Send message to WebSocket
-        await self.send(
-            text_data=json.dumps(
+        await self.safe_send(
+            json.dumps(
                 {
                     "type": "system_message",
                     "message": event["message"],
@@ -201,14 +201,14 @@ class ChangeLaneConsumer(SafeSendMixin, AsyncWebsocketConsumer):
 
     async def lane_update(self, event):
         lane_html = event["lane_html"]
-        await self.send(
-            text_data=json.dumps({"type": "lane.update", "lane_html": lane_html})
+        await self.safe_send(
+            json.dumps({"type": "lane.update", "lane_html": lane_html})
         )
 
     async def rclane_update(self, event):
         lane_html = event["lane_html"]
-        await self.send(
-            text_data=json.dumps({"type": "rclane.update", "lane_html": lane_html})
+        await self.safe_send(
+            json.dumps({"type": "rclane.update", "lane_html": lane_html})
         )
 
 
@@ -283,8 +283,8 @@ class RoundConsumer(SafeSendMixin, AsyncWebsocketConsumer):
     # Receive message from room group
     async def round_update(self, event):
         # Send message to WebSocket
-        await self.send(
-            text_data=json.dumps(
+        await self.safe_send(
+            json.dumps(
                 {
                     "is_paused": event["is paused"],
                     "remaining_seconds": event["remaining seconds"],
@@ -305,8 +305,8 @@ class RoundConsumer(SafeSendMixin, AsyncWebsocketConsumer):
     # Receive message from room group
     async def session_update(self, event):
         # Send message to WebSocket
-        await self.send(
-            text_data=json.dumps(
+        await self.safe_send(
+            json.dumps(
                 {
                     "is_paused": event["is paused"],
                     "time_spent": event["time spent"],
@@ -321,8 +321,8 @@ class RoundConsumer(SafeSendMixin, AsyncWebsocketConsumer):
 
     async def pause_update(self, event):
         # Send message to WebSocket
-        await self.send(
-            text_data=json.dumps(
+        await self.safe_send(
+            json.dumps(
                 {
                     "session_update": False,
                     "is_paused": event["is paused"],
@@ -340,8 +340,8 @@ class RoundConsumer(SafeSendMixin, AsyncWebsocketConsumer):
         )
 
     async def grid_violation(self, event):
-        await self.send(
-            text_data=json.dumps(
+        await self.safe_send(
+            json.dumps(
                 {
                     "type": "grid_violation",
                     "team_number": event["team_number"],
@@ -371,8 +371,8 @@ class RoundConsumer(SafeSendMixin, AsyncWebsocketConsumer):
 
     async def race_finished(self, event):
         """Broadcast race finished notification to race control"""
-        await self.send(
-            text_data=json.dumps(
+        await self.safe_send(
+            json.dumps(
                 {
                     "type": "race_finished",
                     "race_id": event["race_id"],
@@ -585,30 +585,31 @@ class StopAndGoConsumer(SafeSendMixin, AsyncWebsocketConsumer):
 
     async def penalty_served(self, event):
         # Broadcast penalty served notification to race control interfaces
-        await self.send(
-            text_data=json.dumps({"type": "penalty_served", "team": event["team"]})
+        await self.safe_send(
+            json.dumps({"type": "penalty_served", "team": event["team"]})
         )
 
     async def fence_status(self, event):
         # Broadcast fence status to race control interfaces
-        await self.send(
-            text_data=json.dumps({"type": "fence_status", "enabled": event["enabled"]})
+        await self.safe_send(
+            json.dumps({"type": "fence_status", "enabled": event["enabled"]})
         )
 
     async def penalty_completed(self, event):
         # Broadcast penalty completion notification to race control interfaces
-        await self.send(
-            text_data=json.dumps({"type": "penalty_completed", "team": event["team"]})
+        await self.safe_send(
+            json.dumps({"type": "penalty_completed", "team": event["team"]})
         )
 
     async def penalty_queue_update(self, event):
         # Broadcast penalty queue status update to race control interfaces
-        await self.send(
-            text_data=json.dumps(
+        await self.safe_send(
+            json.dumps(
                 {
                     "type": "penalty_queue_update",
                     "serving_team": event["serving_team"],
                     "queue_count": event["queue_count"],
+                    "crossings_since_queued": event.get("crossings_since_queued", 0),
                     "round_id": event["round_id"],
                 }
             )
@@ -633,8 +634,8 @@ class StopAndGoConsumer(SafeSendMixin, AsyncWebsocketConsumer):
 
     async def race_finished(self, event):
         """Broadcast race finished notification to race control"""
-        await self.send(
-            text_data=json.dumps(
+        await self.safe_send(
+            json.dumps(
                 {
                     "type": "race_finished",
                     "race_id": event["race_id"],
@@ -1014,6 +1015,17 @@ class TimingConsumer(SafeSendMixin, AsyncWebsocketConsumer):
                 {"type": "grid_violation", **result["grid_violation"]},
             )
 
+        # Update penalty queue crossing count when penalties are queued
+        from .signals import send_penalty_queue_update
+
+        has_queue = await database_sync_to_async(
+            lambda: PenaltyQueue.objects.filter(
+                round_penalty__round_id=round_id
+            ).exists()
+        )()
+        if has_queue:
+            await database_sync_to_async(send_penalty_queue_update)(round_id)
+
         if result.get("race_started"):
             # FIRST_CROSSING mode: race just started on this crossing — schedule auto-end
             asyncio.ensure_future(self._schedule_auto_end(race_id))
@@ -1029,8 +1041,8 @@ class TimingConsumer(SafeSendMixin, AsyncWebsocketConsumer):
                 },
             )
             # Tell the timing station so SimulatorPlugin can wind down
-            await self.send(
-                text_data=json.dumps(
+            await self.safe_send(
+                json.dumps(
                     self.sign_message(
                         {"type": "command", "command": "race_ended", "race_id": race_id}
                     )
@@ -1686,8 +1698,8 @@ class LeaderboardConsumer(SafeSendMixin, AsyncWebsocketConsumer):
 
     async def race_ended(self, event):
         """Called when pre-race check fires for next race. Redirect this leaderboard."""
-        await self.send(
-            text_data=json.dumps(
+        await self.safe_send(
+            json.dumps(
                 {
                     "type": "race_ended",
                     "next_race_url": event.get("next_race_url"),
@@ -1697,8 +1709,8 @@ class LeaderboardConsumer(SafeSendMixin, AsyncWebsocketConsumer):
 
     async def pause_update(self, event):
         """Forward pause state changes to the leaderboard client."""
-        await self.send(
-            text_data=json.dumps(
+        await self.safe_send(
+            json.dumps(
                 {
                     "type": "pause_update",
                     "is_paused": event["is paused"],
@@ -1733,8 +1745,8 @@ class LeaderboardConsumer(SafeSendMixin, AsyncWebsocketConsumer):
 
     async def round_update(self, event):
         """Forward round state changes (started, ended) to the leaderboard client."""
-        await self.send(
-            text_data=json.dumps(
+        await self.safe_send(
+            json.dumps(
                 {
                     "type": "round_update",
                     "is_paused": event["is paused"],
@@ -1777,8 +1789,8 @@ class TransponderScanConsumer(SafeSendMixin, AsyncWebsocketConsumer):
 
     async def transponder_detected(self, event):
         """Forward transponder detection to WebSocket client."""
-        await self.send(
-            text_data=json.dumps(
+        await self.safe_send(
+            json.dumps(
                 {
                     "type": "transponder_detected",
                     "transponder_id": event["transponder_id"],

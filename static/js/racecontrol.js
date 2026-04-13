@@ -1185,11 +1185,15 @@ function updatePenaltyQueueUI(data = null) {
   const hasActivePenalties = (data && data.queue_count > 0);
   
   // Update status display
+  const crossingsElement = document.getElementById('crossingsSinceQueued');
   if (statusElement && servingTeamElement && queueCountElement) {
     if (hasActivePenalties && data) {
       statusElement.style.display = 'block';
       servingTeamElement.textContent = data.serving_team || '--';
       queueCountElement.textContent = data.queue_count;
+      if (crossingsElement) {
+        crossingsElement.textContent = data.crossings_since_queued || 0;
+      }
     } else {
       statusElement.style.display = 'none';
     }
