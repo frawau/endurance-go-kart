@@ -24,6 +24,7 @@ from .models import (
     GridPosition,
     ChampionshipPenalty,
     RoundPenalty,
+    PenaltyQueue,
     MandatoryPenalty,
 )
 from django.template.loader import render_to_string
