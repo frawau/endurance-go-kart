@@ -873,15 +873,13 @@ class Command(BaseCommand):
             elapsed_race = (loop.time() - race_start_wall) * speed
             pit_open = pit_open_at <= elapsed_race <= pit_close_at
 
-            if not pit_open:
-                continue
-
             for team_id, stats in team_stats.items():
                 team = stats["team"]
 
-                # ── Queue next driver ──
+                # ── Queue next driver (only when pit is open) ──
                 if (
-                    not stats["has_queued"]
+                    pit_open
+                    and not stats["has_queued"]
                     and stats["completed_changes"] < stats["target_changes"]
                     and elapsed_race >= stats["next_queue_race_time"]
                 ):
@@ -904,10 +902,10 @@ class Command(BaseCommand):
                                     f"[PitLane] Team {team.number}: queue failed — {resp.data}"
                                 )
 
-                # ── Check lane promotion ──
+                # ── Check lane promotion (only when pit is open) ──
                 # A driver physically enters the pit lane only when their session
                 # reaches a top change_lanes slot (first-registered pending sessions).
-                if stats["has_queued"] and not stats["in_lane"]:
+                if pit_open and stats["has_queued"] and not stats["in_lane"]:
                     in_lane = await sync_to_async(self._check_in_lane)(
                         cround, team, change_lanes
                     )
