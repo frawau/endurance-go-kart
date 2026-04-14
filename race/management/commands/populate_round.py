@@ -132,22 +132,12 @@ class Command(BaseCommand):
         if teams_to_create:
             self.stdout.write(f"  Creating {teams_to_create} new championship team(s)")
 
-        # ── People pool: exclude anyone already in this round ─────────────────
+        # ── People tracking: built lazily after reuse loop ─────────────────
         already_in_round = set(
             team_member.objects.filter(team__round=cround).values_list(
                 "member_id", flat=True
             )
         )
-        available_people = list(Person.objects.exclude(pk__in=already_in_round))
-        random.shuffle(available_people)
-
-        needed = teams_to_create * min_drivers
-        if needed > 0 and len(available_people) < needed:
-            raise CommandError(
-                f"Not enough People in the database: need at least {needed}, "
-                f"found {len(available_people)} not already in round {cround.pk}. "
-                f"Run: python manage.py generate_people --number {needed - len(available_people)}"
-            )
 
         # ── For new teams: number pool and Team objects ───────────────────────
         free_numbers = []
@@ -175,7 +165,17 @@ class Command(BaseCommand):
             random.shuffle(reusable_teams)
 
         # ── Add reused championship teams to the round ────────────────────────
+        available_people = None
         people_cursor = 0
+
+        def get_available_people():
+            nonlocal available_people, people_cursor
+            if available_people is None:
+                available_people = list(Person.objects.exclude(pk__in=already_in_round))
+                random.shuffle(available_people)
+                people_cursor = 0
+            return available_people
+
         for ct in reusable_ct[:teams_to_add]:
             rt, created = round_team.objects.get_or_create(round=cround, team=ct)
             if not created:
@@ -216,11 +216,10 @@ class Command(BaseCommand):
                     )
                 else:
                     # No previous round — assign random drivers
-                    n_drivers = min(n_drivers, len(available_people) - people_cursor)
+                    pool = get_available_people()
+                    n_drivers = min(n_drivers, len(pool) - people_cursor)
                     if n_drivers > 0:
-                        drivers = available_people[
-                            people_cursor : people_cursor + n_drivers
-                        ]
+                        drivers = pool[people_cursor : people_cursor + n_drivers]
                         people_cursor += n_drivers
                         team_member.objects.create(
                             team=rt,
@@ -266,9 +265,10 @@ class Command(BaseCommand):
             )
             rt = round_team.objects.create(round=cround, team=ct)
 
+            pool = get_available_people()
             n_drivers = random.randint(min_drivers, max_drivers)
-            if people_cursor + n_drivers > len(available_people):
-                n_drivers = len(available_people) - people_cursor
+            if people_cursor + n_drivers > len(pool):
+                n_drivers = len(pool) - people_cursor
                 if n_drivers <= 0:
                     self.stdout.write(
                         self.style.WARNING(
@@ -277,7 +277,7 @@ class Command(BaseCommand):
                     )
                     break
 
-            drivers = available_people[people_cursor : people_cursor + n_drivers]
+            drivers = pool[people_cursor : people_cursor + n_drivers]
             people_cursor += n_drivers
 
             team_member.objects.create(
