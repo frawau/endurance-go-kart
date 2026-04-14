@@ -186,67 +186,35 @@ class Command(BaseCommand):
             if not created:
                 continue
 
-            # Add drivers if the team has none in this round
+            # Add random drivers if the team has none in this round
             existing_members = team_member.objects.filter(team=rt).exists()
             if not existing_members:
+                pool = get_available_people()
                 n_drivers = random.randint(min_drivers, max_drivers)
-                # Reuse drivers from a previous round for this championship team
-                prev_rt = (
-                    round_team.objects.filter(team=ct)
-                    .exclude(round=cround)
-                    .order_by("-round__start")
-                    .first()
-                )
-                if prev_rt:
-                    prev_members = list(
-                        team_member.objects.filter(team=prev_rt).select_related(
-                            "member"
-                        )
+                n_drivers = min(n_drivers, len(pool) - people_cursor)
+                if n_drivers > 0:
+                    drivers = pool[people_cursor : people_cursor + n_drivers]
+                    people_cursor += n_drivers
+                    team_member.objects.create(
+                        team=rt,
+                        member=drivers[0],
+                        driver=True,
+                        manager=True,
+                        weight=round(random.uniform(50, 100), 1),
                     )
-                    for pm in prev_members:
-                        if pm.member_id not in already_in_round:
-                            team_member.objects.create(
-                                team=rt,
-                                member=pm.member,
-                                driver=pm.driver,
-                                manager=pm.manager,
-                                weight=pm.weight,
-                            )
-                            already_in_round.add(pm.member_id)
-                    self.stdout.write(
-                        self.style.SUCCESS(
-                            f"  #{ct.number:02d} {ct.team.name}: "
-                            f"reused {len(prev_members)} driver(s) from previous round"
-                        )
-                    )
-                else:
-                    # No previous round — assign random drivers
-                    pool = get_available_people()
-                    n_drivers = min(n_drivers, len(pool) - people_cursor)
-                    if n_drivers > 0:
-                        drivers = pool[people_cursor : people_cursor + n_drivers]
-                        people_cursor += n_drivers
+                    for person in drivers[1:]:
                         team_member.objects.create(
                             team=rt,
-                            member=drivers[0],
+                            member=person,
                             driver=True,
-                            manager=True,
+                            manager=False,
                             weight=round(random.uniform(50, 100), 1),
                         )
-                        for person in drivers[1:]:
-                            team_member.objects.create(
-                                team=rt,
-                                member=person,
-                                driver=True,
-                                manager=False,
-                                weight=round(random.uniform(50, 100), 1),
-                            )
-                        self.stdout.write(
-                            self.style.SUCCESS(
-                                f"  #{ct.number:02d} {ct.team.name}: "
-                                f"{n_drivers} new driver(s)"
-                            )
+                    self.stdout.write(
+                        self.style.SUCCESS(
+                            f"  #{ct.number:02d} {ct.team.name}: {n_drivers} driver(s)"
                         )
+                    )
             else:
                 self.stdout.write(
                     self.style.SUCCESS(
