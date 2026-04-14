@@ -113,6 +113,25 @@ class Command(BaseCommand):
             self._assign_transponders(cround)
             return
 
+        # ── Reuse championship teams not yet in this round ─────────────────
+        teams_in_round = set(
+            round_team.objects.filter(round=cround).values_list("team_id", flat=True)
+        )
+        reusable_ct = list(
+            championship_team.objects.filter(championship=championship)
+            .exclude(pk__in=teams_in_round)
+            .select_related("team")
+        )
+        random.shuffle(reusable_ct)
+
+        teams_to_add = min(num_teams, len(reusable_ct))
+        teams_to_create = max(0, num_teams - len(reusable_ct))
+
+        if teams_to_add:
+            self.stdout.write(f"  Reusing {teams_to_add} existing championship team(s)")
+        if teams_to_create:
+            self.stdout.write(f"  Creating {teams_to_create} new championship team(s)")
+
         # ── People pool: exclude anyone already in this round ─────────────────
         already_in_round = set(
             team_member.objects.filter(team__round=cround).values_list(
@@ -122,67 +141,138 @@ class Command(BaseCommand):
         available_people = list(Person.objects.exclude(pk__in=already_in_round))
         random.shuffle(available_people)
 
-        needed = num_teams * min_drivers  # lower bound on people needed
-        if len(available_people) < needed:
+        needed = teams_to_create * min_drivers
+        if needed > 0 and len(available_people) < needed:
             raise CommandError(
                 f"Not enough People in the database: need at least {needed}, "
                 f"found {len(available_people)} not already in round {cround.pk}. "
                 f"Run: python manage.py generate_people --number {needed - len(available_people)}"
             )
 
-        # ── Team number pool: avoid collisions with existing numbers ──────────
-        used_numbers = set(
-            championship_team.objects.filter(championship=championship).values_list(
-                "number", flat=True
+        # ── For new teams: number pool and Team objects ───────────────────────
+        free_numbers = []
+        reusable_teams = []
+        if teams_to_create:
+            used_numbers = set(
+                championship_team.objects.filter(championship=championship).values_list(
+                    "number", flat=True
+                )
             )
-        )
-        free_numbers = [n for n in range(1, 100) if n not in used_numbers]
-        if len(free_numbers) < num_teams:
-            raise CommandError(
-                f"Not enough free team numbers (1-99) in championship. "
-                f"Only {len(free_numbers)} slots left, need {num_teams}."
-            )
-        random.shuffle(free_numbers)
+            free_numbers = [n for n in range(1, 100) if n not in used_numbers]
+            if len(free_numbers) < teams_to_create:
+                raise CommandError(
+                    f"Not enough free team numbers (1-99) in championship. "
+                    f"Only {len(free_numbers)} slots left, need {teams_to_create}."
+                )
+            random.shuffle(free_numbers)
 
-        # ── Existing Team objects we can reuse (not yet in championship) ──────
-        teams_in_championship = set(
-            championship_team.objects.filter(championship=championship).values_list(
-                "team_id", flat=True
+            teams_in_championship = set(
+                championship_team.objects.filter(championship=championship).values_list(
+                    "team_id", flat=True
+                )
             )
-        )
-        reusable_teams = list(Team.objects.exclude(pk__in=teams_in_championship))
-        random.shuffle(reusable_teams)
+            reusable_teams = list(Team.objects.exclude(pk__in=teams_in_championship))
+            random.shuffle(reusable_teams)
 
-        # ── Create teams ──────────────────────────────────────────────────────
+        # ── Add reused championship teams to the round ────────────────────────
         people_cursor = 0
+        for ct in reusable_ct[:teams_to_add]:
+            rt, created = round_team.objects.get_or_create(round=cround, team=ct)
+            if not created:
+                continue
 
-        for i in range(num_teams):
-            # Get or create a Team object
+            # Add drivers if the team has none in this round
+            existing_members = team_member.objects.filter(team=rt).exists()
+            if not existing_members:
+                n_drivers = random.randint(min_drivers, max_drivers)
+                # Reuse drivers from a previous round for this championship team
+                prev_rt = (
+                    round_team.objects.filter(team=ct)
+                    .exclude(round=cround)
+                    .order_by("-round__start")
+                    .first()
+                )
+                if prev_rt:
+                    prev_members = list(
+                        team_member.objects.filter(team=prev_rt).select_related(
+                            "member"
+                        )
+                    )
+                    for pm in prev_members:
+                        if pm.member_id not in already_in_round:
+                            team_member.objects.create(
+                                team=rt,
+                                member=pm.member,
+                                driver=pm.driver,
+                                manager=pm.manager,
+                                weight=pm.weight,
+                            )
+                            already_in_round.add(pm.member_id)
+                    self.stdout.write(
+                        self.style.SUCCESS(
+                            f"  #{ct.number:02d} {ct.team.name}: "
+                            f"reused {len(prev_members)} driver(s) from previous round"
+                        )
+                    )
+                else:
+                    # No previous round — assign random drivers
+                    n_drivers = min(n_drivers, len(available_people) - people_cursor)
+                    if n_drivers > 0:
+                        drivers = available_people[
+                            people_cursor : people_cursor + n_drivers
+                        ]
+                        people_cursor += n_drivers
+                        team_member.objects.create(
+                            team=rt,
+                            member=drivers[0],
+                            driver=True,
+                            manager=True,
+                            weight=round(random.uniform(50, 100), 1),
+                        )
+                        for person in drivers[1:]:
+                            team_member.objects.create(
+                                team=rt,
+                                member=person,
+                                driver=True,
+                                manager=False,
+                                weight=round(random.uniform(50, 100), 1),
+                            )
+                        self.stdout.write(
+                            self.style.SUCCESS(
+                                f"  #{ct.number:02d} {ct.team.name}: "
+                                f"{n_drivers} new driver(s)"
+                            )
+                        )
+            else:
+                self.stdout.write(
+                    self.style.SUCCESS(
+                        f"  #{ct.number:02d} {ct.team.name}: already has drivers"
+                    )
+                )
+
+        # ── Create new championship teams if needed ───────────────────────────
+        for i in range(teams_to_create):
             if reusable_teams:
                 team_obj = reusable_teams.pop()
             else:
                 team_obj = Team.objects.create(name=fake.company() + " Racing")
                 self.stdout.write(f'  Created team "{team_obj.name}"')
 
-            # Register team in championship
             number = free_numbers[i]
             ct = championship_team.objects.create(
                 championship=championship,
                 team=team_obj,
                 number=number,
             )
-
-            # Register team in round
             rt = round_team.objects.create(round=cround, team=ct)
 
-            # Pick drivers
             n_drivers = random.randint(min_drivers, max_drivers)
             if people_cursor + n_drivers > len(available_people):
                 n_drivers = len(available_people) - people_cursor
                 if n_drivers <= 0:
                     self.stdout.write(
                         self.style.WARNING(
-                            f"  Ran out of people after {i} teams — stopping."
+                            f"  Ran out of people after creating {i} teams — stopping."
                         )
                     )
                     break
@@ -190,11 +280,9 @@ class Command(BaseCommand):
             drivers = available_people[people_cursor : people_cursor + n_drivers]
             people_cursor += n_drivers
 
-            # First driver is manager
-            manager = drivers[0]
             team_member.objects.create(
                 team=rt,
-                member=manager,
+                member=drivers[0],
                 driver=True,
                 manager=True,
                 weight=round(random.uniform(50, 100), 1),
@@ -210,7 +298,7 @@ class Command(BaseCommand):
 
             self.stdout.write(
                 self.style.SUCCESS(
-                    f"  #{number:02d} {team_obj.name}: {n_drivers} drivers"
+                    f"  #{number:02d} {team_obj.name}: {n_drivers} drivers (new)"
                 )
             )
 
