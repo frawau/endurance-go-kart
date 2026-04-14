@@ -98,6 +98,12 @@ class Command(BaseCommand):
             except Round.DoesNotExist:
                 raise CommandError(f"Round {round_id} does not exist.")
 
+        if cround.ended:
+            raise CommandError(
+                f'Round "{cround.name}" has already ended. '
+                "Use --list to pick another round."
+            )
+
         championship = cround.championship
         self.stdout.write(
             f'Populating round "{cround.name}" (championship: {championship.name})'
