@@ -170,10 +170,15 @@ class Command(BaseCommand):
 
         def get_available_people():
             nonlocal available_people, people_cursor
-            if available_people is None:
-                available_people = list(Person.objects.exclude(pk__in=already_in_round))
-                random.shuffle(available_people)
-                people_cursor = 0
+            # Always re-query DB to catch all assignments made during reuse
+            current_in_round = set(
+                team_member.objects.filter(team__round=cround).values_list(
+                    "member_id", flat=True
+                )
+            )
+            available_people = list(Person.objects.exclude(pk__in=current_in_round))
+            random.shuffle(available_people)
+            people_cursor = 0
             return available_people
 
         for ct in reusable_ct[:teams_to_add]:
