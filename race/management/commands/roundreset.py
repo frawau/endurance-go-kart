@@ -30,9 +30,9 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument(
-            "--dry-run",
+            "--commit",
             action="store_true",
-            help="Show what would be reset without actually doing it",
+            help="Actually perform the reset (default is preview only)",
         )
         parser.add_argument(
             "--round-id",
@@ -119,10 +119,10 @@ class Command(BaseCommand):
         self.stdout.write(f"Found {grid_count} grid positions to delete")
         self.stdout.write(f"Found {races_count} races to reset")
 
-        if options["dry_run"]:
+        if not options["commit"]:
             self.stdout.write(
                 self.style.WARNING(
-                    "\nDRY RUN — would reset the current round by:\n"
+                    "\nPREVIEW — would reset the current round by:\n"
                     "- Deleting all sessions, pauses, pit lanes\n"
                     "- Deleting all penalty queue entries and penalties\n"
                     "- Deleting all championship standings for this round\n"
@@ -130,7 +130,7 @@ class Command(BaseCommand):
                     "- Deleting all grid positions\n"
                     "- Resetting all race flags (started/ended/ready/grid_locked)\n"
                     "- Resetting round flags (ready/started/ended/post_race_check_completed)\n\n"
-                    "Run without --dry-run to actually perform the reset."
+                    "Add --commit to actually perform the reset."
                 )
             )
             return

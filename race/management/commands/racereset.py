@@ -35,9 +35,9 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument(
-            "--dry-run",
+            "--commit",
             action="store_true",
-            help="Show what would be reset without actually doing it",
+            help="Actually perform the reset (default is preview only)",
         )
 
     def handle(self, *args, **options):
@@ -115,21 +115,22 @@ class Command(BaseCommand):
             f"(assignments kept, lock removed)"
         )
 
-        if options["dry_run"]:
+        if not options["commit"]:
             self.stdout.write(
                 self.style.WARNING(
-                    "\nDRY RUN — would reset the race by:\n"
+                    "\nPREVIEW — would reset the race by:\n"
                     "- Deleting all lap crossings for this race\n"
                     "- Deleting sessions linked to this race\n"
                     "- Deleting pauses that started during this race\n"
                     "- Deleting all pit lane (ChangeLane) records for the round\n"
-                    "- Deleting penalty queue entries and penalties imposed during this race\n"
+                    "- Deleting penalty queue entries and all round penalties\n"
+                    "- Clearing championship standings for this round\n"
                     "- Unconfirming transponder assignments (assignments kept)\n"
                     "- Resetting race: started=None, ended=None, ready=False\n"
                     "- Unlocking grid for subsequent non-started races\n"
                     "- Resetting Round.ended/started if appropriate\n\n"
                     "Grid positions are preserved.\n"
-                    "Run without --dry-run to actually perform the reset."
+                    "Add --commit to actually perform the reset."
                 )
             )
             return
