@@ -5238,6 +5238,52 @@ def fix_scan_in(request):
 
 @login_required
 @user_passes_test(_is_queue_scanner)
+def fix_scan_in_team(request, team_id):
+    """Return drivers and pending queue for a team."""
+    cround = current_round()
+    if not cround:
+        return JsonResponse({"success": False, "error": "No active round"})
+
+    rt = get_object_or_404(round_team, id=team_id)
+
+    # Drivers currently on track (active session)
+    active_ids = set(
+        Session.objects.filter(
+            round=cround,
+            driver__team=rt,
+            start__isnull=False,
+            end__isnull=True,
+        ).values_list("driver_id", flat=True)
+    )
+
+    # Drivers in the queue (registered, not started)
+    pending_sessions = Session.objects.filter(
+        round=cround,
+        driver__team=rt,
+        register__isnull=False,
+        start__isnull=True,
+        end__isnull=True,
+    ).select_related("driver__member")
+    pending_ids = set(p.driver_id for p in pending_sessions)
+
+    pending = [
+        {"driver_id": p.driver_id, "nickname": p.driver.member.nickname}
+        for p in pending_sessions
+    ]
+
+    # Available: drivers not on track and not in queue
+    all_drivers = rt.team_member_set.filter(driver=True).select_related("member")
+    available = [
+        {"id": d.id, "nickname": d.member.nickname}
+        for d in all_drivers
+        if d.id not in active_ids and d.id not in pending_ids
+    ]
+
+    return JsonResponse({"success": True, "pending": pending, "available": available})
+
+
+@login_required
+@user_passes_test(_is_queue_scanner)
 @require_POST
 def fix_scan_in_action(request):
     """Add or remove a driver from the queue."""
