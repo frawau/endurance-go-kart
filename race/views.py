@@ -5418,33 +5418,53 @@ def fix_scan_out_action(request):
 @login_required
 @user_passes_test(is_race_director)
 def fix_laps(request):
-    """Emergency: split/unsplit laps in a finished race."""
-    # Get finished races
-    finished_races = (
-        Race.objects.filter(ended__isnull=False)
+    """Emergency: split/merge laps in recent or active races."""
+    one_week_ago = dt.datetime.now() - dt.timedelta(days=7)
+
+    # Recent finished races (within 1 week) + currently active races
+    recent_races = list(
+        Race.objects.filter(ended__isnull=False, ended__gte=one_week_ago)
         .select_related("round__championship")
-        .order_by("-ended")[:20]
+        .order_by("-ended")
     )
+    active_races = list(
+        Race.objects.filter(started__isnull=False, ended__isnull=True)
+        .select_related("round__championship")
+        .order_by("round__start")
+    )
+    available_races = active_races + recent_races
 
     selected_race_id = request.GET.get("race_id")
+    selected_team_id = request.GET.get("team_id")
     selected_race = None
+    selected_team = None
+    teams = []
     laps = []
 
     if selected_race_id:
         selected_race = get_object_or_404(Race, id=int(selected_race_id))
-        laps = (
-            LapCrossing.objects.filter(race=selected_race)
-            .select_related("team__team__team")
-            .order_by("team__team__number", "lap_number")
+        teams = list(
+            selected_race.get_all_teams()
+            .select_related("team__team")
+            .order_by("team__number")
         )
+
+    if selected_race and selected_team_id:
+        selected_team = get_object_or_404(round_team, id=int(selected_team_id))
+        laps = LapCrossing.objects.filter(
+            race=selected_race, team=selected_team
+        ).order_by("lap_number")
 
     return render(
         request,
         "pages/fix_laps.html",
         {
-            "finished_races": finished_races,
+            "available_races": available_races,
             "selected_race": selected_race,
             "selected_race_id": int(selected_race_id) if selected_race_id else None,
+            "teams": teams,
+            "selected_team": selected_team,
+            "selected_team_id": int(selected_team_id) if selected_team_id else None,
             "laps": laps,
         },
     )
@@ -5485,5 +5505,76 @@ def fix_laps_unsplit(request, crossing_id):
         {
             "success": True,
             "message": f"Unsplit lap {crossing.lap_number}: removed {count} split laps",
+        }
+    )
+
+
+@login_required
+@user_passes_test(is_race_director)
+@require_POST
+def fix_laps_merge(request):
+    """Merge consecutive laps into one. Max 4 laps."""
+    data = json.loads(request.body)
+    crossing_ids = data.get("crossing_ids", [])
+
+    if len(crossing_ids) < 2:
+        return JsonResponse(
+            {"success": False, "error": "Select at least 2 laps to merge"}
+        )
+    if len(crossing_ids) > 4:
+        return JsonResponse(
+            {"success": False, "error": "Cannot merge more than 4 laps at once"}
+        )
+
+    crossings = list(
+        LapCrossing.objects.filter(id__in=crossing_ids).order_by("lap_number")
+    )
+    if len(crossings) != len(crossing_ids):
+        return JsonResponse({"success": False, "error": "Some laps not found"})
+
+    # Verify all same race and team
+    races = set(c.race_id for c in crossings)
+    teams = set(c.team_id for c in crossings)
+    if len(races) != 1 or len(teams) != 1:
+        return JsonResponse(
+            {"success": False, "error": "All laps must be from the same team and race"}
+        )
+
+    # Verify consecutive
+    lap_numbers = [c.lap_number for c in crossings]
+    for i in range(1, len(lap_numbers)):
+        if lap_numbers[i] != lap_numbers[i - 1] + 1:
+            return JsonResponse({"success": False, "error": "Laps must be consecutive"})
+
+    # Merge: keep the last crossing, sum lap_times, delete the rest
+    keeper = crossings[-1]
+    total_time = dt.timedelta()
+    for c in crossings:
+        if c.lap_time:
+            total_time += c.lap_time
+
+    # Update the keeper with merged time
+    keeper.lap_time = total_time if total_time.total_seconds() > 0 else None
+    keeper.lap_number = crossings[0].lap_number
+    keeper.is_suspicious = False
+    keeper.was_split = False
+    keeper.save()
+
+    # Delete the others
+    removed = len(crossings) - 1
+    for c in crossings[:-1]:
+        c.delete()
+
+    # Re-number subsequent laps to close the gap
+    LapCrossing.objects.filter(
+        race=keeper.race,
+        team=keeper.team,
+        lap_number__gt=keeper.lap_number + removed,
+    ).update(lap_number=models.F("lap_number") - removed)
+
+    return JsonResponse(
+        {
+            "success": True,
+            "message": f"Merged {len(crossings)} laps into lap {keeper.lap_number}",
         }
     )

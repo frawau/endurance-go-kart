@@ -4,69 +4,77 @@
 <div class="container mt-5">
     <div class="card border-danger">
         <div class="card-header bg-danger text-white">
-            <h4 class="mb-0"><i class="fas fa-exclamation-triangle me-2"></i>Fix: Lap Split / Unsplit</h4>
+            <h4 class="mb-0"><i class="fas fa-exclamation-triangle me-2"></i>Fix: Lap Split / Merge</h4>
         </div>
         <div class="card-body">
-            <form method="get" class="mb-4">
+            <!-- Race selection -->
+            <form method="get" class="mb-3">
                 <div class="row">
                     <div class="col-md-6">
-                        <label for="race-select" class="form-label fw-bold">Select Finished Race:</label>
+                        <label for="race-select" class="form-label fw-bold">Race:</label>
                         <select id="race-select" name="race_id" class="form-control" onchange="this.form.submit()">
                             <option value="">-- Select Race --</option>
-                            {% for race in finished_races %}
+                            {% for race in available_races %}
                             <option value="{{ race.id }}" {% if race.id == selected_race_id %}selected{% endif %}>
-                                {{ race.round.name }} — {{ race.get_race_type_display }} ({{ race.ended|date:"Y-m-d H:i" }})
+                                {{ race.round.name }} — {{ race.get_race_type_display }}
+                                {% if race.ended %}(ended {{ race.ended|date:"d/m H:i" }}){% else %}(LIVE){% endif %}
                             </option>
                             {% endfor %}
                         </select>
                     </div>
+                    {% if selected_race and teams %}
+                    <div class="col-md-4">
+                        <label for="team-select" class="form-label fw-bold">Team:</label>
+                        <select id="team-select" name="team_id" class="form-control" onchange="this.form.submit()">
+                            <option value="">-- Select Team --</option>
+                            {% for t in teams %}
+                            <option value="{{ t.id }}" {% if t.id == selected_team_id %}selected{% endif %}>
+                                #{{ t.team.number }} {{ t.team.team.name }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                        <input type="hidden" name="race_id" value="{{ selected_race_id }}">
+                    </div>
+                    {% endif %}
                 </div>
             </form>
 
-            {% if selected_race %}
-            <div class="mb-3">
-                <label for="team-filter" class="form-label fw-bold">Filter by Team:</label>
-                <select id="team-filter" class="form-control" style="width:auto;display:inline-block;">
-                    <option value="all">All Teams</option>
-                </select>
-                <label class="ms-3">
-                    <input type="checkbox" id="show-invalid" checked> Show invalid laps
-                </label>
-                <label class="ms-3">
-                    <input type="checkbox" id="show-splits-only"> Splits only
-                </label>
+            {% if selected_race and selected_team and laps %}
+            <div class="d-flex align-items-center gap-3 mb-3">
+                <span class="text-muted">Select 2-4 consecutive laps to merge, or use Split/Unsplit on individual laps.</span>
+                <button id="merge-btn" class="btn btn-sm btn-warning" disabled onclick="mergeLaps()">
+                    <i class="fas fa-compress-arrows-alt me-1"></i>Merge Selected
+                </button>
             </div>
 
             <div class="table-responsive">
                 <table class="table table-sm" id="laps-table">
                     <thead>
                         <tr>
-                            <th>Team</th>
+                            <th style="width:40px;">
+                                <input type="checkbox" id="select-all" title="Select all visible">
+                            </th>
                             <th>Lap</th>
-                            <th>Time</th>
-                            <th>Valid</th>
+                            <th>Crossing Time</th>
+                            <th>Lap Time</th>
                             <th>Status</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody>
                         {% for lap in laps %}
-                        <tr data-team="{{ lap.team.team.number }}"
-                            data-valid="{{ lap.is_valid|yesno:'true,false' }}"
-                            data-split="{{ lap.was_split|yesno:'true,false' }}"
-                            data-has-splits="{{ lap.split_laps.exists|yesno:'true,false' }}"
-                            class="{% if not lap.is_valid %}table-secondary{% elif lap.was_split %}table-info{% elif lap.is_suspicious %}table-warning{% endif %}">
-                            <td>#{{ lap.team.team.number }}</td>
-                            <td>{{ lap.lap_number }}</td>
-                            <td>{% if lap.lap_time %}{{ lap.lap_time }}{% else %}—{% endif %}</td>
+                        <tr class="{% if not lap.is_valid %}table-secondary{% elif lap.was_split %}table-info{% elif lap.is_suspicious %}table-warning{% endif %}"
+                            data-id="{{ lap.id }}" data-lap="{{ lap.lap_number }}" data-valid="{{ lap.is_valid|yesno:'1,0' }}">
                             <td>
                                 {% if lap.is_valid %}
-                                <span class="badge bg-success">Valid</span>
-                                {% else %}
-                                <span class="badge bg-secondary">Invalid</span>
+                                <input type="checkbox" class="lap-check" value="{{ lap.id }}" data-lap="{{ lap.lap_number }}">
                                 {% endif %}
                             </td>
+                            <td>{{ lap.lap_number }}</td>
+                            <td>{{ lap.crossing_time|date:"H:i:s" }}</td>
+                            <td>{% if lap.lap_time %}{{ lap.lap_time }}{% else %}—{% endif %}</td>
                             <td>
+                                {% if not lap.is_valid %}<span class="badge bg-secondary">Invalid</span>{% endif %}
                                 {% if lap.is_suspicious %}<span class="badge bg-warning">Suspicious</span>{% endif %}
                                 {% if lap.was_split %}<span class="badge bg-info">Split</span>{% endif %}
                                 {% if lap.split_laps.exists %}<span class="badge bg-dark">Has Splits</span>{% endif %}
@@ -82,13 +90,13 @@
                                     <i class="fas fa-undo me-1"></i>Unsplit
                                 </button>
                                 {% endif %}
-                                {% if lap.is_valid %}
+                                {% if lap.is_valid and not lap.was_split %}
                                 <button class="btn btn-sm btn-outline-secondary" onclick="invalidateLap({{ lap.id }})">
-                                    <i class="fas fa-times me-1"></i>Invalidate
+                                    <i class="fas fa-times"></i>
                                 </button>
-                                {% elif not lap.was_split %}
+                                {% elif not lap.is_valid and not lap.was_split %}
                                 <button class="btn btn-sm btn-outline-success" onclick="validateLap({{ lap.id }})">
-                                    <i class="fas fa-check me-1"></i>Validate
+                                    <i class="fas fa-check"></i>
                                 </button>
                                 {% endif %}
                             </td>
@@ -97,42 +105,64 @@
                     </tbody>
                 </table>
             </div>
-            {% elif not finished_races %}
-            <div class="alert alert-info">No finished races found.</div>
+            {% elif selected_race and not selected_team %}
+            <div class="alert alert-info">Select a team to view laps.</div>
+            {% elif not available_races %}
+            <div class="alert alert-info">No recent or active races found.</div>
             {% endif %}
         </div>
     </div>
 </div>
 
-{% if selected_race %}
+{% if selected_race and selected_team and laps %}
 <script>
 const csrfToken = '{{ csrf_token }}';
+const mergeBtn = document.getElementById('merge-btn');
+const checks = document.querySelectorAll('.lap-check');
 
-// Build team filter
-const teams = new Set();
-document.querySelectorAll('#laps-table tbody tr').forEach(r => teams.add(r.dataset.team));
-const filter = document.getElementById('team-filter');
-[...teams].sort((a,b) => parseInt(a) - parseInt(b)).forEach(t => {
-    const opt = document.createElement('option');
-    opt.value = t; opt.textContent = `#${t}`;
-    filter.appendChild(opt);
+// Track selection and validate merge eligibility
+function updateMergeBtn() {
+    const selected = [...checks].filter(c => c.checked).sort((a, b) => parseInt(a.dataset.lap) - parseInt(b.dataset.lap));
+    const count = selected.length;
+
+    if (count < 2 || count > 4) {
+        mergeBtn.disabled = true;
+        mergeBtn.title = count > 4 ? 'Max 4 laps' : 'Select 2-4 laps';
+        return;
+    }
+
+    // Check consecutive
+    const laps = selected.map(c => parseInt(c.dataset.lap));
+    let consecutive = true;
+    for (let i = 1; i < laps.length; i++) {
+        if (laps[i] !== laps[i-1] + 1) { consecutive = false; break; }
+    }
+
+    mergeBtn.disabled = !consecutive;
+    mergeBtn.title = consecutive ? `Merge laps ${laps[0]}-${laps[laps.length-1]}` : 'Laps must be consecutive';
+}
+
+checks.forEach(c => c.addEventListener('change', updateMergeBtn));
+document.getElementById('select-all')?.addEventListener('change', function() {
+    checks.forEach(c => { c.checked = this.checked; });
+    updateMergeBtn();
 });
 
-function applyFilters() {
-    const team = filter.value;
-    const showInvalid = document.getElementById('show-invalid').checked;
-    const splitsOnly = document.getElementById('show-splits-only').checked;
-    document.querySelectorAll('#laps-table tbody tr').forEach(r => {
-        let show = true;
-        if (team !== 'all' && r.dataset.team !== team) show = false;
-        if (!showInvalid && r.dataset.valid === 'false') show = false;
-        if (splitsOnly && r.dataset.split !== 'true' && r.dataset.hasSplits !== 'true') show = false;
-        r.style.display = show ? '' : 'none';
+function mergeLaps() {
+    const ids = [...checks].filter(c => c.checked).map(c => parseInt(c.value));
+    if (!confirm(`Merge ${ids.length} laps into one?`)) return;
+
+    fetch('{% url "fix_laps_merge" %}', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken},
+        body: JSON.stringify({crossing_ids: ids}),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) { alert(data.message); location.reload(); }
+        else { alert('Error: ' + data.error); }
     });
 }
-filter.addEventListener('change', applyFilters);
-document.getElementById('show-invalid').addEventListener('change', applyFilters);
-document.getElementById('show-splits-only').addEventListener('change', applyFilters);
 
 function splitLap(crossingId) {
     const count = prompt('Split into how many laps?', '2');
@@ -150,7 +180,7 @@ function splitLap(crossingId) {
 }
 
 function unsplitLap(crossingId, lapNumber) {
-    if (!confirm(`Unsplit lap ${lapNumber}? This will delete the split laps and re-validate the original.`)) return;
+    if (!confirm(`Unsplit lap ${lapNumber}?`)) return;
     fetch(`/api/fix/laps/${crossingId}/unsplit/`, {
         method: 'POST',
         headers: {'X-CSRFToken': csrfToken},
@@ -169,10 +199,7 @@ function invalidateLap(crossingId) {
         headers: {'X-CSRFToken': csrfToken},
     })
     .then(r => r.json())
-    .then(data => {
-        if (data.success) location.reload();
-        else alert('Error: ' + data.error);
-    });
+    .then(data => { if (data.success) location.reload(); else alert('Error: ' + data.error); });
 }
 
 function validateLap(crossingId) {
@@ -181,10 +208,7 @@ function validateLap(crossingId) {
         headers: {'X-CSRFToken': csrfToken},
     })
     .then(r => r.json())
-    .then(data => {
-        if (data.success) location.reload();
-        else alert('Error: ' + data.error);
-    });
+    .then(data => { if (data.success) location.reload(); else alert('Error: ' + data.error); });
 }
 </script>
 {% endif %}

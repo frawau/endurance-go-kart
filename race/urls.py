@@ -330,4 +330,9 @@ urlpatterns = [
         views.fix_laps_unsplit,
         name="fix_laps_unsplit",
     ),
+    path(
+        "api/fix/laps/merge/",
+        views.fix_laps_merge,
+        name="fix_laps_merge",
+    ),
 ]
