@@ -1632,9 +1632,11 @@ class TimingConsumer(SafeSendMixin, AsyncWebsocketConsumer):
             threshold = median_time * 1.9 + event_extra
             if lap_secs <= threshold:
                 return 1, 1
-            # Subtract known event time before estimating lap count
+            # Subtract known event time before estimating lap count.
+            # Use int() (floor) not round() — 2.6 laps means 2 missed crossings,
+            # not 3. The extra time is from pit stops / driver changes.
             effective_secs = max(0, lap_secs - event_extra)
-            suggested = max(2, round(effective_secs / median_time))
+            suggested = max(2, int(effective_secs / median_time))
             max_count = int(effective_secs // median_time) + 1
             return suggested, max_count
 
