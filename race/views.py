@@ -5266,8 +5266,24 @@ def fix_scan_in_team(request, team_id):
     ).select_related("driver__member")
     pending_ids = set(p.driver_id for p in pending_sessions)
 
+    # Top-N pit lane slots
+    top_ids = set(
+        Session.objects.filter(
+            round=cround,
+            register__isnull=False,
+            start__isnull=True,
+            end__isnull=True,
+        )
+        .order_by("register")
+        .values_list("driver_id", flat=True)[: cround.change_lanes]
+    )
+
     pending = [
-        {"driver_id": p.driver_id, "nickname": p.driver.member.nickname}
+        {
+            "driver_id": p.driver_id,
+            "nickname": p.driver.member.nickname,
+            "in_lane": p.driver_id in top_ids,
+        }
         for p in pending_sessions
     ]
 
@@ -5313,15 +5329,35 @@ def fix_scan_in_action(request):
                 start__isnull=True,
                 end__isnull=True,
             ).first()
-            if session:
-                session.delete()
+            if not session:
+                return JsonResponse(
+                    {"success": False, "error": "No pending session found"}
+                )
+            # Check if driver is in a top-N pit lane slot
+            top_ids = list(
+                Session.objects.filter(
+                    round=cround,
+                    register__isnull=False,
+                    start__isnull=True,
+                    end__isnull=True,
+                )
+                .order_by("register")
+                .values_list("driver_id", flat=True)[: cround.change_lanes]
+            )
+            if driver.id in top_ids:
                 return JsonResponse(
                     {
-                        "success": True,
-                        "message": f"Removed {driver.member.nickname} from queue",
+                        "success": False,
+                        "error": f"{driver.member.nickname} is in a pit lane slot and cannot be removed",
                     }
                 )
-            return JsonResponse({"success": False, "error": "No pending session found"})
+            session.delete()
+            return JsonResponse(
+                {
+                    "success": True,
+                    "message": f"Removed {driver.member.nickname} from queue",
+                }
+            )
     except Exception as e:
         return JsonResponse({"success": False, "error": str(e)})
 
