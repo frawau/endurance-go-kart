@@ -1,0 +1,139 @@
+{% extends 'layout/content.html' %}
+
+{% block main_content %}
+<div class="container mt-5">
+    <div class="card border-danger">
+        <div class="card-header bg-danger text-white">
+            <h4 class="mb-0"><i class="fas fa-exclamation-triangle me-2"></i>Fix: Scan In (Queue Management)</h4>
+        </div>
+        <div class="card-body">
+            {% if not round %}
+            <div class="alert alert-warning">No active round.</div>
+            {% else %}
+            <p class="text-muted">Add or remove drivers from the pit lane queue. Select a team, then add or remove drivers.</p>
+
+            <div class="row">
+                <div class="col-md-4">
+                    <label for="team-select" class="form-label fw-bold">Team:</label>
+                    <select id="team-select" class="form-control">
+                        <option value="">-- Select Team --</option>
+                        {% for td in team_data %}
+                        <option value="{{ td.team.id }}" data-index="{{ forloop.counter0 }}">
+                            #{{ td.team.team.number }} {{ td.team.team.team.name }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+
+            <div id="team-details" class="mt-4" style="display:none;">
+                <h5>Pending in Queue:</h5>
+                <div id="pending-list" class="mb-3"></div>
+
+                <h5>Available Drivers:</h5>
+                <div id="driver-list"></div>
+            </div>
+
+            <div id="messages" class="mt-3"></div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+{% if round %}
+<script>
+const teamData = {{ team_data|safe }};
+const csrfToken = '{{ csrf_token }}';
+
+// Build JS-friendly data from Django template
+const teams = [
+    {% for td in team_data %}
+    {
+        id: {{ td.team.id }},
+        number: {{ td.team.team.number }},
+        name: "{{ td.team.team.team.name|escapejs }}",
+        drivers: [
+            {% for d in td.drivers %}
+            {id: {{ d.id }}, nickname: "{{ d.member.nickname|escapejs }}"},
+            {% endfor %}
+        ],
+        pending: [
+            {% for p in td.pending %}
+            {session_id: {{ p.id }}, driver_id: {{ p.driver.id }}, nickname: "{{ p.driver.member.nickname|escapejs }}"},
+            {% endfor %}
+        ],
+    },
+    {% endfor %}
+];
+
+const teamSelect = document.getElementById('team-select');
+const teamDetails = document.getElementById('team-details');
+const pendingList = document.getElementById('pending-list');
+const driverList = document.getElementById('driver-list');
+const messages = document.getElementById('messages');
+
+teamSelect.addEventListener('change', function() {
+    const idx = this.selectedOptions[0]?.dataset.index;
+    if (idx === undefined || idx === '') { teamDetails.style.display = 'none'; return; }
+    const team = teams[parseInt(idx)];
+    teamDetails.style.display = '';
+    renderTeam(team);
+});
+
+function renderTeam(team) {
+    const pendingIds = new Set(team.pending.map(p => p.driver_id));
+
+    pendingList.innerHTML = team.pending.length === 0
+        ? '<p class="text-muted">No drivers in queue</p>'
+        : team.pending.map(p => `
+            <div class="d-flex align-items-center gap-2 mb-2">
+                <span class="fw-bold">${p.nickname}</span>
+                <button class="btn btn-sm btn-outline-danger" onclick="removeDriver(${p.driver_id}, '${p.nickname}')">
+                    <i class="fas fa-times me-1"></i>Remove
+                </button>
+            </div>
+        `).join('');
+
+    driverList.innerHTML = team.drivers
+        .filter(d => !pendingIds.has(d.id))
+        .map(d => `
+            <div class="d-flex align-items-center gap-2 mb-2">
+                <span>${d.nickname}</span>
+                <button class="btn btn-sm btn-outline-success" onclick="addDriver(${d.id}, '${d.nickname}')">
+                    <i class="fas fa-plus me-1"></i>Add to Queue
+                </button>
+            </div>
+        `).join('') || '<p class="text-muted">All drivers are in the queue</p>';
+}
+
+function addDriver(driverId, name) {
+    doAction('add', driverId, name);
+}
+
+function removeDriver(driverId, name) {
+    doAction('remove', driverId, name);
+}
+
+function doAction(action, driverId, name) {
+    fetch('{% url "fix_scan_in_action" %}', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken},
+        body: JSON.stringify({action: action, driver_id: driverId}),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            showMsg(`${action === 'add' ? 'Added' : 'Removed'} ${name}`, 'success');
+            setTimeout(() => location.reload(), 500);
+        } else {
+            showMsg(data.error || 'Failed', 'danger');
+        }
+    });
+}
+
+function showMsg(text, type) {
+    messages.innerHTML = `<div class="alert alert-${type}">${text}</div>`;
+}
+</script>
+{% endif %}
+{% endblock %}

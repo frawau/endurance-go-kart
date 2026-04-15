@@ -5178,3 +5178,230 @@ def retire_team(request):
         )
     except json.JSONDecodeError:
         return JsonResponse({"success": False, "error": "Invalid JSON"}, status=400)
+
+
+# ============================================================
+# Fix Pages (Emergency — hidden behind Ctrl+Shift+F)
+# ============================================================
+
+
+def _is_scanner_or_director(user):
+    return (
+        user.is_authenticated
+        and user.groups.filter(
+            name__in=["Queue Scanner", "Driver Scanner", "Race Director"]
+        ).exists()
+    )
+
+
+def _is_queue_scanner(user):
+    return user.is_authenticated and user.groups.filter(name="Queue Scanner").exists()
+
+
+def _is_driver_scanner(user):
+    return user.is_authenticated and user.groups.filter(name="Driver Scanner").exists()
+
+
+@login_required
+@user_passes_test(_is_queue_scanner)
+def fix_scan_in(request):
+    """Emergency: manually add/remove a driver to the pit lane queue."""
+    cround = current_round()
+    if not cround:
+        return render(request, "pages/fix_scan_in.html", {"round": None})
+
+    teams = cround.round_team_set.select_related("team__team").order_by("team__number")
+    team_data = []
+    for rt in teams:
+        drivers = rt.team_member_set.filter(driver=True).select_related("member")
+        pending = Session.objects.filter(
+            round=cround,
+            driver__team=rt,
+            register__isnull=False,
+            start__isnull=True,
+            end__isnull=True,
+        ).select_related("driver__member")
+        team_data.append(
+            {
+                "team": rt,
+                "drivers": drivers,
+                "pending": pending,
+            }
+        )
+
+    return render(
+        request,
+        "pages/fix_scan_in.html",
+        {"round": cround, "team_data": team_data},
+    )
+
+
+@login_required
+@user_passes_test(_is_queue_scanner)
+@require_POST
+def fix_scan_in_action(request):
+    """Add or remove a driver from the queue."""
+    cround = current_round()
+    if not cround:
+        return JsonResponse({"success": False, "error": "No active round"})
+
+    data = json.loads(request.body)
+    action = data.get("action")
+    driver_id = data.get("driver_id")
+
+    try:
+        driver = team_member.objects.get(pk=driver_id)
+        if action == "add":
+            result = cround.driver_register(driver)
+            return JsonResponse(
+                {
+                    "success": result.get("status") == "ok",
+                    "message": result.get("message", ""),
+                }
+            )
+        elif action == "remove":
+            session = Session.objects.filter(
+                round=cround,
+                driver=driver,
+                register__isnull=False,
+                start__isnull=True,
+                end__isnull=True,
+            ).first()
+            if session:
+                session.delete()
+                return JsonResponse(
+                    {
+                        "success": True,
+                        "message": f"Removed {driver.member.nickname} from queue",
+                    }
+                )
+            return JsonResponse({"success": False, "error": "No pending session found"})
+    except Exception as e:
+        return JsonResponse({"success": False, "error": str(e)})
+
+    return JsonResponse({"success": False, "error": "Invalid action"})
+
+
+@login_required
+@user_passes_test(_is_driver_scanner)
+def fix_scan_out(request):
+    """Emergency: force-end a driver's active session."""
+    cround = current_round()
+    if not cround:
+        return render(request, "pages/fix_scan_out.html", {"round": None})
+
+    # Find all active sessions (started, not ended)
+    active_sessions = (
+        Session.objects.filter(
+            round=cround,
+            start__isnull=False,
+            end__isnull=True,
+        )
+        .select_related("driver__member", "driver__team__team__team")
+        .order_by("driver__team__team__number")
+    )
+
+    return render(
+        request,
+        "pages/fix_scan_out.html",
+        {"round": cround, "active_sessions": active_sessions},
+    )
+
+
+@login_required
+@user_passes_test(_is_driver_scanner)
+@require_POST
+def fix_scan_out_action(request):
+    """Force-end a driver session."""
+    cround = current_round()
+    if not cround:
+        return JsonResponse({"success": False, "error": "No active round"})
+
+    data = json.loads(request.body)
+    driver_id = data.get("driver_id")
+
+    try:
+        driver = team_member.objects.get(pk=driver_id)
+        result = cround.driver_endsession(driver)
+        return JsonResponse(
+            {
+                "success": result.get("status") == "ok",
+                "message": result.get("message", ""),
+            }
+        )
+    except Exception as e:
+        return JsonResponse({"success": False, "error": str(e)})
+
+
+@login_required
+@user_passes_test(is_race_director)
+def fix_laps(request):
+    """Emergency: split/unsplit laps in a finished race."""
+    # Get finished races
+    finished_races = (
+        Race.objects.filter(ended__isnull=False)
+        .select_related("round__championship")
+        .order_by("-ended")[:20]
+    )
+
+    selected_race_id = request.GET.get("race_id")
+    selected_race = None
+    laps = []
+
+    if selected_race_id:
+        selected_race = get_object_or_404(Race, id=int(selected_race_id))
+        laps = (
+            LapCrossing.objects.filter(race=selected_race)
+            .select_related("team__team__team")
+            .order_by("team__team__number", "lap_number")
+        )
+
+    return render(
+        request,
+        "pages/fix_laps.html",
+        {
+            "finished_races": finished_races,
+            "selected_race": selected_race,
+            "selected_race_id": int(selected_race_id) if selected_race_id else None,
+            "laps": laps,
+        },
+    )
+
+
+@login_required
+@user_passes_test(is_race_director)
+@require_POST
+def fix_laps_unsplit(request, crossing_id):
+    """Undo a split: delete split laps and re-validate the original."""
+    crossing = get_object_or_404(LapCrossing, id=crossing_id)
+
+    if not crossing.split_laps.exists():
+        return JsonResponse(
+            {"success": False, "error": "This crossing has no split laps"}
+        )
+
+    split_laps = list(crossing.split_laps.all())
+    count = len(split_laps)
+
+    # Delete the split laps
+    for sl in split_laps:
+        sl.delete()
+
+    # Re-validate the original
+    crossing.is_valid = True
+    crossing.is_suspicious = False
+    crossing.save(update_fields=["is_valid", "is_suspicious"])
+
+    # Re-number subsequent laps to close the gap
+    LapCrossing.objects.filter(
+        race=crossing.race,
+        team=crossing.team,
+        lap_number__gt=crossing.lap_number + count - 1,
+    ).update(lap_number=models.F("lap_number") - (count - 1))
+
+    return JsonResponse(
+        {
+            "success": True,
+            "message": f"Unsplit lap {crossing.lap_number}: removed {count} split laps",
+        }
+    )

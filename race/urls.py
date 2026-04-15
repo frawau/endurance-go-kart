@@ -314,4 +314,15 @@ urlpatterns = [
         views.sim_transponders,
         name="sim_transponders",
     ),
+    # Fix pages (emergency — hidden behind Ctrl+Shift+F)
+    path("fix/scan-in/", views.fix_scan_in, name="fix_scan_in"),
+    path("api/fix/scan-in/", views.fix_scan_in_action, name="fix_scan_in_action"),
+    path("fix/scan-out/", views.fix_scan_out, name="fix_scan_out"),
+    path("api/fix/scan-out/", views.fix_scan_out_action, name="fix_scan_out_action"),
+    path("fix/laps/", views.fix_laps, name="fix_laps"),
+    path(
+        "api/fix/laps/<int:crossing_id>/unsplit/",
+        views.fix_laps_unsplit,
+        name="fix_laps_unsplit",
+    ),
 ]
