@@ -59,8 +59,7 @@ class GenerateCardPDF(View):
 
     def textFit(self, text, canvas, max_width, fontsize, font):
         while fontsize > 0:
-            # canvas.setFont(font, fontsize)
-            text_width = canvas.stringWidth(text, "Helvetica-Bold", fontsize)
+            text_width = canvas.stringWidth(text, font, fontsize)
             if text_width <= max_width:
                 return fontsize
             fontsize -= 1
@@ -127,12 +126,26 @@ class GenerateCardPDF(View):
 
         # --- Team Name at the Top ---
         team_name = team.name if team.name else "Team Name"
+        try:
+            team_lang = detect(team_name)
+        except LangDetectException:
+            team_lang = "unknown"
+        if team_lang == "th":
+            tfont = "THFont"
+        elif team_lang == "ja":
+            tfont = "JPFont"
+        elif team_lang == "ko":
+            tfont = "KRFont"
+        elif team_lang == "zh":
+            tfont = "ZHFont"
+        else:
+            tfont = "Helvetica-Bold"
         ftsz = self.textFit(
-            team_name, canvas, card_w, int(32 * scalefactor + 0.5), "Helvetica-Bold"
+            team_name, canvas, card_w, int(32 * scalefactor + 0.5), tfont
         )
-        text_width_team = canvas.stringWidth(team_name, "Helvetica-Bold", ftsz)
+        text_width_team = canvas.stringWidth(team_name, tfont, ftsz)
         x_team = (card_w - text_width_team) / 2
-        canvas.setFont("Helvetica-Bold", ftsz)
+        canvas.setFont(tfont, ftsz)
         canvas.drawString(x_team, card_h - 10 * scaledmm, team_name)
 
         # --- Logo  ---
