@@ -133,11 +133,11 @@ class GenerateCardPDF(View):
         if team_lang == "th":
             tfont = "THFontBold"
         elif team_lang == "ja":
-            tfont = "JPFontBold"
+            tfont = "JPFont"
         elif team_lang == "ko":
-            tfont = "KRFontBold"
+            tfont = "KRFont"
         elif team_lang == "zh":
-            tfont = "ZHFontBold"
+            tfont = "ZHFont"
         else:
             tfont = "Helvetica-Bold"
         ftsz = self.textFit(
@@ -360,18 +360,15 @@ class GenerateCardPDF(View):
         pdfmetrics.registerFont(
             TTFont("ENFont", "/usr/local/share/fonts/NotoSans-Regular.ttf")
         )
-        # Bold variants. CJK Bold comes from a single shared TTC so the three
-        # languages reference one file via subfontIndex (0=JP, 1=KR, 3=TC).
+        # Bold variants for Latin/Thai only. Noto CJK ships only CFF-outline
+        # Bold weights (in .ttc/.otf), which reportlab's TTFont cannot read,
+        # so CJK team names fall back to the Regular XxxFont.
         pdfmetrics.registerFont(
             TTFont("ENFontBold", "/usr/local/share/fonts/NotoSans-Bold.ttf")
         )
         pdfmetrics.registerFont(
             TTFont("THFontBold", "/usr/local/share/fonts/NotoSansThai-Bold.ttf")
         )
-        cjk_bold = "/usr/local/share/fonts/NotoSansCJK-Bold.ttc"
-        pdfmetrics.registerFont(TTFont("JPFontBold", cjk_bold, subfontIndex=0))
-        pdfmetrics.registerFont(TTFont("KRFontBold", cjk_bold, subfontIndex=1))
-        pdfmetrics.registerFont(TTFont("ZHFontBold", cjk_bold, subfontIndex=3))
         return p, buffer
 
     def post(self, request):
