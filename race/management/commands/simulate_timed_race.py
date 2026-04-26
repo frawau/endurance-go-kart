@@ -394,6 +394,10 @@ class Command(BaseCommand):
         if cround.started is None:
             cround.started = now
             cround.save(update_fields=["started"])
+        # Arm the race so the consumer accepts crossings (mirrors race_start view).
+        if not active_race.armed:
+            active_race.armed = True
+            active_race.save(update_fields=["armed"])
         sessions = cround.session_set.filter(
             register__isnull=False, start__isnull=True, end__isnull=True
         )
@@ -405,6 +409,7 @@ class Command(BaseCommand):
     def _do_race_start(self, cround, active_race, now):
         """Replicate race_start view logic for IMMEDIATE mode."""
         active_race.started = now
+        active_race.armed = True
         active_race.save()
         if cround.started is None:
             cround.started = now

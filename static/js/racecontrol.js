@@ -885,6 +885,8 @@ document.addEventListener("DOMContentLoaded", () => {
     initialState = "running";
   else if (document.getElementById("resumeButton")?.offsetParent !== null)
     initialState = "paused";
+  else if (document.getElementById("falseStartButton")?.offsetParent !== null)
+    initialState = "armed";
   else if (
     !document.querySelector(
       "#race-control-buttons .race-action-btn:not([hidden])",
@@ -896,7 +898,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // --- Initial Lane Connection Check ---
   // Connect if initial state is ready, running, or paused
-  if (["ready", "running", "paused"].includes(initialState)) {
+  if (["ready", "armed", "running", "paused"].includes(initialState)) {
     console.log(
       `Page loaded: Round state is ${initialState}. Connecting lane sockets.`,
     );

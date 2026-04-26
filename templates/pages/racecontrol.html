@@ -59,7 +59,7 @@
                                         data-action="start"
                                         data-url="{% url 'race_start' %}"
                                         {% if active_race %}
-                                            {% if not active_race.ready or active_race.started or active_race.ended %}hidden{% endif %}
+                                            {% if not active_race.ready or active_race.armed or active_race.started or active_race.ended %}hidden{% endif %}
                                         {% else %}
                                             {% if not round.ready or round.started or round.ended %}hidden{% endif %}
                                         {% endif %}>
@@ -84,7 +84,7 @@
                                         data-action="end"
                                         data-url="{% url 'endofrace' %}"
                                         {% if active_race %}
-                                            {% if not active_race.started or active_race.ended %}hidden{% endif %}
+                                            {% if not active_race.armed and not active_race.started or active_race.ended %}hidden{% endif %}
                                         {% else %}
                                             {% if not round.started or round.ended %}hidden{% endif %}
                                         {% endif %}>
@@ -94,7 +94,7 @@
                                 <button id="falseStartButton" class="btn btn-secondary btn-lg me-2 mb-2 race-action-btn"
                                         data-action="false_start"
                                         data-url="{% url 'falsestart' %}"
-                                        hidden>
+                                        {% if not active_race or not active_race.armed or active_race.started or active_race.ended %}hidden{% endif %}>
                                     <i class="fas fa-undo me-1"></i> False Start
                                 </button>
 

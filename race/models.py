@@ -1109,6 +1109,11 @@ class Race(models.Model):
     started = models.DateTimeField(null=True, blank=True)
     ended = models.DateTimeField(null=True, blank=True)
     ready = models.BooleanField(default=False)
+    # `armed` is set explicitly by the race-start button. Pre-race check
+    # only sets `ready`; in FIRST_CROSSING mode the consumer requires
+    # `armed` before a transponder crossing may trigger `started`. This
+    # prevents warm-up laps from accidentally starting the race.
+    armed = models.BooleanField(default=False)
 
     # Dependencies
     depends_on_race = models.ForeignKey(

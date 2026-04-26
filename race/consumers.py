@@ -1209,10 +1209,10 @@ class TimingConsumer(SafeSendMixin, AsyncWebsocketConsumer):
             team = assignment.team
 
             # Drop crossings for races that haven't been armed or started yet.
-            # This prevents karts still on track after Q2 ends from accidentally
-            # triggering the Main Race start via FIRST_CROSSING mode.
+            # `armed` is set by the race-start button; `ready` is set by the
+            # pre-race check (too early — a warm-up lap would trigger start).
             race_accepts_crossing = race.started is not None or (
-                race.ready and race.start_mode != "IMMEDIATE"
+                race.armed and race.start_mode != "IMMEDIATE"
             )
             if not race_accepts_crossing:
                 _log.debug(

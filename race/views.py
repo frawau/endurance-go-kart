@@ -500,13 +500,14 @@ def race_start(request):
         # ---- Lap-based: start the active race ----
         now = dt.datetime.now()
 
-        if active_race.start_mode == "FIRST_CROSSING":
-            # Timer stays frozen — Race.started remains None until first passage
-            pass
-        else:
-            # IMMEDIATE: start the race clock now
+        # Mark the race as armed: the start button has been pressed, so
+        # crossings may now be processed. For FIRST_CROSSING mode the
+        # clock stays frozen until the first crossing; for IMMEDIATE we
+        # also set `started` to start the race clock now.
+        active_race.armed = True
+        if active_race.start_mode != "FIRST_CROSSING":
             active_race.started = now
-            active_race.save()
+        active_race.save()
 
         # Set Round.started on first race start (needed for timing consumer)
         if cround.started is None:
@@ -550,13 +551,12 @@ def falsestart(request):
     cround = current_round()
     active_race = cround.active_race
 
-    # Detect armed state: FIRST_CROSSING mode where Round.started is set
-    # but Race.started is still None
+    # Detect armed state: start button pressed but no crossing yet
     is_armed = (
         active_race
+        and active_race.armed
         and active_race.started is None
         and active_race.start_mode == "FIRST_CROSSING"
-        and cround.started is not None
     )
 
     if active_race and (active_race.started or is_armed):
@@ -592,6 +592,7 @@ def falsestart(request):
             ).delete()
 
         active_race.started = None
+        active_race.armed = False
         active_race.save()
 
         # If this was the first race and Round.started was just set, reset it too
