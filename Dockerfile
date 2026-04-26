@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y \
     fonts-noto-cjk \
     fonts-noto-cjk-extra \
     fontconfig \
+    postgresql-client \
     wget \
     unzip \
     && rm -rf /var/lib/apt/lists/*
