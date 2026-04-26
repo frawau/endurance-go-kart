@@ -374,6 +374,20 @@ def racecontrol(request):
         race_sequence = (
             list(cround.races.all()) if not cround.uses_legacy_session_model else []
         )
+        # Clock-sync data for the leaderboard-style epoch-based countdown.
+        # The browser computes remaining = limit - (Date.now()/1000 - epoch),
+        # which is anchored to a server-supplied Unix timestamp and avoids
+        # any drift caused by intermittent WebSocket updates or local-tick
+        # throttling when the tab is backgrounded.
+        clock_instance = active_race or cround
+        race_started_epoch = (
+            int(clock_instance.started.timestamp())
+            if clock_instance and clock_instance.started and not clock_instance.ended
+            else None
+        )
+        race_time_limit_seconds = (
+            int(clock_instance.duration.total_seconds()) if clock_instance else 0
+        )
         return render(
             request,
             "pages/racecontrol.html",
@@ -385,6 +399,8 @@ def racecontrol(request):
                 "active_race": active_race,
                 "is_paused": is_paused,
                 "race_sequence": race_sequence,
+                "race_started_epoch": race_started_epoch,
+                "race_time_limit_seconds": race_time_limit_seconds,
             },
         )
     except:

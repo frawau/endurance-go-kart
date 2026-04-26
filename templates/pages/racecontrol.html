@@ -12,14 +12,37 @@
                 {% if round %}
                     {% if active_race %}
                         <span id="raceHeaderLabel">{{ round.name }} - {{ active_race.get_race_type_display }}</span>
-                        &nbsp;&nbsp;Remaining Time: {% timer_widget "race-control-countdown" "countdownDisplay" active_race %}
+                        &nbsp;&nbsp;Remaining Time: <span id="race-control-countdown" class="timer">--:--:--</span>
                     {% else %}
-                        {{ round.name }}&nbsp;&nbsp;Remaining Time: {% timer_widget "race-control-countdown" "countdownDisplay" round %}
+                        {{ round.name }}&nbsp;&nbsp;Remaining Time: <span id="race-control-countdown" class="timer">--:--:--</span>
                     {% endif %}
                 {% else %}
                     Race Control - No Active Round
                 {% endif %}
             </h1>
+            {% if round %}
+            <script>
+                // Server-anchored countdown init (matches public_leaderboard.html).
+                // Computes remaining from server-supplied epoch + browser Date.now(),
+                // so tab-throttling or sparse WS updates don't accumulate drift.
+                (function() {
+                    const startedEpoch = {{ race_started_epoch|default:"null" }};
+                    const timeLimitSeconds = {{ race_time_limit_seconds }};
+                    const initialPaused = {{ is_paused|yesno:"true,false" }};
+                    const raceStarted = startedEpoch !== null;
+                    const elapsed = raceStarted ? (Date.now() / 1000) - startedEpoch : 0;
+                    const remaining = Math.max(0, timeLimitSeconds - elapsed);
+                    new TimerWidget({
+                        elementId: 'race-control-countdown',
+                        startValue: remaining,
+                        countDirection: 'down',
+                        timerType: 'countdownDisplay',
+                        initialPaused: !raceStarted || initialPaused,
+                        showHours: timeLimitSeconds >= 3600,
+                    });
+                })();
+            </script>
+            {% endif %}
             {% if race_sequence %}
             <div id="raceProgressIndicator" class="d-flex justify-content-center gap-2 mt-1">
                 {% for race in race_sequence %}
