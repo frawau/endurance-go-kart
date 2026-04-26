@@ -1,0 +1,183 @@
+{% extends 'layout/content.html' %}
+
+{% block main_content %}
+<div class="container mt-5">
+    <div class="card border-danger">
+        <div class="card-header bg-danger text-white">
+            <h4 class="mb-0"><i class="fas fa-exclamation-triangle me-2"></i>Fix: Lap Penalties</h4>
+        </div>
+        <div class="card-body">
+            <p class="text-muted">
+                Assign or remove lap penalties on a recently-finished or live race. Use this for incidents
+                where there was no time to issue a Stop &amp; Go during the race. Standings update automatically.
+            </p>
+
+            <form method="get" class="mb-3">
+                <label for="race-select" class="form-label fw-bold">Race:</label>
+                <select id="race-select" name="race_id" class="form-control" onchange="this.form.submit()">
+                    <option value="">-- Select Race --</option>
+                    {% for race in available_races %}
+                    <option value="{{ race.id }}" {% if race.id == selected_race_id %}selected{% endif %}>
+                        {{ race.round.name }} — {{ race.get_race_type_display }}
+                        {% if race.ended %}(ended {{ race.ended|date:"d/m H:i" }}){% else %}(LIVE){% endif %}
+                    </option>
+                    {% endfor %}
+                </select>
+            </form>
+
+            {% if selected_race %}
+            <hr>
+            <h5 class="mb-3">Assign New Penalty</h5>
+            <form id="penalty-form" class="row g-2">
+                {% csrf_token %}
+                <div class="col-md-4">
+                    <label for="offender-select" class="form-label">Offending Team</label>
+                    <select id="offender-select" class="form-control" required>
+                        <option value="">-- Team --</option>
+                        {% for t in teams %}
+                        <option value="{{ t.id }}">
+                            #{{ t.team.number }} {{ t.team.team.name }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label for="penalty-select" class="form-label">Penalty</label>
+                    <select id="penalty-select" class="form-control" required>
+                        <option value="">-- Penalty --</option>
+                        {% for cp in championship_penalties %}
+                        <option value="{{ cp.id }}" data-default-value="{{ cp.value }}">
+                            [{{ cp.get_sanction_display }}] {{ cp.penalty.name }} ({{ cp.value }})
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label for="value-input" class="form-label">Laps</label>
+                    <input id="value-input" type="number" min="1" max="120" class="form-control" value="1" required>
+                </div>
+                <div class="col-md-2 d-flex align-items-end">
+                    <button type="submit" class="btn btn-warning w-100">
+                        <i class="fas fa-flag me-1"></i>Assign
+                    </button>
+                </div>
+            </form>
+
+            <hr class="mt-4">
+            <h5 class="mb-3">Existing Lap Penalties for {{ selected_race.round.name }}</h5>
+            {% if existing_penalties %}
+            <div class="table-responsive">
+                <table class="table table-sm" id="penalties-table">
+                    <thead>
+                        <tr>
+                            <th>Imposed</th>
+                            <th>Team</th>
+                            <th>Type</th>
+                            <th>Penalty</th>
+                            <th class="text-end">Laps</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for p in existing_penalties %}
+                        <tr id="penalty-row-{{ p.id }}">
+                            <td>{{ p.imposed|date:"d/m H:i" }}</td>
+                            <td>#{{ p.offender.team.number }} {{ p.offender.team.team.name }}</td>
+                            <td>{{ p.penalty.get_sanction_display }}</td>
+                            <td>{{ p.penalty.penalty.name }}</td>
+                            <td class="text-end">{{ p.value }}</td>
+                            <td class="text-end">
+                                <button class="btn btn-sm btn-outline-danger"
+                                        onclick="deletePenalty({{ p.id }})">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <p class="text-muted">No lap penalties assigned for this round yet.</p>
+            {% endif %}
+            {% endif %}
+
+            <div id="messages" class="mt-3"></div>
+        </div>
+    </div>
+</div>
+
+{% if selected_race %}
+<script>
+const csrfToken = '{{ csrf_token }}';
+const raceId = {{ selected_race_id }};
+const form = document.getElementById('penalty-form');
+const penaltySelect = document.getElementById('penalty-select');
+const valueInput = document.getElementById('value-input');
+const messages = document.getElementById('messages');
+
+penaltySelect.addEventListener('change', () => {
+    const opt = penaltySelect.selectedOptions[0];
+    if (opt && opt.dataset.defaultValue) {
+        valueInput.value = opt.dataset.defaultValue;
+    }
+});
+
+form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const offender = document.getElementById('offender-select').value;
+    const penalty = penaltySelect.value;
+    const value = parseInt(valueInput.value, 10);
+    if (!offender || !penalty || !value) return;
+
+    fetch('{% url "fix_penalties_create" %}', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken},
+        body: JSON.stringify({
+            race_id: raceId,
+            offender_id: parseInt(offender, 10),
+            championship_penalty_id: parseInt(penalty, 10),
+            value: value,
+        }),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (!data.success) {
+            showMsg(data.error || 'Failed to assign penalty', 'danger');
+            return;
+        }
+        showMsg(data.message, 'success');
+        setTimeout(() => location.reload(), 800);
+    })
+    .catch(err => showMsg('Network error: ' + err, 'danger'));
+});
+
+function deletePenalty(penaltyId) {
+    if (!confirm('Remove this penalty? Standings will be recalculated.')) return;
+    fetch(`/api/fix/penalties/${penaltyId}/delete/`, {
+        method: 'POST',
+        headers: {'X-CSRFToken': csrfToken},
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (!data.success) {
+            showMsg(data.error || 'Failed to remove penalty', 'danger');
+            return;
+        }
+        showMsg(data.message, 'success');
+        const row = document.getElementById('penalty-row-' + penaltyId);
+        if (row) row.remove();
+    })
+    .catch(err => showMsg('Network error: ' + err, 'danger'));
+}
+
+function showMsg(text, kind) {
+    const div = document.createElement('div');
+    div.className = `alert alert-${kind}`;
+    div.textContent = text;
+    messages.appendChild(div);
+    setTimeout(() => div.remove(), 5000);
+}
+</script>
+{% endif %}
+{% endblock %}

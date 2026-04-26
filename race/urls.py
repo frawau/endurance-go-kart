@@ -335,4 +335,15 @@ urlpatterns = [
         views.fix_laps_merge,
         name="fix_laps_merge",
     ),
+    path("fix/penalties/", views.fix_penalties, name="fix_penalties"),
+    path(
+        "api/fix/penalties/create/",
+        views.fix_penalties_create,
+        name="fix_penalties_create",
+    ),
+    path(
+        "api/fix/penalties/<int:penalty_id>/delete/",
+        views.fix_penalties_delete,
+        name="fix_penalties_delete",
+    ),
 ]
