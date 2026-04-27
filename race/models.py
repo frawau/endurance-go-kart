@@ -2662,8 +2662,30 @@ class PenaltyQueue(models.Model):
         return await cls.objects.filter(round_penalty__round_id=round_id).afirst()
 
     def delay_penalty(self):
-        """Move this penalty to the end of the queue"""
-        self.timestamp = dt.datetime.now()
+        """Move this penalty to the end of the queue.
+
+        Use the max of (latest existing queue timestamp, now) plus a
+        one-second buffer. The buffer is required because the calling
+        view (delay_penalty in views.py) immediately calls
+        reset_next_penalty_timestamp(), which sets the new leader's
+        timestamp to datetime.now(). Without the buffer that "now" lands
+        a few microseconds after this entry's "now", flipping the queue
+        order and putting the just-delayed penalty back at the head.
+        """
+        same_round_qs = (
+            type(self)
+            .objects.filter(round_penalty__round=self.round_penalty.round)
+            .exclude(pk=self.pk)
+        )
+        latest = (
+            same_round_qs.order_by("-timestamp")
+            .values_list("timestamp", flat=True)
+            .first()
+        )
+        base = dt.datetime.now()
+        if latest and latest > base:
+            base = latest
+        self.timestamp = base + dt.timedelta(seconds=1)
         self.save()
 
     @sync_to_async
