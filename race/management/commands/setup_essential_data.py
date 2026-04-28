@@ -62,6 +62,12 @@ class Command(BaseCommand):
                 "ignoring s&g",
                 "Ignoring a Stop & Go penalty.",
             ),
+            "time_in_lieu": (
+                "time in lieu",
+                "Stop & Go penalty not served before the end of the race, "
+                "converted into an equivalent time penalty added to the team's "
+                "total race time.",
+            ),
         }
         for mp_key, (name, description) in mandatory_penalties.items():
             # If already linked, skip penalty creation (name may have been changed)

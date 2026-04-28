@@ -49,7 +49,6 @@ if [ "$PENALTY_EXISTS" = "MISSING" ]; then
     echo "First run detected - running initial setup..."
     python manage.py makemigrations race
     python manage.py migrate
-    python manage.py setup_essential_data
     python manage.py createsuperuser_with_password --username ${DJANGO_SUPERUSER_USERNAME} --password ${DJANGO_SUPERUSER_PASSWORD}
     echo "First run setup complete"
 else
@@ -60,6 +59,11 @@ else
     # because Django skips 0001_initial when it is already recorded as applied.
     python manage.py sync_race_schema
 fi
+
+# setup_essential_data is idempotent — always run it so newly added
+# Config / MandatoryPenalty entries (e.g. time_in_lieu) get seeded on
+# rebuilds of existing deployments without touching previous data.
+python manage.py setup_essential_data
 
 # Start the application
 echo "Starting Gunicorn..."

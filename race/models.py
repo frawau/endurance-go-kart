@@ -653,11 +653,9 @@ class Round(models.Model):
             except (MandatoryPenalty.DoesNotExist, ChampionshipPenalty.DoesNotExist):
                 penalties[dict_key] = None
 
-        # If no penalties are configured, return early
-        if not any(penalties.values()):
-            return penalties_created
-
         # Calculate duration in hours once for per_hour penalties (as integer)
+        # Even if no transgression penalties are configured we still need to
+        # run the unserved-S&G conversion below, so don't early-exit here.
         duration_hours = self.duration.total_seconds() // 3600
 
         # Loop through all participating teams
@@ -775,6 +773,65 @@ class Round(models.Model):
                         penalties_created += 1
                     else:
                         print(f"  - ✅ No min time violation")
+
+        # 3. Convert any unserved Stop & Go penalties into "time in lieu" time
+        # penalties of equivalent duration. Adds RoundPenalty.value seconds (the
+        # original S&G duration) to the team's total race time during standings
+        # calculation. The original S&G is marked served and its queue entry
+        # cleared so it no longer shows as pending.
+        try:
+            mp_til = MandatoryPenalty.objects.get(key="time_in_lieu")
+        except MandatoryPenalty.DoesNotExist:
+            mp_til = None
+
+        if mp_til:
+            unserved_sg = list(
+                RoundPenalty.objects.filter(
+                    round=self,
+                    served__isnull=True,
+                    penalty__sanction__in=("S", "D"),
+                ).select_related("offender", "penalty")
+            )
+            if unserved_sg:
+                # Use a single championship-level "Time in Lieu" entry of
+                # sanction='T'. Auto-create on first need so admins don't have
+                # to seed it manually before the race ends.
+                til_cp, cp_created = ChampionshipPenalty.objects.get_or_create(
+                    championship=championship,
+                    penalty=mp_til.penalty,
+                    defaults={"sanction": "T", "value": 1},
+                )
+                if til_cp.sanction != "T":
+                    # If somebody mis-configured the championship entry under a
+                    # different sanction, force-correct it so the standings
+                    # calculator (which keys off sanction='T') will pick it up.
+                    til_cp.sanction = "T"
+                    til_cp.save(update_fields=["sanction"])
+                if cp_created:
+                    print(
+                        f"  - Auto-created ChampionshipPenalty 'time in lieu' "
+                        f"(sanction T) for {championship.name}"
+                    )
+
+                for sg in unserved_sg:
+                    RoundPenalty.objects.create(
+                        round=self,
+                        offender=sg.offender,
+                        victim=None,
+                        penalty=til_cp,
+                        value=sg.value,
+                        imposed=penalty_timestamp,
+                        served=penalty_timestamp,
+                    )
+                    sg.served = penalty_timestamp
+                    sg.save(update_fields=["served"])
+                    PenaltyQueue.objects.filter(round_penalty=sg).delete()
+                    penalties_created += 1
+                    print(
+                        f"  - Converted unserved S&G for "
+                        f"team {sg.offender.team.number} into +{sg.value}s "
+                        f"time-in-lieu penalty"
+                    )
 
         # Mark post-race check as completed to prevent duplicates
         self.post_race_check_completed = True
