@@ -5616,6 +5616,11 @@ _FIX_PENALTY_SANCTIONS = ("L", "P", "T")
 
 def _fix_penalty_round_open(race):
     """Return (ok, error) — allow penalty edits only between race-end and confirm."""
+    if race.race_type != "MAIN":
+        return (
+            False,
+            "Post-race lap and time penalties only apply to the Main race, not qualifying.",
+        )
     if race.ended is None:
         return (
             False,
@@ -5636,9 +5641,11 @@ def fix_penalties(request):
     """Assign or remove lap/time penalties on a finished, not-yet-confirmed race."""
     one_week_ago = dt.datetime.now() - dt.timedelta(days=7)
 
-    # Only finished races whose round hasn't been confirmed yet.
+    # Only finished MAIN races whose round hasn't been confirmed yet.
+    # Qualifying races don't accept post-race lap or time penalties.
     available_races = list(
         Race.objects.filter(
+            race_type="MAIN",
             ended__isnull=False,
             ended__gte=one_week_ago,
             round__results_confirmed=False,
