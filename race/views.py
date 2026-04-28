@@ -1973,7 +1973,7 @@ def round_result_team_laps(request, race_id, team_id):
         final_pos = next(
             (s["position"] for s in standings if s["team_id"] == team.id), None
         )
-        total_penalty = (
+        total_lap_penalty = (
             RoundPenalty.objects.filter(
                 round=race.round,
                 offender=team,
@@ -1981,8 +1981,39 @@ def round_result_team_laps(request, race_id, team_id):
             ).aggregate(total=Sum("value"))["total"]
             or 0
         )
-        if total_penalty > 0:
-            label = f"Penalty {total_penalty} lap{'s' if total_penalty != 1 else ''}"
+        total_time_penalty = (
+            RoundPenalty.objects.filter(
+                round=race.round,
+                offender=team,
+                penalty__sanction="T",
+            ).aggregate(total=Sum("value"))["total"]
+            or 0
+        )
+        # Show final position on the last appended trailer row only.
+        has_trailers = total_lap_penalty > 0 or total_time_penalty > 0
+        if total_lap_penalty > 0:
+            label = (
+                f"Penalty {total_lap_penalty} lap"
+                f"{'s' if total_lap_penalty != 1 else ''}"
+            )
+            result.append(
+                {
+                    "lap_number": "",
+                    "driver": label,
+                    "lap_time": "—",
+                    "diff": "—",
+                    # Final position goes on the last trailer row to avoid
+                    # showing two pos-change badges in a row.
+                    "position": final_pos if total_time_penalty == 0 else None,
+                    "is_penalty": True,
+                }
+            )
+        if total_time_penalty > 0:
+            label = (
+                f"Penalty +{total_time_penalty}s"
+                if total_time_penalty != 1
+                else "Penalty +1s"
+            )
             result.append(
                 {
                     "lap_number": "",
@@ -1993,12 +2024,13 @@ def round_result_team_laps(request, race_id, team_id):
                     "is_penalty": True,
                 }
             )
-        elif (
-            final_pos is not None
+        if (
+            not has_trailers
+            and final_pos is not None
             and prev_position is not None
             and final_pos < prev_position
         ):
-            # This team moved up because other teams received lap penalties
+            # This team moved up because other teams received penalties.
             result.append(
                 {
                     "lap_number": "",
