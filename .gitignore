@@ -16,3 +16,7 @@ env
 
 # Environment variables with secrets
 .env
+
+# Database backups produced by `race-manager backup`
+/backups/
+gokart_backup_*.tar.gz
