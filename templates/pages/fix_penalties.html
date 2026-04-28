@@ -4,12 +4,13 @@
 <div class="container mt-5">
     <div class="card border-danger">
         <div class="card-header bg-danger text-white">
-            <h4 class="mb-0"><i class="fas fa-exclamation-triangle me-2"></i>Fix: Lap Penalties</h4>
+            <h4 class="mb-0"><i class="fas fa-exclamation-triangle me-2"></i>Fix: Lap &amp; Time Penalties</h4>
         </div>
         <div class="card-body">
             <p class="text-muted">
-                Assign or remove lap penalties on a recently-finished or live race. Use this for incidents
-                where there was no time to issue a Stop &amp; Go during the race. Standings update automatically.
+                Assign or remove lap and time penalties on a finished race whose results have not yet
+                been confirmed. Time penalties are added in seconds to the team's total race time.
+                Use this for incidents discovered too late for a Stop &amp; Go. Standings update live.
             </p>
 
             <form method="get" class="mb-3">
@@ -19,20 +20,29 @@
                     {% for race in available_races %}
                     <option value="{{ race.id }}" {% if race.id == selected_race_id %}selected{% endif %}>
                         {{ race.round.name }} — {{ race.get_race_type_display }}
-                        {% if race.ended %}(ended {{ race.ended|date:"d/m H:i" }}){% else %}(LIVE){% endif %}
+                        (ended {{ race.ended|date:"d/m H:i" }})
                     </option>
                     {% endfor %}
                 </select>
+                {% if not available_races %}
+                <small class="text-muted">No finished, unconfirmed races in the last 7 days.</small>
+                {% endif %}
             </form>
 
             {% if selected_race %}
+            {% if edit_locked_reason %}
+            <div class="alert alert-warning mb-3">
+                <i class="fas fa-lock me-1"></i>{{ edit_locked_reason }}
+            </div>
+            {% endif %}
+
             <hr>
             <h5 class="mb-3">Assign New Penalty</h5>
             <form id="penalty-form" class="row g-2">
                 {% csrf_token %}
                 <div class="col-md-4">
                     <label for="offender-select" class="form-label">Offending Team</label>
-                    <select id="offender-select" class="form-control" required>
+                    <select id="offender-select" class="form-control" required {% if edit_locked_reason %}disabled{% endif %}>
                         <option value="">-- Team --</option>
                         {% for t in teams %}
                         <option value="{{ t.id }}">
@@ -43,28 +53,36 @@
                 </div>
                 <div class="col-md-4">
                     <label for="penalty-select" class="form-label">Penalty</label>
-                    <select id="penalty-select" class="form-control" required>
+                    <select id="penalty-select" class="form-control" required {% if edit_locked_reason %}disabled{% endif %}>
                         <option value="">-- Penalty --</option>
                         {% for cp in championship_penalties %}
-                        <option value="{{ cp.id }}" data-default-value="{{ cp.value }}">
+                        <option value="{{ cp.id }}"
+                                data-default-value="{{ cp.value }}"
+                                data-sanction="{{ cp.sanction }}">
                             [{{ cp.get_sanction_display }}] {{ cp.penalty.name }} ({{ cp.value }})
                         </option>
                         {% endfor %}
                     </select>
                 </div>
                 <div class="col-md-2">
-                    <label for="value-input" class="form-label">Laps</label>
-                    <input id="value-input" type="number" min="1" max="120" class="form-control" value="1" required>
+                    <label for="value-input" class="form-label" id="value-label">Laps</label>
+                    <input id="value-input" type="number" min="1" max="120" class="form-control" value="1" required {% if edit_locked_reason %}disabled{% endif %}>
                 </div>
                 <div class="col-md-2 d-flex align-items-end">
-                    <button type="submit" class="btn btn-warning w-100">
+                    <button type="submit" class="btn btn-warning w-100" {% if edit_locked_reason %}disabled{% endif %}>
                         <i class="fas fa-flag me-1"></i>Assign
                     </button>
                 </div>
             </form>
+            {% if not championship_penalties %}
+            <small class="text-muted">
+                This championship has no Laps, Post-Race Laps, or Time penalties configured —
+                add them via the championship admin first.
+            </small>
+            {% endif %}
 
             <hr class="mt-4">
-            <h5 class="mb-3">Existing Lap Penalties for {{ selected_race.round.name }}</h5>
+            <h5 class="mb-3">Existing Penalties for {{ selected_race.round.name }}</h5>
             {% if existing_penalties %}
             <div class="table-responsive">
                 <table class="table table-sm" id="penalties-table">
@@ -74,7 +92,7 @@
                             <th>Team</th>
                             <th>Type</th>
                             <th>Penalty</th>
-                            <th class="text-end">Laps</th>
+                            <th class="text-end">Amount</th>
                             <th></th>
                         </tr>
                     </thead>
@@ -85,10 +103,13 @@
                             <td>#{{ p.offender.team.number }} {{ p.offender.team.team.name }}</td>
                             <td>{{ p.penalty.get_sanction_display }}</td>
                             <td>{{ p.penalty.penalty.name }}</td>
-                            <td class="text-end">{{ p.value }}</td>
+                            <td class="text-end">
+                                {{ p.value }}{% if p.penalty.sanction == "T" %} s{% else %} lap{{ p.value|pluralize }}{% endif %}
+                            </td>
                             <td class="text-end">
                                 <button class="btn btn-sm btn-outline-danger"
-                                        onclick="deletePenalty({{ p.id }})">
+                                        onclick="deletePenalty({{ p.id }})"
+                                        {% if edit_locked_reason %}disabled{% endif %}>
                                     <i class="fas fa-trash"></i>
                                 </button>
                             </td>
@@ -98,7 +119,7 @@
                 </table>
             </div>
             {% else %}
-            <p class="text-muted">No lap penalties assigned for this round yet.</p>
+            <p class="text-muted">No lap or time penalties assigned for this round yet.</p>
             {% endif %}
             {% endif %}
 
@@ -114,12 +135,19 @@ const raceId = {{ selected_race_id }};
 const form = document.getElementById('penalty-form');
 const penaltySelect = document.getElementById('penalty-select');
 const valueInput = document.getElementById('value-input');
+const valueLabel = document.getElementById('value-label');
 const messages = document.getElementById('messages');
 
 penaltySelect.addEventListener('change', () => {
     const opt = penaltySelect.selectedOptions[0];
-    if (opt && opt.dataset.defaultValue) {
+    if (!opt) return;
+    if (opt.dataset.defaultValue) {
         valueInput.value = opt.dataset.defaultValue;
+    }
+    if (opt.dataset.sanction === 'T') {
+        valueLabel.textContent = 'Seconds';
+    } else {
+        valueLabel.textContent = 'Laps';
     }
 });
 

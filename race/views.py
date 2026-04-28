@@ -5611,32 +5611,54 @@ def _push_race_standings_refresh(race_id):
         print(f"Warning: could not refresh leaderboard for race {race_id}: {e}")
 
 
+_FIX_PENALTY_SANCTIONS = ("L", "P", "T")
+
+
+def _fix_penalty_round_open(race):
+    """Return (ok, error) — allow penalty edits only between race-end and confirm."""
+    if race.ended is None:
+        return (
+            False,
+            "Race is still in progress — finish it before assigning post-race penalties.",
+        )
+    if race.round.results_confirmed:
+        return (
+            False,
+            "Round results already confirmed and pushed to the championship — "
+            "unconfirm them first if you need to edit penalties.",
+        )
+    return True, None
+
+
 @login_required
 @user_passes_test(is_race_director)
 def fix_penalties(request):
-    """Emergency: assign / remove lap penalties on recent or active races."""
+    """Assign or remove lap/time penalties on a finished, not-yet-confirmed race."""
     one_week_ago = dt.datetime.now() - dt.timedelta(days=7)
 
-    recent_races = list(
-        Race.objects.filter(ended__isnull=False, ended__gte=one_week_ago)
+    # Only finished races whose round hasn't been confirmed yet.
+    available_races = list(
+        Race.objects.filter(
+            ended__isnull=False,
+            ended__gte=one_week_ago,
+            round__results_confirmed=False,
+        )
         .select_related("round__championship")
         .order_by("-ended")
     )
-    active_races = list(
-        Race.objects.filter(started__isnull=False, ended__isnull=True)
-        .select_related("round__championship")
-        .order_by("round__start")
-    )
-    available_races = active_races + recent_races
 
     selected_race_id = request.GET.get("race_id")
     selected_race = None
     teams = []
     championship_penalties = []
     existing_penalties = []
+    edit_locked_reason = None
 
     if selected_race_id:
         selected_race = get_object_or_404(Race, id=int(selected_race_id))
+        ok, reason = _fix_penalty_round_open(selected_race)
+        if not ok:
+            edit_locked_reason = reason
         teams = list(
             selected_race.get_all_teams()
             .select_related("team__team")
@@ -5645,7 +5667,7 @@ def fix_penalties(request):
         championship_penalties = list(
             ChampionshipPenalty.objects.filter(
                 championship=selected_race.round.championship,
-                sanction__in=["L", "P"],
+                sanction__in=_FIX_PENALTY_SANCTIONS,
             )
             .select_related("penalty")
             .order_by("sanction", "penalty__name")
@@ -5653,7 +5675,7 @@ def fix_penalties(request):
         existing_penalties = list(
             RoundPenalty.objects.filter(
                 round=selected_race.round,
-                penalty__sanction__in=["L", "P"],
+                penalty__sanction__in=_FIX_PENALTY_SANCTIONS,
             )
             .select_related("penalty__penalty", "offender__team__team")
             .order_by("-imposed")
@@ -5669,6 +5691,7 @@ def fix_penalties(request):
             "teams": teams,
             "championship_penalties": championship_penalties,
             "existing_penalties": existing_penalties,
+            "edit_locked_reason": edit_locked_reason,
         },
     )
 
@@ -5677,7 +5700,7 @@ def fix_penalties(request):
 @user_passes_test(is_race_director)
 @require_POST
 def fix_penalties_create(request):
-    """Create a Lap or Post-Race-Lap penalty."""
+    """Create a Lap, Post-Race-Lap, or Time penalty (post-race, pre-confirm)."""
     data = json.loads(request.body)
     race_id = data.get("race_id")
     offender_id = data.get("offender_id")
@@ -5685,14 +5708,18 @@ def fix_penalties_create(request):
     value = data.get("value")
 
     race = get_object_or_404(Race, id=race_id)
+    ok, reason = _fix_penalty_round_open(race)
+    if not ok:
+        return JsonResponse({"success": False, "error": reason}, status=400)
+
     offender = get_object_or_404(round_team, id=offender_id)
     cp = get_object_or_404(ChampionshipPenalty, id=championship_penalty_id)
 
-    if cp.sanction not in ("L", "P"):
+    if cp.sanction not in _FIX_PENALTY_SANCTIONS:
         return JsonResponse(
             {
                 "success": False,
-                "error": "Only Laps or Post-Race-Laps penalties allowed.",
+                "error": "Only Laps, Post-Race-Laps, or Time penalties allowed here.",
             }
         )
     try:
@@ -5709,16 +5736,22 @@ def fix_penalties_create(request):
         penalty=cp,
         value=value,
         imposed=dt.datetime.now(),
-        served=dt.datetime.now() if cp.sanction == "P" else None,
+        # Post-race penalties have nothing to "serve" — mark them as served.
+        served=dt.datetime.now() if cp.sanction in ("P", "T") else None,
     )
     _push_race_standings_refresh(race.id)
+    if cp.sanction == "T":
+        unit = "second" if value == 1 else "seconds"
+        unit_phrase = f"{value} {unit}"
+    else:
+        unit = "lap" if value == 1 else "laps"
+        unit_phrase = f"{value} {unit}"
     return JsonResponse(
         {
             "success": True,
             "penalty_id": rp.id,
             "message": (
-                f"{cp.get_sanction_display()} penalty ({value} lap"
-                f"{'s' if value != 1 else ''}) assigned to "
+                f"{cp.get_sanction_display()} penalty ({unit_phrase}) assigned to "
                 f"#{offender.team.number} {offender.team.team.name}."
             ),
         }
@@ -5729,17 +5762,21 @@ def fix_penalties_create(request):
 @user_passes_test(is_race_director)
 @require_POST
 def fix_penalties_delete(request, penalty_id):
-    """Remove a previously-assigned lap penalty."""
+    """Remove a previously-assigned lap or time penalty (pre-confirm only)."""
     rp = get_object_or_404(RoundPenalty, id=penalty_id)
-    if rp.penalty.sanction not in ("L", "P"):
+    if rp.penalty.sanction not in _FIX_PENALTY_SANCTIONS:
         return JsonResponse(
             {
                 "success": False,
-                "error": "Only Laps or Post-Race-Laps penalties can be removed here.",
+                "error": "Only Laps, Post-Race-Laps, or Time penalties can be removed here.",
             }
         )
-    # Find an associated race in the same round to refresh.
+    # Find an associated race in the same round to refresh / gate-check on.
     race = Race.objects.filter(round=rp.round).order_by("-sequence_number").first()
+    if race is not None:
+        ok, reason = _fix_penalty_round_open(race)
+        if not ok:
+            return JsonResponse({"success": False, "error": reason}, status=400)
     rp.delete()
     if race:
         _push_race_standings_refresh(race.id)

@@ -1880,6 +1880,7 @@ class Race(models.Model):
                 race_finished = False
 
             # Deduct lap penalties (L = Laps, P = Post Race Laps)
+            # Add time penalties (T = Time Penalty, value in seconds)
             if not is_qualifying:
                 penalty_laps = (
                     RoundPenalty.objects.filter(
@@ -1890,8 +1891,19 @@ class Race(models.Model):
                     or 0
                 )
                 laps_completed = max(0, laps_completed - penalty_laps)
+                penalty_seconds = (
+                    RoundPenalty.objects.filter(
+                        round=self.round,
+                        offender=team,
+                        penalty__sanction="T",
+                    ).aggregate(total=Sum("value"))["total"]
+                    or 0
+                )
+                if penalty_seconds and total_time is not None:
+                    total_time = total_time + dt.timedelta(seconds=penalty_seconds)
             else:
                 penalty_laps = 0
+                penalty_seconds = 0
 
             # Get grid position if available
             try:
@@ -1929,6 +1941,7 @@ class Race(models.Model):
                     "current_driver_country": current_driver_country,
                     "laps_completed": laps_completed,
                     "penalty_laps": penalty_laps,
+                    "penalty_seconds": penalty_seconds,
                     "total_time": total_time.total_seconds() if total_time else None,
                     "total_time_formatted": fmt_time(total_time),
                     "last_lap_time": (
@@ -2567,6 +2580,7 @@ class ChampionshipPenalty(models.Model):
         ("D", "Self Stop & Go"),
         ("L", "Laps"),
         ("P", "Post Race Laps"),
+        ("T", "Time Penalty"),
     )
     OPTION_CHOICES = (
         ("fixed", "Fixed"),
