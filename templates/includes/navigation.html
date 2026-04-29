@@ -111,6 +111,28 @@
                             <span class="text-sm">Controlling the current Round.</span>
                           </a>
                         </li>
+                        {% if grid_penalty_available %}
+                        <li class="nav-item list-group-item border-0 p-0">
+                          <a class="dropdown-item py-2 ps-3 border-radius-md"
+                          href="{% url 'fix_grid_penalties' %}">
+                            <h6
+                            class="dropdown-header text-dark font-weight-bolder d-flex justify-content-cente align-items-center p-0">
+                            Grid Penalties</h6>
+                            <span class="text-sm">Move teams back on the Main race grid before it is locked.</span>
+                          </a>
+                        </li>
+                        {% endif %}
+                        {% if post_race_penalty_available %}
+                        <li class="nav-item list-group-item border-0 p-0">
+                          <a class="dropdown-item py-2 ps-3 border-radius-md"
+                          href="{% url 'fix_penalties' %}">
+                            <h6
+                            class="dropdown-header text-dark font-weight-bolder d-flex justify-content-cente align-items-center p-0">
+                            Lap &amp; Time Penalties</h6>
+                            <span class="text-sm">Add or remove lap / time penalties before confirming results.</span>
+                          </a>
+                        </li>
+                        {% endif %}
                         {% endif %}
                       </ul>
                     </div>
@@ -489,20 +511,6 @@
                             <h6 class="dropdown-header text-dark font-weight-bolder d-flex justify-content-cente align-items-center p-0">
                               Lap Fix</h6>
                             <span class="text-sm">Split/unsplit laps after race ends.</span>
-                          </a>
-                        </li>
-                        <li class="nav-item list-group-item border-0 p-0">
-                          <a class="dropdown-item py-2 ps-3 border-radius-md" href="{% url 'fix_penalties' %}">
-                            <h6 class="dropdown-header text-dark font-weight-bolder d-flex justify-content-cente align-items-center p-0">
-                              Lap &amp; Time Penalties</h6>
-                            <span class="text-sm">Add or remove lap / time penalties before confirming results.</span>
-                          </a>
-                        </li>
-                        <li class="nav-item list-group-item border-0 p-0">
-                          <a class="dropdown-item py-2 ps-3 border-radius-md" href="{% url 'fix_grid_penalties' %}">
-                            <h6 class="dropdown-header text-dark font-weight-bolder d-flex justify-content-cente align-items-center p-0">
-                              Grid Penalties</h6>
-                            <span class="text-sm">Move teams back on the Main race grid before it is locked.</span>
                           </a>
                         </li>
                         {% endif %}

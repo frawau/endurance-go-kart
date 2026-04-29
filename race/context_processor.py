@@ -61,4 +61,27 @@ def active_round_data(request):
         active_cround is not None and not active_cround.uses_legacy_session_model
     )
 
+    # Penalty-menu visibility flags. Cheap queries, only when there is an
+    # active timing round. They drive Setup Round menu entries:
+    #   - Grid Penalty: a Main race exists, hasn't started, grid not locked.
+    #   - Lap & Time Penalties (post-race): a Main race has ended and the
+    #     round results are not yet confirmed.
+    grid_penalty_available = False
+    post_race_penalty_available = False
+    if active_cround is not None and not active_cround.uses_legacy_session_model:
+        grid_penalty_available = Race.objects.filter(
+            round=active_cround,
+            race_type="MAIN",
+            started__isnull=True,
+            grid_locked=False,
+        ).exists()
+        if not active_cround.results_confirmed:
+            post_race_penalty_available = Race.objects.filter(
+                round=active_cround,
+                race_type="MAIN",
+                ended__isnull=False,
+            ).exists()
+    myvals["grid_penalty_available"] = grid_penalty_available
+    myvals["post_race_penalty_available"] = post_race_penalty_available
+
     return myvals
