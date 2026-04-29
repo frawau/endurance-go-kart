@@ -68,6 +68,12 @@ class Command(BaseCommand):
                 "converted into an equivalent time penalty added to the team's "
                 "total race time.",
             ),
+            "grid_penalty": (
+                "grid penalty",
+                "Move a team back the configured number of positions on the "
+                "Main race grid. Applied automatically when the grid is "
+                "computed from qualifying.",
+            ),
         }
         for mp_key, (name, description) in mandatory_penalties.items():
             # If already linked, skip penalty creation (name may have been changed)

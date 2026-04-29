@@ -5820,3 +5820,198 @@ def fix_penalties_delete(request, penalty_id):
     if race:
         _push_race_standings_refresh(race.id)
     return JsonResponse({"success": True, "message": "Penalty removed."})
+
+
+# ── Grid Penalties ────────────────────────────────────────────────────────────
+
+
+def _grid_penalty_main_open(main_race):
+    """Return (ok, error). Grid penalties are editable until the MAIN grid
+    is locked, the MAIN race has started, or it has already ended."""
+    if main_race.race_type != "MAIN":
+        return False, "Grid penalties only apply to the Main race."
+    if main_race.started is not None:
+        return False, "Main race has already started — grid is final."
+    if main_race.grid_locked:
+        return (
+            False,
+            "Main race grid is locked — unlock it first to edit grid penalties.",
+        )
+    return True, None
+
+
+def _refresh_main_grid(main_race):
+    """Recompute the MAIN grid from quali (or championship if no quali) and
+    apply grid penalties on top. Used after every grid-penalty add/remove
+    so the displayed grid stays consistent with the penalty list."""
+    has_ended_q = Race.objects.filter(
+        round=main_race.round,
+        race_type__startswith="Q",
+        ended__isnull=False,
+    ).exists()
+    source = "QUALIFYING" if has_ended_q else "CHAMPIONSHIP"
+    main_race.auto_assign_grid_positions(source_type=source)
+
+
+def _ensure_grid_penalty_cp(championship):
+    """Look up or auto-create the championship's "grid penalty" entry."""
+    try:
+        mp = MandatoryPenalty.objects.get(key="grid_penalty")
+    except MandatoryPenalty.DoesNotExist:
+        return None
+    cp, _ = ChampionshipPenalty.objects.get_or_create(
+        championship=championship,
+        penalty=mp.penalty,
+        defaults={"sanction": "G", "value": 1},
+    )
+    if cp.sanction != "G":
+        cp.sanction = "G"
+        cp.save(update_fields=["sanction"])
+    return cp
+
+
+@login_required
+@user_passes_test(is_race_director)
+def fix_grid_penalties(request):
+    """Assign or remove Grid Penalties on a not-yet-started Main race grid."""
+    # Only Main races whose grid is still open: not started, not locked.
+    available_races = list(
+        Race.objects.filter(
+            race_type="MAIN",
+            started__isnull=True,
+            grid_locked=False,
+        )
+        .select_related("round__championship")
+        .order_by("round__start")
+    )
+
+    selected_race_id = request.GET.get("race_id")
+    selected_race = None
+    teams = []
+    grid_positions = []
+    existing_penalties = []
+    edit_locked_reason = None
+
+    if selected_race_id:
+        selected_race = get_object_or_404(Race, id=int(selected_race_id))
+        ok, reason = _grid_penalty_main_open(selected_race)
+        if not ok:
+            edit_locked_reason = reason
+        teams = list(
+            selected_race.get_all_teams()
+            .select_related("team__team")
+            .order_by("team__number")
+        )
+        grid_positions = list(
+            GridPosition.objects.filter(race=selected_race)
+            .select_related("team__team__team")
+            .order_by("position")
+        )
+        existing_penalties = list(
+            RoundPenalty.objects.filter(
+                round=selected_race.round,
+                penalty__sanction="G",
+            )
+            .select_related("penalty__penalty", "offender__team__team")
+            .order_by("-imposed")
+        )
+
+    return render(
+        request,
+        "pages/fix_grid_penalties.html",
+        {
+            "available_races": available_races,
+            "selected_race": selected_race,
+            "selected_race_id": int(selected_race_id) if selected_race_id else None,
+            "teams": teams,
+            "grid_positions": grid_positions,
+            "existing_penalties": existing_penalties,
+            "edit_locked_reason": edit_locked_reason,
+        },
+    )
+
+
+@login_required
+@user_passes_test(is_race_director)
+@require_POST
+def fix_grid_penalties_create(request):
+    """Create a Grid Penalty (move a team back N positions on the Main grid)."""
+    data = json.loads(request.body)
+    race_id = data.get("race_id")
+    offender_id = data.get("offender_id")
+    value = data.get("value")
+
+    main_race = get_object_or_404(Race, id=race_id)
+    ok, reason = _grid_penalty_main_open(main_race)
+    if not ok:
+        return JsonResponse({"success": False, "error": reason}, status=400)
+
+    offender = get_object_or_404(round_team, id=offender_id)
+
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        return JsonResponse({"success": False, "error": "Invalid value."})
+    if value < 1 or value > 20:
+        return JsonResponse(
+            {"success": False, "error": "Value must be between 1 and 20."}
+        )
+
+    cp = _ensure_grid_penalty_cp(main_race.round.championship)
+    if cp is None:
+        return JsonResponse(
+            {
+                "success": False,
+                "error": "Mandatory penalty 'grid_penalty' is not configured. "
+                "Run setup_essential_data.",
+            },
+            status=400,
+        )
+
+    RoundPenalty.objects.create(
+        round=main_race.round,
+        offender=offender,
+        victim=None,
+        penalty=cp,
+        value=value,
+        imposed=dt.datetime.now(),
+        # Grid penalties are applied at grid-build time; nothing to "serve".
+        served=dt.datetime.now(),
+    )
+    _refresh_main_grid(main_race)
+
+    return JsonResponse(
+        {
+            "success": True,
+            "message": (
+                f"Grid penalty (-{value} place"
+                f"{'s' if value != 1 else ''}) assigned to "
+                f"#{offender.team.number} {offender.team.team.name}."
+            ),
+        }
+    )
+
+
+@login_required
+@user_passes_test(is_race_director)
+@require_POST
+def fix_grid_penalties_delete(request, penalty_id):
+    """Remove a previously-assigned Grid Penalty (only while grid is editable)."""
+    rp = get_object_or_404(RoundPenalty, id=penalty_id)
+    if rp.penalty.sanction != "G":
+        return JsonResponse(
+            {"success": False, "error": "Not a grid penalty."}, status=400
+        )
+    main_race = (
+        Race.objects.filter(round=rp.round, race_type="MAIN")
+        .order_by("sequence_number")
+        .first()
+    )
+    if main_race is not None:
+        ok, reason = _grid_penalty_main_open(main_race)
+        if not ok:
+            return JsonResponse({"success": False, "error": reason}, status=400)
+    rp.delete()
+    if main_race is not None:
+        _refresh_main_grid(main_race)
+    return JsonResponse({"success": True, "message": "Grid penalty removed."})

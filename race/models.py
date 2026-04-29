@@ -1,6 +1,6 @@
 import uuid
 
-from django.db import models
+from django.db import models, transaction
 from django.db.models import Q, Sum, UniqueConstraint
 from django_countries.fields import CountryField
 from django.core.validators import MinValueValidator, MaxValueValidator
@@ -1687,6 +1687,11 @@ class Race(models.Model):
                 manually_overridden=False,
             )
 
+        # Grid penalties (sanction 'G') are applied to the freshly-built
+        # grid. Re-running combine_qualifying_results always restarts from
+        # quali results, so penalty effects don't accumulate across calls.
+        main_race.apply_grid_penalties()
+
     def auto_assign_grid_positions(self, source_type="CHAMPIONSHIP"):
         """
         Auto-assign grid positions based on source.
@@ -1721,6 +1726,68 @@ class Race(models.Model):
                         "source": "CHAMPIONSHIP",
                         "manually_overridden": False,
                     },
+                )
+
+        # Apply grid penalties on top of whichever base ordering was used.
+        if self.race_type == "MAIN":
+            self.apply_grid_penalties()
+
+    def apply_grid_penalties(self):
+        """Re-rank GridPosition records to incorporate grid penalties.
+
+        Penalties are applied **in the order they were imposed** (imposed
+        timestamp asc, id asc as tiebreaker). Each grid penalty literally
+        moves the offending team back `value` positions from its current
+        spot in the grid; intervening teams each shift up by one. If the
+        target index runs past the back of the grid, the team is placed
+        last. Multiple penalties for the same team stack naturally
+        because each is applied sequentially to the post-previous grid.
+
+        Caller must have first written the *base* grid via either
+        combine_qualifying_results or auto_assign_grid_positions, so
+        penalty effects don't accumulate across recomputes.
+        """
+        if self.race_type != "MAIN" or self.grid_locked:
+            return
+
+        pens = list(
+            RoundPenalty.objects.filter(
+                round=self.round, penalty__sanction="G"
+            ).order_by("imposed", "id")
+        )
+        if not pens:
+            return
+
+        gps = list(GridPosition.objects.filter(race=self).order_by("position"))
+        if not gps:
+            return
+
+        # Mutable order: list of team_id, index 0 = pos 1.
+        order = [gp.team_id for gp in gps]
+        team_id_to_pk = {gp.team_id: gp.pk for gp in gps}
+
+        for pen in pens:
+            try:
+                cur_idx = order.index(pen.offender_id)
+            except ValueError:
+                continue  # offender not on this race's grid
+            new_idx = min(cur_idx + int(pen.value), len(order) - 1)
+            if new_idx == cur_idx:
+                continue
+            team_id = order.pop(cur_idx)
+            order.insert(new_idx, team_id)
+
+        # Re-emit positions 1..N. Use a temp range to avoid violating the
+        # (race, position) unique constraint mid-rewrite (same trick as
+        # reorder_grid_positions).
+        with transaction.atomic():
+            for idx, team_id in enumerate(order):
+                GridPosition.objects.filter(pk=team_id_to_pk[team_id]).update(
+                    position=10000 + idx
+                )
+            for new_pos, team_id in enumerate(order, 1):
+                GridPosition.objects.filter(pk=team_id_to_pk[team_id]).update(
+                    position=new_pos
                 )
 
     def lock_grid(self):
@@ -2638,6 +2705,7 @@ class ChampionshipPenalty(models.Model):
         ("L", "Laps"),
         ("P", "Post Race Laps"),
         ("T", "Time Penalty"),
+        ("G", "Grid Penalty"),
     )
     OPTION_CHOICES = (
         ("fixed", "Fixed"),

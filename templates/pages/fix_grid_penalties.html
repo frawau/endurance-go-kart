@@ -1,0 +1,195 @@
+{% extends 'layout/content.html' %}
+
+{% block main_content %}
+<div class="container mt-5">
+    <div class="card border-danger">
+        <div class="card-header bg-danger text-white">
+            <h4 class="mb-0"><i class="fas fa-exclamation-triangle me-2"></i>Fix: Grid Penalties</h4>
+        </div>
+        <div class="card-body">
+            <p class="text-muted">
+                Assign or remove Grid Penalties on a Main race that has not yet started and whose
+                grid is not locked. Each penalty moves the offending team back the chosen number of
+                positions on the starting grid (1–20). Penalties stack and the grid is recomputed
+                after every change.
+            </p>
+
+            <form method="get" class="mb-3">
+                <label for="race-select" class="form-label fw-bold">Main race:</label>
+                <select id="race-select" name="race_id" class="form-control" onchange="this.form.submit()">
+                    <option value="">-- Select Main Race --</option>
+                    {% for race in available_races %}
+                    <option value="{{ race.id }}" {% if race.id == selected_race_id %}selected{% endif %}>
+                        {{ race.round.name }} — {{ race.get_race_type_display }}
+                        {% if race.round.start %}(round starts {{ race.round.start|date:"d/m H:i" }}){% endif %}
+                    </option>
+                    {% endfor %}
+                </select>
+                {% if not available_races %}
+                <small class="text-muted">No Main race with an editable grid.</small>
+                {% endif %}
+            </form>
+
+            {% if selected_race %}
+            {% if edit_locked_reason %}
+            <div class="alert alert-warning mb-3">
+                <i class="fas fa-lock me-1"></i>{{ edit_locked_reason }}
+            </div>
+            {% endif %}
+
+            <hr>
+            <h5 class="mb-3">Assign New Grid Penalty</h5>
+            <form id="grid-penalty-form" class="row g-2">
+                {% csrf_token %}
+                <div class="col-md-5">
+                    <label for="offender-select" class="form-label">Offending Team</label>
+                    <select id="offender-select" class="form-control" required {% if edit_locked_reason %}disabled{% endif %}>
+                        <option value="">-- Team --</option>
+                        {% for t in teams %}
+                        <option value="{{ t.id }}">
+                            #{{ t.team.number }} {{ t.team.team.name }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label for="value-input" class="form-label">Positions back</label>
+                    <input id="value-input" type="number" min="1" max="20" class="form-control" value="1" required {% if edit_locked_reason %}disabled{% endif %}>
+                </div>
+                <div class="col-md-4 d-flex align-items-end">
+                    <button type="submit" class="btn btn-warning w-100" {% if edit_locked_reason %}disabled{% endif %}>
+                        <i class="fas fa-flag me-1"></i>Assign Grid Penalty
+                    </button>
+                </div>
+            </form>
+
+            <hr class="mt-4">
+            <h5 class="mb-3">Existing Grid Penalties</h5>
+            {% if existing_penalties %}
+            <div class="table-responsive">
+                <table class="table table-sm" id="penalties-table">
+                    <thead>
+                        <tr>
+                            <th>Imposed</th>
+                            <th>Team</th>
+                            <th class="text-end">Positions</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for p in existing_penalties %}
+                        <tr id="penalty-row-{{ p.id }}">
+                            <td>{{ p.imposed|date:"d/m H:i" }}</td>
+                            <td>#{{ p.offender.team.number }} {{ p.offender.team.team.name }}</td>
+                            <td class="text-end">-{{ p.value }}</td>
+                            <td class="text-end">
+                                <button class="btn btn-sm btn-outline-danger"
+                                        onclick="deletePenalty({{ p.id }})"
+                                        {% if edit_locked_reason %}disabled{% endif %}>
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <p class="text-muted">No grid penalties on this round yet.</p>
+            {% endif %}
+
+            <hr class="mt-4">
+            <h5 class="mb-3">Resulting Main race grid</h5>
+            {% if grid_positions %}
+            <div class="table-responsive">
+                <table class="table table-sm">
+                    <thead>
+                        <tr>
+                            <th class="text-end" style="width:80px;">Position</th>
+                            <th>Team</th>
+                            <th>Source</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for gp in grid_positions %}
+                        <tr>
+                            <td class="text-end fw-bold">{{ gp.position }}</td>
+                            <td>#{{ gp.team.team.number }} {{ gp.team.team.team.name }}</td>
+                            <td><small class="text-muted">{{ gp.get_source_display }}</small></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <p class="text-muted">No grid positions yet — finish at least one Qualifying first.</p>
+            {% endif %}
+            {% endif %}
+
+            <div id="messages" class="mt-3"></div>
+        </div>
+    </div>
+</div>
+
+{% if selected_race %}
+<script>
+const csrfToken = '{{ csrf_token }}';
+const raceId = {{ selected_race_id }};
+const form = document.getElementById('grid-penalty-form');
+const messages = document.getElementById('messages');
+
+form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const offender = document.getElementById('offender-select').value;
+    const value = parseInt(document.getElementById('value-input').value, 10);
+    if (!offender || !value) return;
+
+    fetch('{% url "fix_grid_penalties_create" %}', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken},
+        body: JSON.stringify({
+            race_id: raceId,
+            offender_id: parseInt(offender, 10),
+            value: value,
+        }),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (!data.success) {
+            showMsg(data.error || 'Failed to assign grid penalty', 'danger');
+            return;
+        }
+        showMsg(data.message, 'success');
+        setTimeout(() => location.reload(), 800);
+    })
+    .catch(err => showMsg('Network error: ' + err, 'danger'));
+});
+
+function deletePenalty(penaltyId) {
+    if (!confirm('Remove this grid penalty? Grid will be recomputed.')) return;
+    fetch(`/api/fix/grid-penalties/${penaltyId}/delete/`, {
+        method: 'POST',
+        headers: {'X-CSRFToken': csrfToken},
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (!data.success) {
+            showMsg(data.error || 'Failed to remove grid penalty', 'danger');
+            return;
+        }
+        showMsg(data.message, 'success');
+        setTimeout(() => location.reload(), 600);
+    })
+    .catch(err => showMsg('Network error: ' + err, 'danger'));
+}
+
+function showMsg(text, kind) {
+    const div = document.createElement('div');
+    div.className = `alert alert-${kind}`;
+    div.textContent = text;
+    messages.appendChild(div);
+    setTimeout(() => div.remove(), 5000);
+}
+</script>
+{% endif %}
+{% endblock %}

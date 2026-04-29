@@ -346,4 +346,19 @@ urlpatterns = [
         views.fix_penalties_delete,
         name="fix_penalties_delete",
     ),
+    path(
+        "fix/grid-penalties/",
+        views.fix_grid_penalties,
+        name="fix_grid_penalties",
+    ),
+    path(
+        "api/fix/grid-penalties/create/",
+        views.fix_grid_penalties_create,
+        name="fix_grid_penalties_create",
+    ),
+    path(
+        "api/fix/grid-penalties/<int:penalty_id>/delete/",
+        views.fix_grid_penalties_delete,
+        name="fix_grid_penalties_delete",
+    ),
 ]
