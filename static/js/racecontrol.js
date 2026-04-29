@@ -864,7 +864,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (penaltySelect && offenderSelect && victimSelect) {
       const roundIdContainer = document.getElementById('race-control-buttons');
       currentRoundId = roundIdContainer?.dataset.roundId;
-      if (currentRoundId) loadStopAndGoPenalties();
+      if (currentRoundId) applyPenaltyModeFromActiveRace();
       initializeStopAndGo();
       initializeDropdownLogic();
       return true;
@@ -974,11 +974,71 @@ function initializeStopAndGo() {
 }
 
 /**
+ * True if the active race is a qualifying session.
+ */
+function isQualifyingActive() {
+  return !!(activeRaceType && activeRaceType.startsWith('Q'));
+}
+
+/**
+ * Switch the in-race penalty form between qualifying mode (Grid Penalty
+ * only) and main / practice mode (Stop & Go). Called on init and whenever
+ * the active race type changes.
+ *
+ * Qualifying mode:
+ *   - Penalty dropdown contains a single "Grid Penalty" entry.
+ *   - "Duration" label becomes "Positions back" (1..20).
+ *   - "Stop & Go" button label becomes "Grid Penalty".
+ *   - Lap Penalties button is hidden (lap/time penalties only on Main).
+ *   - Submission posts to fix_grid_penalties_create with round_id +
+ *     optional victim_id.
+ */
+function applyPenaltyModeFromActiveRace() {
+  const penaltySelect = document.getElementById('penaltySelect');
+  const durationLabel = document.querySelector('label[for="durationInput"]');
+  const durationInput = document.getElementById('durationInput');
+  const stopGoButton = document.getElementById('stopGoButton');
+  const lapPenaltiesButton = document.getElementById('lapPenaltiesButton');
+
+  if (!penaltySelect) return;
+
+  if (isQualifyingActive()) {
+    // Single Grid Penalty option, no server fetch needed — backend
+    // auto-creates the championship CP on first use.
+    penaltySelect.innerHTML =
+      '<option value="">Select penalty...</option>' +
+      '<option value="GRID_PENALTY" ' +
+      'data-penalty-value="1" data-penalty-option="variable" ' +
+      'data-penalty-sanction="G">Grid Penalty</option>';
+    if (durationLabel) durationLabel.textContent = 'Positions back';
+    if (durationInput) {
+      durationInput.value = '1';
+      durationInput.min = '1';
+      durationInput.max = '20';
+    }
+    if (stopGoButton) stopGoButton.textContent = 'Grid Penalty';
+    if (lapPenaltiesButton) lapPenaltiesButton.style.display = 'none';
+  } else {
+    // Restore S&G defaults and load the championship's S&G entries.
+    if (durationLabel) durationLabel.textContent = 'Duration';
+    if (durationInput) {
+      durationInput.value = '20';
+      durationInput.min = '1';
+      durationInput.max = '300';
+    }
+    if (stopGoButton) stopGoButton.textContent = 'Stop & Go';
+    if (lapPenaltiesButton) lapPenaltiesButton.style.display = '';
+    loadStopAndGoPenalties();
+  }
+  resetStopAndGoForm();
+}
+
+/**
  * Load Stop & Go penalties for current round
  */
 function loadStopAndGoPenalties() {
   if (!currentRoundId) return;
-  
+
   fetch(`/api/round/${currentRoundId}/stop-go-penalties/`)
     .then(response => response.json())
     .then(data => {
@@ -1044,9 +1104,12 @@ function initializeDropdownLogic() {
         durationInput.disabled = true;
       }
       
-      // For Self Stop & Go penalties, update victim dropdown label
+      // Adjust victim dropdown label by sanction.
       if (selectedPenalty.sanction === 'D') {
         victimSelect.innerHTML = '<option value="">No victim needed</option>';
+      } else if (selectedPenalty.sanction === 'G') {
+        // Grid Penalty: victim is optional; show a clear placeholder.
+        victimSelect.innerHTML = '<option value="">No victim (optional)</option>';
       } else {
         victimSelect.innerHTML = '<option value="">Select victim team...</option>';
       }
@@ -1074,17 +1137,20 @@ function initializeDropdownLogic() {
     const selectedOffenderId = this.value;
     
     if (selectedOffenderId) {
-      // For Self Stop & Go penalties (D), don't enable victim dropdown
+      // Self Stop & Go (D) has no victim; disable the dropdown.
       if (selectedPenalty && selectedPenalty.sanction === 'D') {
-        // Disable victim dropdown for Self Stop & Go
         victimSelect.disabled = true;
         victimSelect.value = '';
         victimSelect.innerHTML = '<option value="">No victim needed</option>';
       } else {
-        // Enable victim dropdown for regular Stop & Go
+        // S (Stop & Go) and G (Grid Penalty during quali) both allow a
+        // victim. For G it's optional, for S it's required — checkFormCompletion
+        // enforces that.
         victimSelect.disabled = false;
-        
-        // Populate victim dropdown (all teams except the offender)
+        const placeholder = selectedPenalty && selectedPenalty.sanction === 'G'
+          ? 'No victim (optional)'
+          : 'Select victim team...';
+        victimSelect.innerHTML = `<option value="">${placeholder}</option>`;
         populateVictimDropdown(selectedOffenderId);
       }
     } else {
@@ -1117,26 +1183,27 @@ function initializeDropdownLogic() {
   function checkFormCompletion() {
     const penaltySelected = selectedPenalty !== null;
     const offenderSelected = offenderSelect.value !== '';
-    
-    // For Self Stop & Go (D), victim is not required
+
+    // Victim is required for S (Stop & Go); optional for D (Self S&G)
+    // and G (Grid Penalty during qualifying).
     let victimRequired = true;
-    if (selectedPenalty && selectedPenalty.sanction === 'D') {
+    if (selectedPenalty && (selectedPenalty.sanction === 'D' || selectedPenalty.sanction === 'G')) {
       victimRequired = false;
     }
-    
+
     const victimSelected = victimRequired ? victimSelect.value !== '' : true;
-    
-    // Stop & Go button: enabled when form is complete (queues penalties)
+    const isGrid = selectedPenalty && selectedPenalty.sanction === 'G';
+
     if (penaltySelected && offenderSelected && victimSelected) {
       stopGoButton.disabled = false;
       stopGoButton.style.backgroundColor = '#dc3545';
       stopGoButton.style.color = 'yellow';
-      stopGoButton.textContent = 'Stop & Go';
+      stopGoButton.textContent = isGrid ? 'Grid Penalty' : 'Stop & Go';
     } else {
       stopGoButton.disabled = true;
       stopGoButton.style.backgroundColor = '#6c757d';
       stopGoButton.style.color = '#fff';
-      stopGoButton.textContent = 'Stop & Go';
+      stopGoButton.textContent = isGrid ? 'Grid Penalty' : 'Stop & Go';
     }
   }
 }
@@ -1220,56 +1287,88 @@ function updateQueueButtons() {
 }
 
 /**
- * Handle Stop & Go button click - Now queues penalties
+ * Handle Stop & Go / Grid Penalty button click. The qualifying form
+ * shares the same widget and flips its semantics via selectedPenalty.sanction.
  */
 function handleStopGoButtonClick() {
   const offenderSelect = document.getElementById('offenderSelect');
   const victimSelect = document.getElementById('victimSelect');
   const durationInput = document.getElementById('durationInput');
-  
-  // Queue the penalty
+
   const offenderId = offenderSelect.value;
   const victimId = victimSelect.value || null;
   const offenderTeamNumber = offenderSelect.selectedOptions[0]?.dataset.teamNumber;
-  const duration = parseInt(durationInput.value) || 20;
-    
-  if (selectedPenalty && offenderId && offenderTeamNumber) {
-    // Queue the penalty
-    const penaltyData = {
+  const value = parseInt(durationInput.value) || 1;
+
+  if (!selectedPenalty || !offenderId || !offenderTeamNumber) return;
+
+  if (selectedPenalty.sanction === 'G') {
+    // Qualifying-mode Grid Penalty — bypass S&G queue and apply directly
+    // to the Main race grid via the fix endpoint (RD-only on the server).
+    const payload = {
       round_id: currentRoundId,
       offender_id: offenderId,
       victim_id: victimId,
-      championship_penalty_id: selectedPenalty.id,
-      value: duration
+      value: value,
     };
-    
-    fetch('/api/queue-penalty/', {
+    fetch('/api/fix/grid-penalties/create/', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-CSRFToken': getCookie('csrftoken')
+        'X-CSRFToken': getCookie('csrftoken'),
       },
-      body: JSON.stringify(penaltyData)
+      body: JSON.stringify(payload),
     })
-    .then(response => response.json())
+    .then(r => r.json())
     .then(data => {
       if (data.success) {
-        addSystemMessage(`Stop & Go penalty queued for team ${offenderTeamNumber}`, 'info');
-        
-        // Reset form after successful queueing
+        addSystemMessage(
+          data.message || `Grid penalty (-${value}) for team ${offenderTeamNumber}`,
+          'info'
+        );
         resetStopAndGoForm();
-        
-        // Refresh queue state and status display
-        loadQueueState();
       } else {
-        throw new Error(data.error || 'Failed to queue penalty');
+        throw new Error(data.error || 'Failed to assign grid penalty');
       }
     })
-    .catch(error => {
-      console.error('Failed to queue penalty:', error);
-      addSystemMessage('Failed to queue penalty: ' + error.message, 'danger');
+    .catch(err => {
+      console.error('Failed to assign grid penalty:', err);
+      addSystemMessage('Failed to assign grid penalty: ' + err.message, 'danger');
     });
+    return;
   }
+
+  // Stop & Go / Self Stop & Go (Main race or Practice) — existing flow.
+  const penaltyData = {
+    round_id: currentRoundId,
+    offender_id: offenderId,
+    victim_id: victimId,
+    championship_penalty_id: selectedPenalty.id,
+    value: value,
+  };
+
+  fetch('/api/queue-penalty/', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-CSRFToken': getCookie('csrftoken')
+    },
+    body: JSON.stringify(penaltyData)
+  })
+  .then(response => response.json())
+  .then(data => {
+    if (data.success) {
+      addSystemMessage(`Stop & Go penalty queued for team ${offenderTeamNumber}`, 'info');
+      resetStopAndGoForm();
+      loadQueueState();
+    } else {
+      throw new Error(data.error || 'Failed to queue penalty');
+    }
+  })
+  .catch(error => {
+    console.error('Failed to queue penalty:', error);
+    addSystemMessage('Failed to queue penalty: ' + error.message, 'danger');
+  });
 }
 
 /**
@@ -1466,7 +1565,7 @@ function handleStopAndGoMessage(data) {
 }
 
 /**
- * Reset Stop & Go form to initial state
+ * Reset Stop & Go / Grid Penalty form to initial state
  */
 function resetStopAndGoForm() {
   const penaltySelect = document.getElementById('penaltySelect');
@@ -1474,31 +1573,39 @@ function resetStopAndGoForm() {
   const victimSelect = document.getElementById('victimSelect');
   const durationInput = document.getElementById('durationInput');
   const stopGoButton = document.getElementById('stopGoButton');
-  
+  const penaltyFields = document.getElementById('penaltyFields');
+
+  const qualifying = isQualifyingActive();
+
   // Reset dropdowns
-  penaltySelect.value = '';
-  offenderSelect.value = '';
-  victimSelect.value = '';
-  
+  if (penaltySelect) penaltySelect.value = '';
+  if (offenderSelect) offenderSelect.value = '';
+  if (victimSelect) victimSelect.value = '';
+
   // Disable form elements
-  offenderSelect.disabled = true;
-  victimSelect.disabled = true;
-  durationInput.disabled = true;
-  
+  if (offenderSelect) offenderSelect.disabled = true;
+  if (victimSelect) victimSelect.disabled = true;
+  if (durationInput) durationInput.disabled = true;
+
+  // Hide offender/victim/duration block until a penalty is selected
+  if (penaltyFields) penaltyFields.style.display = 'none';
+
   // Clear victim options
-  victimSelect.innerHTML = '<option value="">Select victim team...</option>';
-  
-  // Reset duration
-  durationInput.value = '20';
-  
+  if (victimSelect) victimSelect.innerHTML = '<option value="">Select victim team...</option>';
+
+  // Reset duration / positions to mode-appropriate default
+  if (durationInput) durationInput.value = qualifying ? '1' : '20';
+
   // Reset penalty selection
   selectedPenalty = null;
-  
+
   // Reset button to idle state
-  stopGoButton.disabled = true;
-  stopGoButton.style.backgroundColor = '#6c757d';
-  stopGoButton.style.color = '#fff';
-  stopGoButton.textContent = 'Stop & Go';
+  if (stopGoButton) {
+    stopGoButton.disabled = true;
+    stopGoButton.style.backgroundColor = '#6c757d';
+    stopGoButton.style.color = '#fff';
+    stopGoButton.textContent = qualifying ? 'Grid Penalty' : 'Stop & Go';
+  }
 }
 
 /**
@@ -1540,9 +1647,20 @@ function updateMultiRaceUI(data) {
   }
 
   // Update cached state
+  const prevType = activeRaceType;
   activeRaceType = newType;
   activeRaceLabel = newLabel;
   if (data.start_mode) activeStartMode = data.start_mode;
+
+  // If we crossed the qualifying / non-qualifying boundary, swap the
+  // in-race penalty form between Grid Penalty and Stop & Go.
+  if (typeof applyPenaltyModeFromActiveRace === 'function') {
+    const wasQ = !!(prevType && prevType.startsWith('Q'));
+    const isQ = !!(activeRaceType && activeRaceType.startsWith('Q'));
+    if (wasQ !== isQ || prevType !== activeRaceType) {
+      applyPenaltyModeFromActiveRace();
+    }
+  }
 
   // Update header label
   const headerLabel = document.getElementById('raceHeaderLabel');

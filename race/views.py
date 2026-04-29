@@ -5935,18 +5935,45 @@ def fix_grid_penalties(request):
 @user_passes_test(is_race_director)
 @require_POST
 def fix_grid_penalties_create(request):
-    """Create a Grid Penalty (move a team back N positions on the Main grid)."""
+    """Create a Grid Penalty (move a team back N positions on the Main grid).
+
+    Accepts either ``race_id`` (the Main race) or ``round_id`` (race control
+    posts this during qualifying because the active race is a Q-race, not
+    the Main). ``victim_id`` is optional and stored on the RoundPenalty.
+    """
     data = json.loads(request.body)
     race_id = data.get("race_id")
+    round_id = data.get("round_id")
     offender_id = data.get("offender_id")
+    victim_id = data.get("victim_id")
     value = data.get("value")
 
-    main_race = get_object_or_404(Race, id=race_id)
+    if race_id:
+        main_race = get_object_or_404(Race, id=race_id)
+    elif round_id:
+        main_race = (
+            Race.objects.filter(round_id=round_id, race_type="MAIN")
+            .order_by("sequence_number")
+            .first()
+        )
+        if main_race is None:
+            return JsonResponse(
+                {"success": False, "error": "No Main race in this round."},
+                status=404,
+            )
+    else:
+        return JsonResponse(
+            {"success": False, "error": "Missing race_id or round_id."}, status=400
+        )
+
     ok, reason = _grid_penalty_main_open(main_race)
     if not ok:
         return JsonResponse({"success": False, "error": reason}, status=400)
 
     offender = get_object_or_404(round_team, id=offender_id)
+    victim = None
+    if victim_id:
+        victim = get_object_or_404(round_team, id=victim_id)
 
     try:
         value = int(value)
@@ -5971,7 +5998,7 @@ def fix_grid_penalties_create(request):
     RoundPenalty.objects.create(
         round=main_race.round,
         offender=offender,
-        victim=None,
+        victim=victim,
         penalty=cp,
         value=value,
         imposed=dt.datetime.now(),
