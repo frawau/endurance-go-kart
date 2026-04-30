@@ -221,6 +221,7 @@
                     aria-labelledby="dropdownMenuDocs">
                     <div class="d-none d-lg-block">
                       <ul class="list-group">
+                        {% if has_active_round %}
                         <li class="nav-item list-group-item border-0 p-0">
                           <a class="dropdown-item py-2 ps-3 border-radius-md"
                             href="/pending_drivers-nav/">
@@ -230,6 +231,7 @@
                             <span class="text-sm">Show drivers waiting for relay..</span>
                           </a>
                         </li>
+                        {% endif %}
                         <li class="nav-item list-group-item border-0 p-0">
                           <a class="dropdown-item py-2 ps-3 border-radius-md"
                             href="/alldrivers/">
@@ -276,6 +278,7 @@
                     aria-labelledby="dropdownMenuDocs">
                     <div class="d-none d-lg-block">
                       <ul class="list-group">
+                        {% if has_active_round %}
                         <li class="nav-item list-group-item border-0 p-0">
                           <a class="dropdown-item py-2 ps-3 border-radius-md"
                             href="/singleteam/">
@@ -294,6 +297,7 @@
                             <span class="text-sm">Display all team status sequentially.</span>
                           </a>
                         </li>
+                        {% endif %}
                         <li class="nav-item list-group-item border-0 p-0">
                           <a class="dropdown-item py-2 ps-3 border-radius-md"
                             href="/allteams/">

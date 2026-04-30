@@ -1713,7 +1713,9 @@ def round_info(request):
                 .count()
             )
 
-            rt.members = team_member.objects.filter(team=rt)
+            # Only show drivers — non-driving managers don't have race
+            # sessions, so a session line for them would be empty noise.
+            rt.members = team_member.objects.filter(team=rt, driver=True)
 
             for member in rt.members:
                 member.sessions_count = (
