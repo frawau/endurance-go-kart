@@ -25,25 +25,27 @@
             overflow: hidden;
         }
 
-        .scale-controls {
-            position: fixed;
-            top: 6px;
-            right: 8px;
-            z-index: 100;
+        .scale-strip {
+            flex: 0 0 56px;
             display: flex;
-            gap: 4px;
-            opacity: 0.20;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            padding: 12px 0;
+            opacity: 0.30;
             transition: opacity 0.3s;
         }
-        .scale-controls:hover { opacity: 0.9; }
+        .scale-strip:hover { opacity: 0.95; }
         .scale-btn {
-            width: 28px; height: 28px;
+            width: 44px; height: 44px;
             border: 1px solid #555;
-            border-radius: 4px;
+            border-radius: 8px;
             background: rgba(30,30,50,0.8);
             color: #ccc;
-            font-size: 1.1rem;
-            line-height: 26px;
+            font-size: 1.6rem;
+            font-weight: 900;
+            line-height: 40px;
             text-align: center;
             cursor: pointer;
             user-select: none;
@@ -54,7 +56,7 @@
             display: flex;
             width: 100vw;
             height: 100vh;
-            gap: 24px;
+            gap: 8px;
             padding: 8px 12px;
         }
 
@@ -103,6 +105,23 @@
             font-feature-settings: "tnum";
         }
 
+        /* Coloured dot to the left of the lap time:
+              green = current < previous (faster)
+              red   = current > previous (slower)
+              blue  = equal */
+        .lap-dot {
+            display: inline-block;
+            width: 0.55em;
+            height: 0.55em;
+            border-radius: 50%;
+            margin-right: 0.45em;
+            vertical-align: middle;
+            background: transparent;
+        }
+        .lap-dot.green { background: #3eea84; }
+        .lap-dot.red   { background: #ff5252; }
+        .lap-dot.blue  { background: #4ea0ff; }
+
         tr.retired td {
             opacity: 0.35;
             text-decoration: line-through;
@@ -125,10 +144,6 @@
     {% if not race %}
     <div class="no-race">No active race</div>
     {% else %}
-    <div class="scale-controls">
-        <div class="scale-btn" id="scaleDown" title="Smaller rows">−</div>
-        <div class="scale-btn" id="scaleUp" title="Larger rows">+</div>
-    </div>
     <div class="panels">
         <div class="panel">
             <table class="track">
@@ -137,11 +152,15 @@
                     <tr class="pos-{{ s.position }}{% if s.retired %} retired{% endif %}"
                         data-team-id="{{ s.team_id }}">
                         <td class="team-num">{{ s.team_number }}</td>
-                        <td class="last-lap">{{ s.last_lap_time_formatted }}</td>
+                        <td class="last-lap"><span class="lap-dot"></span>{{ s.last_lap_time_formatted }}</td>
                     </tr>
                     {% endfor %}
                 </tbody>
             </table>
+        </div>
+        <div class="scale-strip">
+            <div class="scale-btn" id="scaleUp" title="Larger rows">+</div>
+            <div class="scale-btn" id="scaleDown" title="Smaller rows">−</div>
         </div>
         <div class="panel">
             <table class="track">
@@ -150,7 +169,7 @@
                     <tr class="pos-{{ s.position }}{% if s.retired %} retired{% endif %}"
                         data-team-id="{{ s.team_id }}">
                         <td class="team-num">{{ s.team_number }}</td>
-                        <td class="last-lap">{{ s.last_lap_time_formatted }}</td>
+                        <td class="last-lap"><span class="lap-dot"></span>{{ s.last_lap_time_formatted }}</td>
                     </tr>
                     {% endfor %}
                 </tbody>
@@ -165,18 +184,64 @@
         let socket;
         let reconnectAttempts = 0;
 
+        // Per-team lap memory:
+        //   prevByTeam[id] = last numeric last_lap_time we saw
+        //   colourByTeam[id] = colour decided when that lap was first observed
+        // The colour persists across standings updates that don't change the
+        // last lap time (e.g. driver-change pushes), so the dot stays put
+        // until the team turns a new lap.
+        const prevByTeam = {};
+        const colourByTeam = {};
+
         function escHtml(s) {
             return String(s == null ? '' : s)
                 .replace(/&/g, '&amp;').replace(/</g, '&lt;')
                 .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
         }
 
+        function dotColourFor(s) {
+            // Decide the dot colour for this team given the new standings entry.
+            // Returns '', 'green', 'red', or 'blue'.
+            const tid = s.team_id;
+            const cur = (typeof s.last_lap_time === 'number') ? s.last_lap_time : null;
+            const prev = (typeof prevByTeam[tid] === 'number') ? prevByTeam[tid] : null;
+
+            if (cur === null) {
+                // No lap yet — clear any cached colour and emit no dot.
+                delete prevByTeam[tid];
+                delete colourByTeam[tid];
+                return '';
+            }
+            if (prev === null) {
+                // First time we see a lap for this team — no comparison
+                // possible yet. Record but show no dot.
+                prevByTeam[tid] = cur;
+                colourByTeam[tid] = '';
+                return '';
+            }
+            if (cur === prev) {
+                // Same value as last update → not a new lap. Keep prior colour.
+                return colourByTeam[tid] || '';
+            }
+            // New lap — compare against the immediately-preceding lap time.
+            // Faster (smaller time) is green, slower is red.
+            let colour;
+            if (cur < prev) colour = 'green';
+            else if (cur > prev) colour = 'red';
+            else colour = 'blue';
+            prevByTeam[tid] = cur;
+            colourByTeam[tid] = colour;
+            return colour;
+        }
+
         function rowHtml(s) {
             const cls = `pos-${s.position}${s.retired ? ' retired' : ''}`;
+            const colour = dotColourFor(s);
+            const dot = `<span class="lap-dot${colour ? ' ' + colour : ''}"></span>`;
             return (
                 `<tr class="${cls}" data-team-id="${s.team_id}">` +
                 `<td class="team-num">${escHtml(s.team_number)}</td>` +
-                `<td class="last-lap">${escHtml(s.last_lap_time_formatted || '—')}</td>` +
+                `<td class="last-lap">${dot}${escHtml(s.last_lap_time_formatted || '—')}</td>` +
                 `</tr>`
             );
         }
