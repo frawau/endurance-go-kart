@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import os
 import asyncio
+import fcntl
 import mmap
 import struct
 import json
@@ -16,6 +17,70 @@ from PIL import Image, ImageDraw, ImageFont
 import aiohttp
 import RPi.GPIO as GPIO
 from smbus2_asyncio import SMBus2Asyncio
+
+# Linux kernel watchdog ioctls (drivers/watchdog/watchdog_dev.c)
+WDIOC_SETTIMEOUT = 0xC0045706
+
+
+class HardwareWatchdog:
+    """Wrapper around /dev/watchdog so the station can reboot the Pi when
+    the asyncio loop hangs. The kernel reboots if the device isn't written
+    to within `timeout` seconds. Calling close() *without* writing 'V'
+    first leaves the watchdog armed — exiting cleanly via close_normally()
+    disables it."""
+
+    def __init__(self, path="/dev/watchdog", timeout=30):
+        self.path = path
+        self.timeout = int(timeout)
+        self.fd = None
+
+    def open(self):
+        try:
+            self.fd = os.open(self.path, os.O_WRONLY)
+        except OSError as e:
+            logging.warning(f"Hardware watchdog unavailable ({self.path}): {e}")
+            self.fd = None
+            return False
+        try:
+            fcntl.ioctl(self.fd, WDIOC_SETTIMEOUT, struct.pack("i", self.timeout))
+        except OSError as e:
+            # Some watchdog drivers don't support SETTIMEOUT; rely on default.
+            logging.warning(f"Could not set watchdog timeout: {e}")
+        logging.info(f"Hardware watchdog armed (timeout={self.timeout}s)")
+        return True
+
+    def pet(self):
+        if self.fd is None:
+            return
+        try:
+            os.write(self.fd, b"\0")
+        except OSError as e:
+            logging.error(f"Watchdog pet failed: {e}")
+
+    def disarm(self):
+        """Stop petting — kernel will reboot once timeout elapses."""
+        if self.fd is None:
+            return
+        try:
+            os.close(self.fd)
+        except OSError:
+            pass
+        self.fd = None
+
+    def close_normally(self):
+        """Magic close: write 'V' before close to disable cleanly."""
+        if self.fd is None:
+            return
+        try:
+            os.write(self.fd, b"V")
+        except OSError:
+            pass
+        try:
+            os.close(self.fd)
+        except OSError:
+            pass
+        self.fd = None
+
 
 # Default GPIO Pin definitions (will be overridden by command line args)
 DEFAULT_BUTTON_PIN = 18  # Physical pin 18 (GPIO24)
@@ -95,7 +160,9 @@ def create_relay(relay_config):
         return NullRelay()
 
     if I2CRelay.detect(address, bus):
-        logging.info(f"I2C relay detected at 0x{address:02x} on bus {bus}, index {index}")
+        logging.info(
+            f"I2C relay detected at 0x{address:02x} on bus {bus}, index {index}"
+        )
         return I2CRelay(address, index, bus)
     else:
         logging.warning(
@@ -237,7 +304,15 @@ class FramebufferDisplay:
 
 
 class StopAndGoStation:
-    def __init__(self, websocket_url, button_pin, sensor_pin, hmac_secret, relay_config=None):
+    def __init__(
+        self,
+        websocket_url,
+        button_pin,
+        sensor_pin,
+        hmac_secret,
+        relay_config=None,
+        watchdog_config=None,
+    ):
         self.websocket_url = websocket_url
         self.button_pin = button_pin
         self.sensor_pin = sensor_pin
@@ -257,6 +332,22 @@ class StopAndGoStation:
         self.breach_state = False  # Current fence breach status
         self.penalty_ok_task = None  # Track penalty_served sending task
 
+        # Watchdog config (see [watchdog] in stopandgo-station.toml.example)
+        wd = watchdog_config or {}
+        self.ws_heartbeat_seconds = float(wd.get("ws_heartbeat_seconds", 20.0))
+        self.disconnect_reboot_seconds = float(
+            wd.get("disconnect_reboot_seconds", 300.0)
+        )
+        self.hw_watchdog_path = wd.get("hw_watchdog_path", "/dev/watchdog")
+        self.hw_watchdog_timeout = int(wd.get("hw_watchdog_timeout", 30))
+        self.hw_watchdog_pet_seconds = float(wd.get("hw_watchdog_pet_seconds", 10.0))
+        self.hw_watchdog_enabled = bool(wd.get("hw_watchdog_enabled", True))
+        self.hw_watchdog = HardwareWatchdog(
+            self.hw_watchdog_path, self.hw_watchdog_timeout
+        )
+        self._last_connected_at = time.monotonic()
+        self._reboot_pending = False
+
         # Setup GPIO
         GPIO.setmode(GPIO.BOARD)  # Use physical pin numbers
         GPIO.setup(self.button_pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
@@ -269,9 +360,13 @@ class StopAndGoStation:
         while True:
             try:
                 async with aiohttp.ClientSession() as session:
-                    async with session.ws_connect(self.websocket_url) as ws:
+                    async with session.ws_connect(
+                        self.websocket_url,
+                        heartbeat=self.ws_heartbeat_seconds,
+                    ) as ws:
                         self.websocket = ws
                         self.connected = True
+                        self._last_connected_at = time.monotonic()
                         logging.info("WebSocket connected")
 
                         # Show race mode screen when connected
@@ -300,6 +395,55 @@ class StopAndGoStation:
                     )
 
                 await asyncio.sleep(5)  # Wait before reconnecting
+
+    async def hw_watchdog_loop(self):
+        """Pet /dev/watchdog while the asyncio loop is alive. If the loop
+        stalls (deadlock, kernel pause, etc.) the kernel reboots the Pi."""
+        if not self.hw_watchdog_enabled:
+            return
+        if not self.hw_watchdog.open():
+            return
+        try:
+            while True:
+                self.hw_watchdog.pet()
+                await asyncio.sleep(self.hw_watchdog_pet_seconds)
+        except asyncio.CancelledError:
+            self.hw_watchdog.close_normally()
+            raise
+
+    async def disconnect_watchdog_loop(self):
+        """If the WebSocket has been down longer than
+        disconnect_reboot_seconds, reboot the Pi. Catches the case where
+        the network stack is wedged but the asyncio loop is still petting
+        the kernel watchdog (i.e. the app is alive but isolated)."""
+        if self.disconnect_reboot_seconds <= 0:
+            return
+        check_interval = max(5.0, self.disconnect_reboot_seconds / 10)
+        while True:
+            await asyncio.sleep(check_interval)
+            if self.connected:
+                self._last_connected_at = time.monotonic()
+                continue
+            since = time.monotonic() - self._last_connected_at
+            if since < self.disconnect_reboot_seconds:
+                continue
+            if self._reboot_pending:
+                continue
+            self._reboot_pending = True
+            logging.error(
+                f"WebSocket disconnected for {since:.0f}s "
+                f"(threshold {self.disconnect_reboot_seconds:.0f}s) — rebooting"
+            )
+            # Disarm cleanly (don't rely on hw watchdog) so the kernel
+            # accepts the reboot syscall, then call /sbin/reboot.
+            self.hw_watchdog.close_normally()
+            try:
+                self.display.display_status_text("Rebooting", (255, 64, 64), (0, 0, 0))
+            except Exception:
+                pass
+            await asyncio.sleep(1)  # let log/screen flush
+            os.system("/sbin/reboot -f")
+            return
 
     def verify_hmac(self, message_data, provided_signature):
         """Verify HMAC signature for incoming message"""
@@ -668,6 +812,8 @@ class StopAndGoStation:
             asyncio.create_task(self.websocket_handler()),
             asyncio.create_task(self.button_monitor()),
             asyncio.create_task(self.sensor_monitor()),
+            asyncio.create_task(self.hw_watchdog_loop()),
+            asyncio.create_task(self.disconnect_watchdog_loop()),
         ]
 
         try:
@@ -800,6 +946,9 @@ def parse_arguments():
     # Read [relay] section
     args._relay_config = config.get("relay", {})
 
+    # Read [watchdog] section
+    args._watchdog_config = config.get("watchdog", {})
+
     # Read [logging] section (new format) — CLI flags still override
     log_section = config.get("logging", {})
     args._config_log_level = log_section.get("level", None)
@@ -837,8 +986,14 @@ async def main():
         f"bus={relay_config.get('bus', 1)}"
     )
 
+    watchdog_config = getattr(args, "_watchdog_config", {})
     station = StopAndGoStation(
-        websocket_url, args.button, args.fence, args.hmac_secret, relay_config
+        websocket_url,
+        args.button,
+        args.fence,
+        args.hmac_secret,
+        relay_config,
+        watchdog_config,
     )
     await station.run()
 

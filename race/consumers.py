@@ -421,6 +421,46 @@ class StopAndGoConsumer(SafeSendMixin, AsyncWebsocketConsumer):
         await self.accept()
         _log.info("Stop and Go station connected")
 
+        # Replay the current top-of-queue penalty so a station that
+        # connects after a reboot or long disconnect immediately knows
+        # what it should be displaying.
+        pending = await self.get_top_of_queue_penalty()
+        if pending:
+            message = {
+                "type": "command",
+                "command": "penalty_required",
+                "team": pending["team"],
+                "duration": pending["duration"],
+                "timestamp": dt.datetime.now().isoformat(),
+            }
+            await self.safe_send(json.dumps(self.sign_message(message)))
+            _log.info(
+                "Replayed pending penalty to reconnecting station: "
+                f"team={pending['team']} duration={pending['duration']}"
+            )
+
+    @database_sync_to_async
+    def get_top_of_queue_penalty(self):
+        """Return the active round's first unserved S&G penalty, or None."""
+        cround = Round.objects.filter(ended__isnull=True).order_by("start").first()
+        if not cround:
+            return None
+        pq = (
+            PenaltyQueue.objects.filter(
+                round_penalty__round_id=cround.id,
+                round_penalty__served__isnull=True,
+            )
+            .select_related("round_penalty__offender__team")
+            .first()
+        )
+        if not pq:
+            return None
+        return {
+            "team": pq.round_penalty.offender.team.number,
+            "duration": pq.round_penalty.value,
+            "penalty_id": pq.round_penalty.id,
+        }
+
     async def disconnect(self, close_code):
         # Leave room group
         await self.channel_layer.group_discard(
