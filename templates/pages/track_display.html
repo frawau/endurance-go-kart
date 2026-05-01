@@ -54,8 +54,8 @@
             display: flex;
             width: 100vw;
             height: 100vh;
-            gap: 4px;
-            padding: 4px;
+            gap: 24px;
+            padding: 8px 12px;
         }
 
         .panel {
@@ -202,7 +202,12 @@
                 if (data.type === 'standings_update') {
                     updateStandings(data.standings);
                 } else if (data.type === 'race_ended') {
-                    if (data.next_race_url) window.location.href = data.next_race_url;
+                    // The leaderboard consumer broadcasts next_race_url
+                    // pointing at /leaderboard/ so the public leaderboard
+                    // rolls forward to the next race. The track display
+                    // should stay on its own page; reload so the view
+                    // reattaches to whatever race is active now.
+                    window.location.href = "{% url 'track_display' %}";
                 }
             };
             socket.onclose = function() {
