@@ -128,7 +128,7 @@ class Command(BaseCommand):
                     "- Deleting all championship standings for this round\n"
                     "- Deleting all lap crossings and transponder assignments\n"
                     "- Deleting all grid positions\n"
-                    "- Resetting all race flags (started/ended/ready/grid_locked)\n"
+                    "- Resetting all race flags (started/ended/ready/armed/grid_locked)\n"
                     "- Resetting round flags (ready/started/ended/post_race_check_completed)\n\n"
                     "Add --commit to actually perform the reset."
                 )
@@ -170,7 +170,13 @@ class Command(BaseCommand):
                 n, _ = GridPosition.objects.filter(race__in=races).delete()
                 self.stdout.write(self.style.SUCCESS(f"Deleted {n} grid positions"))
 
-                races.update(started=None, ended=None, ready=False, grid_locked=False)
+                races.update(
+                    started=None,
+                    ended=None,
+                    ready=False,
+                    armed=False,
+                    grid_locked=False,
+                )
                 self.stdout.write(
                     self.style.SUCCESS(f"Reset {races_count} races to initial state")
                 )
