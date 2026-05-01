@@ -1683,13 +1683,15 @@ def round_info(request):
             rounds_by_championship[championship_name] = []
         rounds_by_championship[championship_name].append(round_obj)
 
-    # Find closest round to today
+    # Default selection: the most recent round whose start date is today
+    # or in the past (i.e. the current or last completed round). Fall
+    # back to the first upcoming round only if no past round exists.
     selected_round_id = request.GET.get("round_id")
     if not selected_round_id:
         today = dt.date.today()
-        closest_round = rounds.filter(start__date__gte=today).first()
+        closest_round = rounds.filter(start__date__lte=today).order_by("-start").first()
         if not closest_round:
-            closest_round = rounds.last()
+            closest_round = rounds.first()
         selected_round_id = closest_round.id if closest_round else None
 
     selected_round = None
@@ -1758,10 +1760,15 @@ def round_result(request):
     for r in rounds:
         rounds_by_championship.setdefault(r.championship.name, []).append(r)
 
+    # Default to the most recent round whose start is today or earlier
+    # (current or last completed). Fall back to the first upcoming round.
     selected_round_id = request.GET.get("round_id")
     if not selected_round_id:
         today = dt.date.today()
-        closest = rounds.filter(start__date__gte=today).first() or rounds.last()
+        closest = (
+            rounds.filter(start__date__lte=today).order_by("-start").first()
+            or rounds.first()
+        )
         selected_round_id = closest.id if closest else None
 
     selected_round = None
@@ -2411,13 +2418,15 @@ def round_penalties(request):
             rounds_by_championship[championship_name] = []
         rounds_by_championship[championship_name].append(round_obj)
 
-    # Find closest round to today
+    # Default selection: the most recent round whose start is today or
+    # earlier (current or last completed). Fall back to the first
+    # upcoming round only if no past round exists.
     selected_round_id = request.GET.get("round_id")
     if not selected_round_id:
         today = dt.date.today()
-        closest_round = rounds.filter(start__date__gte=today).first()
+        closest_round = rounds.filter(start__date__lte=today).order_by("-start").first()
         if not closest_round:
-            closest_round = rounds.last()
+            closest_round = rounds.first()
         selected_round_id = closest_round.id if closest_round else None
 
     selected_round = None
