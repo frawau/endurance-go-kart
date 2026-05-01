@@ -105,10 +105,11 @@
             font-feature-settings: "tnum";
         }
 
-        /* Coloured dot to the left of the lap time:
-              green = current < previous (faster)
-              red   = current > previous (slower)
-              blue  = equal */
+        /* Coloured dot to the left of the lap time. Comparator depends on
+           race type — see dotColourFor() in JS:
+             - Main: current lap vs previous lap
+             - Qualifying: current lap vs the team's prior best lap
+           green = faster, red = slower, blue = equal. */
         .lap-dot {
             display: inline-block;
             width: 0.55em;
@@ -179,18 +180,27 @@
 
     <script>
         const raceId = {{ race.id }};
+        const raceType = "{{ race.race_type }}";
+        const isQualifying = raceType.startsWith('Q');
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsUrl = `${protocol}//${window.location.host}/ws/leaderboard/${raceId}/`;
         let socket;
         let reconnectAttempts = 0;
 
         // Per-team lap memory:
-        //   prevByTeam[id] = last numeric last_lap_time we saw
-        //   colourByTeam[id] = colour decided when that lap was first observed
+        //   prevLastByTeam[id]  = last_lap_time from the previous update we
+        //                         saw a change at — the comparator for Main.
+        //   prevBestByTeam[id]  = best_lap_time as it stood *before* the
+        //                         current lap was applied — the comparator
+        //                         for Qualifying. We snapshot the best on
+        //                         the first observation, then update it only
+        //                         after deciding the colour for the new lap.
+        //   colourByTeam[id]    = colour decided at the latest new lap.
         // The colour persists across standings updates that don't change the
         // last lap time (e.g. driver-change pushes), so the dot stays put
         // until the team turns a new lap.
-        const prevByTeam = {};
+        const prevLastByTeam = {};
+        const prevBestByTeam = {};
         const colourByTeam = {};
 
         function escHtml(s) {
@@ -202,34 +212,53 @@
         function dotColourFor(s) {
             // Decide the dot colour for this team given the new standings entry.
             // Returns '', 'green', 'red', or 'blue'.
+            //   Main:        compare new last_lap to *previous* last_lap.
+            //   Qualifying:  compare new last_lap to the team's prior best.
+            // Green = faster, red = slower, blue = equal.
             const tid = s.team_id;
             const cur = (typeof s.last_lap_time === 'number') ? s.last_lap_time : null;
-            const prev = (typeof prevByTeam[tid] === 'number') ? prevByTeam[tid] : null;
+            const lastPrev = (typeof prevLastByTeam[tid] === 'number') ? prevLastByTeam[tid] : null;
 
             if (cur === null) {
                 // No lap yet — clear any cached colour and emit no dot.
-                delete prevByTeam[tid];
+                delete prevLastByTeam[tid];
+                delete prevBestByTeam[tid];
                 delete colourByTeam[tid];
                 return '';
             }
-            if (prev === null) {
+            if (lastPrev === null) {
                 // First time we see a lap for this team — no comparison
-                // possible yet. Record but show no dot.
-                prevByTeam[tid] = cur;
+                // possible yet. Record state but show no dot.
+                prevLastByTeam[tid] = cur;
+                prevBestByTeam[tid] =
+                    (typeof s.best_lap_time === 'number') ? s.best_lap_time : cur;
                 colourByTeam[tid] = '';
                 return '';
             }
-            if (cur === prev) {
+            if (cur === lastPrev) {
                 // Same value as last update → not a new lap. Keep prior colour.
                 return colourByTeam[tid] || '';
             }
-            // New lap — compare against the immediately-preceding lap time.
-            // Faster (smaller time) is green, slower is red.
-            let colour;
-            if (cur < prev) colour = 'green';
-            else if (cur > prev) colour = 'red';
-            else colour = 'blue';
-            prevByTeam[tid] = cur;
+
+            // New lap detected. Pick the comparator based on race type.
+            const reference = isQualifying
+                ? (typeof prevBestByTeam[tid] === 'number' ? prevBestByTeam[tid] : null)
+                : lastPrev;
+
+            let colour = '';
+            if (reference !== null) {
+                if (cur < reference) colour = 'green';
+                else if (cur > reference) colour = 'red';
+                else colour = 'blue';
+            }
+
+            // Update memories AFTER comparing so the prior best stays
+            // "what it was before this lap", which is what we want to
+            // compare against. The new best is whichever is smaller.
+            prevLastByTeam[tid] = cur;
+            const oldBest = prevBestByTeam[tid];
+            prevBestByTeam[tid] =
+                (typeof oldBest === 'number') ? Math.min(oldBest, cur) : cur;
             colourByTeam[tid] = colour;
             return colour;
         }
