@@ -1676,9 +1676,7 @@ class Race(models.Model):
         # the (race, team) / (race, position) unique constraints. KNOCKOUT
         # rows are kept because they're already-correct back-of-grid
         # placements from process_qualifying_knockout.
-        GridPosition.objects.filter(race=main_race).exclude(
-            source="KNOCKOUT"
-        ).delete()
+        GridPosition.objects.filter(race=main_race).exclude(source="KNOCKOUT").delete()
 
         # Survivors always fill from position 1 (front of grid).
         # Knockout-eliminated teams already have their KNOCKOUT positions
@@ -1728,17 +1726,24 @@ class Race(models.Model):
                     ended_q_races, self, tiebreaker=tiebreaker
                 )
         elif source_type == "CHAMPIONSHIP":
-            # Use championship standings (placeholder - would need championship_team ordering)
-            teams = list(self.get_all_teams())
+            # Use championship standings (placeholder - would need championship_team ordering).
+            # Wipe the slate first (except KNOCKOUT, which is a final back-of-grid
+            # placement) so we can write fresh rows without colliding on the
+            # (race, position) unique constraint.
+            knockout_team_ids = set(
+                GridPosition.objects.filter(race=self, source="KNOCKOUT").values_list(
+                    "team_id", flat=True
+                )
+            )
+            GridPosition.objects.filter(race=self).exclude(source="KNOCKOUT").delete()
+            teams = [t for t in self.get_all_teams() if t.id not in knockout_team_ids]
             for position, team in enumerate(teams, 1):
-                GridPosition.objects.update_or_create(
+                GridPosition.objects.create(
                     race=self,
                     team=team,
-                    defaults={
-                        "position": position,
-                        "source": "CHAMPIONSHIP",
-                        "manually_overridden": False,
-                    },
+                    position=position,
+                    source="CHAMPIONSHIP",
+                    manually_overridden=False,
                 )
 
         # Apply grid penalties on top of whichever base ordering was used.
