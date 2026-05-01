@@ -4705,6 +4705,40 @@ def public_leaderboard(request):
     return render(request, "pages/public_leaderboard.html", context)
 
 
+def track_display(request):
+    """Track-side full-page display: tall portrait, two columns of teams.
+
+    Each row shows Team # and Last Lap time in big letters. Left column
+    holds the top half (positions 1..ceil(N/2)); right column the rest.
+    Standings are pushed via the existing leaderboard WebSocket so the
+    display stays in sync with the leaderboard automatically.
+    """
+    cround = Round.objects.filter(ended__isnull=True).order_by("start").first()
+    race = cround.active_race if cround else None
+
+    if race is None:
+        return render(
+            request,
+            "pages/track_display.html",
+            {"race": None, "organiser_logo": get_organiser_logo(cround)},
+        )
+
+    standings = race.calculate_race_standings() if race.started else []
+    half = (len(standings) + 1) // 2  # ceil(N/2)
+    left_standings = standings[:half]
+    right_standings = standings[half:]
+
+    return render(
+        request,
+        "pages/track_display.html",
+        {
+            "race": race,
+            "left_standings": left_standings,
+            "right_standings": right_standings,
+        },
+    )
+
+
 # ============================================================
 # Lap Management Views (Phase 6 - Lap Splitting & Suspicious Lap Detection)
 # ============================================================

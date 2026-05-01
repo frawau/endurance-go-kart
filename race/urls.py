@@ -219,6 +219,11 @@ urlpatterns = [
         views.public_leaderboard,
         name="public_leaderboard",
     ),
+    path(
+        "track-display/",
+        views.track_display,
+        name="track_display",
+    ),
     # Lap Management (Phase 6 - Lap Splitting & Suspicious Lap Detection)
     path(
         "race/<int:race_id>/laps/",

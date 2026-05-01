@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% if race %}{{ race.get_race_type_display }} - Track Display{% else %}Track Display{% endif %}</title>
+    {% load static %}
+    <style>
+        :root {
+            /* row-scale is auto-tuned in JS to fit the viewport.
+               Manual override (+/-) is also persisted in localStorage. */
+            --row-scale: 1;
+        }
+
+        * { box-sizing: border-box; }
+
+        html, body {
+            margin: 0;
+            padding: 0;
+            height: 100vh;
+            width: 100vw;
+            background: #000;
+            color: #fff;
+            font-family: 'Arial Black', 'Helvetica', sans-serif;
+            overflow: hidden;
+        }
+
+        .scale-controls {
+            position: fixed;
+            top: 6px;
+            right: 8px;
+            z-index: 100;
+            display: flex;
+            gap: 4px;
+            opacity: 0.20;
+            transition: opacity 0.3s;
+        }
+        .scale-controls:hover { opacity: 0.9; }
+        .scale-btn {
+            width: 28px; height: 28px;
+            border: 1px solid #555;
+            border-radius: 4px;
+            background: rgba(30,30,50,0.8);
+            color: #ccc;
+            font-size: 1.1rem;
+            line-height: 26px;
+            text-align: center;
+            cursor: pointer;
+            user-select: none;
+        }
+        .scale-btn:hover { background: rgba(60,60,90,0.9); color: #fff; }
+
+        .panels {
+            display: flex;
+            width: 100vw;
+            height: 100vh;
+            gap: 4px;
+            padding: 4px;
+        }
+
+        .panel {
+            flex: 1;
+            background: #0a0a0a;
+            border: 2px solid #222;
+            border-radius: 6px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        table.track {
+            width: 100%;
+            border-collapse: collapse;
+            table-layout: fixed;
+        }
+
+        table.track tr {
+            border-bottom: 2px solid #1a1a1a;
+        }
+        table.track tr:nth-child(even) {
+            background: #111;
+        }
+
+        table.track td {
+            padding: calc(4px * var(--row-scale)) calc(8px * var(--row-scale));
+            font-weight: 900;
+            font-size: calc(3.2rem * var(--row-scale));
+            line-height: 1.05;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        td.team-num {
+            color: #ffd700;
+            text-align: left;
+            width: 38%;
+        }
+        td.last-lap {
+            color: #ffffff;
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+            font-feature-settings: "tnum";
+        }
+
+        /* Highlight P1 / P2 / P3 with a colored team-number column */
+        tr.pos-1 td.team-num { color: #ffd700; }
+        tr.pos-2 td.team-num { color: #c0c0c0; }
+        tr.pos-3 td.team-num { color: #cd7f32; }
+
+        tr.retired td {
+            opacity: 0.35;
+            text-decoration: line-through;
+        }
+
+        .no-race {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            font-size: 4rem;
+            font-weight: 900;
+            color: #444;
+            text-align: center;
+            padding: 0 20px;
+        }
+    </style>
+</head>
+<body>
+    {% if not race %}
+    <div class="no-race">No active race</div>
+    {% else %}
+    <div class="scale-controls">
+        <div class="scale-btn" id="scaleDown" title="Smaller rows">−</div>
+        <div class="scale-btn" id="scaleUp" title="Larger rows">+</div>
+    </div>
+    <div class="panels">
+        <div class="panel">
+            <table class="track">
+                <tbody id="leftBody">
+                    {% for s in left_standings %}
+                    <tr class="pos-{{ s.position }}{% if s.retired %} retired{% endif %}"
+                        data-team-id="{{ s.team_id }}">
+                        <td class="team-num">{{ s.team_number }}</td>
+                        <td class="last-lap">{{ s.last_lap_time_formatted }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <div class="panel">
+            <table class="track">
+                <tbody id="rightBody">
+                    {% for s in right_standings %}
+                    <tr class="pos-{{ s.position }}{% if s.retired %} retired{% endif %}"
+                        data-team-id="{{ s.team_id }}">
+                        <td class="team-num">{{ s.team_number }}</td>
+                        <td class="last-lap">{{ s.last_lap_time_formatted }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        const raceId = {{ race.id }};
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${protocol}//${window.location.host}/ws/leaderboard/${raceId}/`;
+        let socket;
+        let reconnectAttempts = 0;
+
+        function escHtml(s) {
+            return String(s == null ? '' : s)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+
+        function rowHtml(s) {
+            const cls = `pos-${s.position}${s.retired ? ' retired' : ''}`;
+            return (
+                `<tr class="${cls}" data-team-id="${s.team_id}">` +
+                `<td class="team-num">${escHtml(s.team_number)}</td>` +
+                `<td class="last-lap">${escHtml(s.last_lap_time_formatted || '—')}</td>` +
+                `</tr>`
+            );
+        }
+
+        function updateStandings(standings) {
+            if (!standings || standings.length === 0) return;
+            const half = Math.ceil(standings.length / 2);
+            const left = standings.slice(0, half).map(rowHtml).join('');
+            const right = standings.slice(half).map(rowHtml).join('');
+            const leftBody = document.getElementById('leftBody');
+            const rightBody = document.getElementById('rightBody');
+            if (!leftBody || !rightBody) { location.reload(); return; }
+            leftBody.innerHTML = left;
+            rightBody.innerHTML = right;
+            autoFit();
+        }
+
+        function connect() {
+            socket = new WebSocket(wsUrl);
+            socket.onopen = function() { reconnectAttempts = 0; };
+            socket.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                if (data.type === 'standings_update') {
+                    updateStandings(data.standings);
+                } else if (data.type === 'race_ended') {
+                    if (data.next_race_url) window.location.href = data.next_race_url;
+                }
+            };
+            socket.onclose = function() {
+                reconnectAttempts++;
+                const delay = Math.min(1000 * reconnectAttempts, 30000);
+                setTimeout(connect, delay);
+            };
+            socket.onerror = function(err) { console.error('WS error', err); };
+        }
+
+        // Auto-fit row size to viewport so all teams are visible at a glance.
+        // The user can still nudge with + / -; that override is persisted.
+        const STORAGE_KEY = 'track_display_row_scale';
+        const STEP = 0.1;
+        const MIN = 0.4;
+        const MAX = 3.0;
+        let manualScale = parseFloat(localStorage.getItem(STORAGE_KEY)) || null;
+
+        function applyScale(scale) {
+            scale = Math.max(MIN, Math.min(MAX, Math.round(scale * 20) / 20));
+            document.documentElement.style.setProperty('--row-scale', scale);
+            return scale;
+        }
+
+        function autoFit() {
+            if (manualScale !== null) {
+                applyScale(manualScale);
+                return;
+            }
+            const leftRows = document.querySelectorAll('#leftBody tr').length;
+            const rightRows = document.querySelectorAll('#rightBody tr').length;
+            const maxRows = Math.max(leftRows, rightRows, 1);
+            // Available height per row (viewport - small padding).
+            const avail = (window.innerHeight - 16) / maxRows;
+            // Empirical: at scale=1 a row takes ~76 px (3.2rem * 1.05 + padding).
+            const target = avail / 76;
+            applyScale(target);
+        }
+
+        document.getElementById('scaleDown').addEventListener('click', function() {
+            manualScale = (manualScale === null
+                ? parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--row-scale')) || 1
+                : manualScale) - STEP;
+            const applied = applyScale(manualScale);
+            manualScale = applied;
+            localStorage.setItem(STORAGE_KEY, applied);
+        });
+        document.getElementById('scaleUp').addEventListener('click', function() {
+            manualScale = (manualScale === null
+                ? parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--row-scale')) || 1
+                : manualScale) + STEP;
+            const applied = applyScale(manualScale);
+            manualScale = applied;
+            localStorage.setItem(STORAGE_KEY, applied);
+        });
+
+        window.addEventListener('resize', autoFit);
+        autoFit();
+        connect();
+
+        // Resync standings when tab regains focus (browsers throttle WS in
+        // background tabs; the leaderboard consumer accepts a 'reload'
+        // poke and replies with current standings).
+        document.addEventListener('visibilitychange', function() {
+            if (!document.hidden && socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({type: 'reload'}));
+            }
+        });
+    </script>
+    {% endif %}
+</body>
+</html>
