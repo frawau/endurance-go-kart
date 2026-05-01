@@ -694,6 +694,9 @@ def endofrace(request):
                 Race.combine_qualifying_results(
                     ended_q_races, main_race, tiebreaker=tiebreaker
                 )
+                # combine_qualifying_results is a leaf utility — apply grid
+                # penalties on top so the closing Q-race picks them up.
+                main_race.apply_grid_penalties()
 
         # MAIN is always last — close the round when it finishes.
         # Don't re-query active_race: ghost unstarted Q-races left over from

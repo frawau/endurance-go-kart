@@ -1687,17 +1687,24 @@ class Race(models.Model):
                 manually_overridden=False,
             )
 
-        # Grid penalties (sanction 'G') are applied to the freshly-built
-        # grid. Re-running combine_qualifying_results always restarts from
-        # quali results, so penalty effects don't accumulate across calls.
-        main_race.apply_grid_penalties()
+        # NOTE: grid penalties (sanction 'G') are NOT applied here.
+        # Both callers (auto_assign_grid_positions and end_this_race)
+        # apply them after this returns, so applying here would double
+        # the offset. Keep this method as a leaf utility.
 
-    def auto_assign_grid_positions(self, source_type="CHAMPIONSHIP"):
+    def auto_assign_grid_positions(self, source_type="QUALIFYING"):
         """
         Auto-assign grid positions based on source.
 
         Args:
-            source_type: "CHAMPIONSHIP" (championship standings) or "QUALIFYING" (all ended Q-races)
+            source_type: "QUALIFYING" (all ended Q-races; default) or
+                         "CHAMPIONSHIP" (championship standings, used when no
+                         qualifying ran).
+
+        Grid penalties are applied exactly once at the end. Note:
+        combine_qualifying_results does NOT apply them itself — that
+        responsibility lives here so a single penalty can't be applied
+        twice (once by combine, once by us).
         """
         if self.grid_locked:
             return  # Grid is locked, cannot auto-assign
@@ -1874,6 +1881,9 @@ class Race(models.Model):
                 Race.combine_qualifying_results(
                     ended_q_races, main_race, tiebreaker=tiebreaker
                 )
+                # combine_qualifying_results is a leaf utility — apply grid
+                # penalties here so a Q-race ending picks them up too.
+                main_race.apply_grid_penalties()
 
         # MAIN is always the last race — end the round when it finishes.
         # Using active_race is None would be blocked by any ghost unstarted
