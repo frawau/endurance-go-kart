@@ -1671,8 +1671,14 @@ class Race(models.Model):
 
         final.sort(key=lambda x: x[1])
 
-        # Clear previous COMBINED_Q positions (safe to re-run after each Q-race)
-        GridPosition.objects.filter(race=main_race, source="COMBINED_Q").delete()
+        # Clear every prior auto-assigned / manual position so the new
+        # COMBINED_Q positions can be written from scratch without hitting
+        # the (race, team) / (race, position) unique constraints. KNOCKOUT
+        # rows are kept because they're already-correct back-of-grid
+        # placements from process_qualifying_knockout.
+        GridPosition.objects.filter(race=main_race).exclude(
+            source="KNOCKOUT"
+        ).delete()
 
         # Survivors always fill from position 1 (front of grid).
         # Knockout-eliminated teams already have their KNOCKOUT positions
