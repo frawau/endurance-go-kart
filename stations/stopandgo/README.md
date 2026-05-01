@@ -4,6 +4,17 @@
 
 The stop and go station supports configuration via TOML files. Command line arguments will override configuration file values.
 
+The repository tracks `stopandgo-station.toml.example` as the template;
+the runtime file `stopandgo-station.toml` is gitignored so local
+changes never block `git pull`. `race-manager configure-stations`
+bootstraps the runtime file from the template on first run, then
+patches it from `.env`. To configure manually:
+
+```bash
+cp stopandgo-station.toml.example stopandgo-station.toml
+# edit stopandgo-station.toml as needed
+```
+
 ### Usage
 
 ```bash

@@ -437,8 +437,22 @@ configure_stations() {
     log_info "Configuring station TOML files from .env values..."
 
     local stopandgo_toml="$SCRIPT_DIR/stations/stopandgo/stopandgo-station.toml"
+    local stopandgo_example="${stopandgo_toml}.example"
     local timing_toml="$SCRIPT_DIR/stations/timing/timing-station.toml"
+    local timing_example="${timing_toml}.example"
     local missing=0
+
+    # Bootstrap runtime configs from the tracked *.toml.example templates.
+    # The runtime files are .gitignored so configure-stations can patch them
+    # repeatedly without ever blocking `git pull`.
+    if [ ! -f "$stopandgo_toml" ] && [ -f "$stopandgo_example" ]; then
+        cp "$stopandgo_example" "$stopandgo_toml"
+        log_info "Initialised $stopandgo_toml from $(basename "$stopandgo_example")"
+    fi
+    if [ ! -f "$timing_toml" ] && [ -f "$timing_example" ]; then
+        cp "$timing_example" "$timing_toml"
+        log_info "Initialised $timing_toml from $(basename "$timing_example")"
+    fi
 
     if [ -z "${APP_HOSTNAME:-}" ]; then
         log_warning "APP_HOSTNAME is not set in .env — skipping hostname substitution"

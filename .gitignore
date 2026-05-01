@@ -20,3 +20,10 @@ env
 # Database backups produced by `race-manager backup`
 /backups/
 gokart_backup_*.tar.gz
+
+# Station runtime configs — derived from the *.toml.example templates by
+# `race-manager configure-stations` and patched with .env values. The
+# templates stay tracked; the runtime files are local-only so a git
+# pull is never blocked by configuration changes.
+/stations/timing/timing-station.toml
+/stations/stopandgo/stopandgo-station.toml

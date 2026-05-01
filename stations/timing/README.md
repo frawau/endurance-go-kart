@@ -12,6 +12,17 @@ Transponder timing station that connects to timing hardware (TAG Heuer/Chronelec
 
 The timing station supports configuration via TOML files.
 
+The repository tracks `timing-station.toml.example` as the template;
+the runtime file `timing-station.toml` is gitignored so local changes
+never block `git pull`. `race-manager configure-stations` bootstraps
+the runtime file from the template on first run, then patches it from
+`.env`. To configure manually:
+
+```bash
+cp timing-station.toml.example timing-station.toml
+# edit timing-station.toml as needed
+```
+
 ### Usage
 
 ```bash
