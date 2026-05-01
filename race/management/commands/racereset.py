@@ -19,9 +19,11 @@ import datetime as dt
 class Command(BaseCommand):
     help = (
         "Reset the last started race in the current round. "
-        "Clears lap crossings, sessions, penalties, pauses, and pit lanes for that race, "
-        "and unconfirms transponder assignments so they can be re-locked. "
-        "Transponder assignments and grid positions are kept."
+        "Clears lap crossings, sessions, in-race penalties, pauses, and pit lanes "
+        "for that race, and unconfirms transponder assignments so they can be "
+        "re-locked. Transponder assignments, grid positions, and grid penalties "
+        "(sanction='G') are kept — grid penalties were configured before the "
+        "race ran and stay applied to the rebuilt grid."
     )
 
     def get_current_round(self):
@@ -75,8 +77,15 @@ class Command(BaseCommand):
         crossings_count = LapCrossing.objects.filter(race=race).count()
         sessions_count = Session.objects.filter(round=cround, race=race).count()
 
-        # All penalties for this round (includes post-race penalties created after race ended)
-        penalties_qs = RoundPenalty.objects.filter(round=cround)
+        # All penalties for this round EXCEPT grid penalties.
+        # Grid penalties (sanction='G') are pre-race setup data: they were
+        # configured before the race ran, applied to the grid at build time,
+        # and should survive a race reset so the rebuilt grid still reflects
+        # them. The other sanctions (S, D, L, P, T) belong to the race
+        # being reset and go away.
+        penalties_qs = RoundPenalty.objects.filter(round=cround).exclude(
+            penalty__sanction="G"
+        )
         penalties_count = penalties_qs.count()
         penalty_queue_count = PenaltyQueue.objects.filter(
             round_penalty__in=penalties_qs
@@ -109,7 +118,10 @@ class Command(BaseCommand):
         self.stdout.write(
             f"Found {penalty_queue_count} penalty queue entries to delete"
         )
-        self.stdout.write(f"Found {penalties_count} race penalties to delete")
+        self.stdout.write(
+            f"Found {penalties_count} in-race penalties to delete "
+            "(grid penalties kept)"
+        )
         self.stdout.write(
             f"Found {confirmed_assignments} transponder assignments to unconfirm "
             f"(assignments kept, lock removed)"
@@ -123,7 +135,8 @@ class Command(BaseCommand):
                     "- Deleting sessions linked to this race\n"
                     "- Deleting pauses that started during this race\n"
                     "- Deleting all pit lane (ChangeLane) records for the round\n"
-                    "- Deleting penalty queue entries and all round penalties\n"
+                    "- Deleting penalty queue entries and in-race penalties\n"
+                    "  (grid penalties, sanction='G', are kept)\n"
                     "- Clearing championship standings for this round\n"
                     "- Unconfirming transponder assignments (assignments kept)\n"
                     "- Resetting race: started=None, ended=None, ready=False\n"
@@ -157,7 +170,11 @@ class Command(BaseCommand):
                 )
 
                 n, _ = penalties_qs.delete()
-                self.stdout.write(self.style.SUCCESS(f"Deleted {n} race penalties"))
+                self.stdout.write(
+                    self.style.SUCCESS(
+                        f"Deleted {n} in-race penalties (kept grid penalties)"
+                    )
+                )
 
                 n = RaceTransponderAssignment.objects.filter(
                     race=race, confirmed=True
