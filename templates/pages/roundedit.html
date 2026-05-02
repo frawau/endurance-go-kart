@@ -2,47 +2,44 @@
 {% load static %}
 
 {% block main_content %}
-<div class="container py-5">
-    <div class="row justify-content-center">
-        <div class="col-md-10">
-            <div class="card">
-                <div class="card-header bg-primary text-white">
-                    <h4>Manage Round</h4>
-                    {% if championship %}
-                        <p class="mb-0">Championship: {{ championship.name }}</p>
-                    {% endif %}
-                </div>
-                <div class="card-body">
-                    <!-- Round Selection -->
-                    <form method="get" class="mb-4">
-                        <div class="row">
-                            <div class="col-md-8">
-                                <div class="form-group">
-                                    <label for="round-select" class="form-label">Select Round</label>
-                                    <select id="round-select" name="round_id" class="form-control">
-                                        <option value="">-- Select a Round --</option>
-                                        {% for round in rounds %}
-                                            <option value="{{ round.id }}" {% if round.id == selected_round.id %}selected{% endif %}>{{ round.name }}</option>
-                                        {% endfor %}
-                                    </select>
-                                </div>
-                            </div>
-                            <div class="col-md-4 d-flex align-items-end">
-                                <button type="submit" class="btn btn-primary">Select Round</button>
+<div class="container mt-5">
+    <div class="card">
+        <div class="card-header bg-primary text-white">
+            <h4 class="mb-0">Manage Round</h4>
+            {% if championship %}
+                <p class="mb-0 mt-1"><small>Championship: {{ championship.name }}</small></p>
+            {% endif %}
+        </div>
+        <div class="card-body">
+            {% if not rounds %}
+                <div class="alert alert-info">No editable rounds found. All rounds are either ready or there is no upcoming championship.</div>
+            {% else %}
+                <!-- Round Selection -->
+                <form method="get" class="mb-4">
+                    <div class="row">
+                        <div class="col-md-8">
+                            <div class="form-group">
+                                <label for="round-select" class="form-label">Select Round</label>
+                                <select id="round-select" name="round_id" class="form-control" onchange="this.form.submit()">
+                                    <option value="">-- Select a Round --</option>
+                                    {% for round in rounds %}
+                                        <option value="{{ round.id }}" {% if round.id == selected_round.id %}selected{% endif %}>{{ round.name }}</option>
+                                    {% endfor %}
+                                </select>
                             </div>
                         </div>
-                    </form>
-
-                    <!-- Form container for round details -->
-                    <div id="round-form-container">
-                        {% if selected_round %}
-                            {% include "layout/roundedit.html" with round=selected_round %}
-                        {% else %}
-                            <div class="alert alert-info">Please select a round to edit its details.</div>
-                        {% endif %}
                     </div>
+                </form>
+
+                <!-- Form container for round details -->
+                <div id="round-form-container">
+                    {% if selected_round %}
+                        {% include "layout/roundedit.html" with round=selected_round %}
+                    {% else %}
+                        <div class="alert alert-info">Please select a round to edit its details.</div>
+                    {% endif %}
                 </div>
-            </div>
+            {% endif %}
         </div>
     </div>
 </div>

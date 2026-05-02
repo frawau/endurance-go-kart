@@ -1,0 +1,50 @@
+# Stop and Go Station Configuration
+# Command line arguments will override these values
+
+# Server connection settings
+server = "__APP_HOSTNAME__"
+port = 8000
+secure = false
+
+# GPIO pin configuration
+button = 18  # Physical pin 18 (GPIO24)
+fence = 24   # Physical pin 24 (GPIO8)
+
+# HMAC secret for message authentication
+hmac_secret = "__STOPANDGO_HMAC_SECRET__"
+
+# I2C relay configuration
+# Set enabled = false to disable, or leave true for auto-detection
+[relay]
+enabled = true   # Set to false to disable relay entirely
+address = 0x10   # I2C address of the relay board
+index = 0        # Relay channel (0-based)
+bus = 1          # I2C bus number
+
+# Watchdog / health
+#
+# Three layers protect the station:
+#   1. WebSocket heartbeat — aiohttp pings the server every
+#      ws_heartbeat_seconds; if no pong arrives in time the WS is
+#      closed and reconnect kicks in. Detects half-open TCP that
+#      would otherwise look healthy indefinitely.
+#   2. Disconnect-reboot timer — if the WS stays down longer than
+#      disconnect_reboot_seconds, /sbin/reboot is called. Catches a
+#      wedged network stack while the asyncio loop is still alive.
+#      Set to 0 to disable.
+#   3. Hardware watchdog (/dev/watchdog) — kernel reboots the Pi if
+#      the asyncio loop stops petting the device within
+#      hw_watchdog_timeout seconds. Catches full deadlocks. Requires
+#      `dtparam=watchdog=on` in /boot/firmware/config.txt and the
+#      station running as root. Set hw_watchdog_enabled = false to
+#      skip (e.g. on hardware without /dev/watchdog).
+[watchdog]
+ws_heartbeat_seconds = 20
+disconnect_reboot_seconds = 300
+hw_watchdog_enabled = true
+hw_watchdog_path = "/dev/watchdog"
+hw_watchdog_timeout = 30
+hw_watchdog_pet_seconds = 10
+
+[logging]
+level = "INFO"  # DEBUG, INFO, WARNING, ERROR

@@ -94,7 +94,7 @@ table, table th, table td {
         <div class="content-wrapper">
             <div class="row mb-4">
                 <div class="col-12 text-left">
-                    <h1>{{ round.name }}&nbsp;&nbsp;Remaining Time: {% timer_widget "race-countdown" "countdownDisplay" round %}</h1>
+                    <h1>{{ round.name }}&nbsp;&nbsp;Remaining Time: {% timer_widget "race-countdown" "countdownDisplay" active_race|default:round %}</h1>
                 </div>
             </div>
 
@@ -174,7 +174,19 @@ document.addEventListener('DOMContentLoaded', function() {
             const data = JSON.parse(event.data);
             console.log("WebSocket received:", data);
 
-            if (data.session_update) {
+            if (data.type === 'race_lap_update') {
+                // Sync countdown timer from server on every crossing
+                if (data.remaining_seconds !== undefined && data.remaining_seconds !== null) {
+                    timerRegistry.countdownTimers.forEach(timer => {
+                        timer.updateRemainingTime(data.remaining_seconds);
+                    });
+                }
+                return;
+            } else if (data.race_ready) {
+                // New race ready — reload to reset session times
+                window.location.reload();
+                return;
+            } else if (data.session_update) {
                 // Handle driver session updates
                 console.log(`Handling session update for driver ${data.driver_id}, active: ${data.driver_active}, status ${data.driver_status}`);
                 const driverTimers = timerRegistry.byDriverId[data.driver_id];
@@ -213,13 +225,14 @@ document.addEventListener('DOMContentLoaded', function() {
 
             } else {
                 const isPaused = data.is_paused;
+                const effectivelyPaused = isPaused || !data.started || !!data.ended;
 
                 // Handle countdown timer updates
                 if (data.remaining_seconds !== undefined && data.remaining_seconds !== null) {
                     // Normal case - update all timers based on pause state
                     timerRegistry.countdownTimers.forEach(timer => {
                         timer.updateRemainingTime(data.remaining_seconds);
-                        timer.updatePauseState(isPaused);
+                        timer.updatePauseState(effectivelyPaused);
                     });
 
                     // For all other timers, update based on round state
@@ -227,7 +240,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     timerRegistry.allTimers
                         .filter(timer => ['sessiontime', 'totaltime'].includes(timer.timerType))
                         .forEach(timer => {
-                            timer.updatePauseState(isPaused);
+                            timer.updatePauseState(effectivelyPaused);
                         });
                 }
             }
@@ -264,6 +277,13 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Initial connection
     connectWebSocket();
+
+    // Resync timer when tab regains focus
+    document.addEventListener('visibilitychange', function() {
+        if (!document.hidden && socket && socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify({type: 'resync'}));
+        }
+    });
 });
 </script>
 {% endif %}

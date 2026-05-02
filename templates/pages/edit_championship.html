@@ -16,10 +16,12 @@
                         <select id="championship-select" class="form-control select2">
                             <option value="">Search for a championship...</option>
                             {% for championship in championships %}
-                            <option value="{{ championship.id }}" 
+                            <option value="{{ championship.id }}"
                                     data-name="{{ championship.name }}"
                                     data-start="{{ championship.start|date:'Y-m-d' }}"
-                                    data-end="{{ championship.end|date:'Y-m-d' }}">
+                                    data-end="{{ championship.end|date:'Y-m-d' }}"
+                                    data-points-system="{{ championship.points_system }}"
+                                    data-points-values="{{ championship.points_values|join:',' }}">
                                 {{ championship.name }} ({{ championship.start|date:'Y' }})
                             </option>
                             {% endfor %}
@@ -45,6 +47,42 @@
                             <label for="year">Year:</label>
                             <input type="number" class="form-control" id="year" name="year" 
                                    min="2024" max="2100" required>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Points System Section -->
+                <div class="row mt-4">
+                    <div class="col-12">
+                        <h5>Championship Points</h5>
+                        <div class="card">
+                            <div class="card-body">
+                                <div class="row">
+                                    <div class="col-md-4">
+                                        <div class="form-group mb-3">
+                                            <label for="points-system">Scoring System:</label>
+                                            <select id="points-system" name="points_system" class="form-control">
+                                                <option value="DESCENDING">Descending (most points wins)</option>
+                                                <option value="ASCENDING">Ascending (fewest points wins)</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-8">
+                                        <div class="form-group mb-3" id="points-desc-group">
+                                            <label for="points-values">Points per Position (comma-separated, 1st to last):</label>
+                                            <input type="text" class="form-control" id="points-values" name="points_values"
+                                                   placeholder="e.g. 25,18,15,12,10,8,6,4,2,1">
+                                            <small class="form-text text-muted">Teams finishing beyond the list get 0 points.</small>
+                                        </div>
+                                        <div class="form-group mb-3" id="points-asc-group" style="display:none;">
+                                            <label for="points-start">Starting Value for Winner:</label>
+                                            <input type="number" class="form-control" id="points-start" name="points_start"
+                                                   min="0" max="10" value="0" style="width:120px;">
+                                            <small class="form-text text-muted">Winner gets this value, 2nd gets +1, 3rd gets +2, etc.</small>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -196,9 +234,19 @@ document.addEventListener('DOMContentLoaded', function() {
             $('#name').val(selectedOption.data('name'));
             $('#year').val(selectedOption.data('start').split('-')[0]);
             
+            // Populate points system fields
+            const pSys = selectedOption.data('points-system') || 'DESCENDING';
+            const pVals = selectedOption.data('points-values') || '';
+            $('#points-system').val(pSys).trigger('change');
+            if (pSys === 'ASCENDING') {
+                $('#points-start').val(pVals || '0');
+            } else {
+                $('#points-values').val(pVals);
+            }
+
             // Load current rounds for this championship
             loadChampionshipRounds(selectedOption.val());
-            
+
             // Load penalty configuration for this championship
             loadAvailablePenalties(selectedOption.val());
             loadChampionshipPenalties(selectedOption.val());
@@ -207,6 +255,20 @@ document.addEventListener('DOMContentLoaded', function() {
             $('#current-rounds').html('<p class="text-muted mb-0">Select a championship to view rounds</p>');
         }
     });
+
+    // Points system toggle
+    function updatePointsGroups() {
+        const sys = $('#points-system').val();
+        if (sys === 'ASCENDING') {
+            $('#points-desc-group').hide();
+            $('#points-asc-group').show();
+        } else {
+            $('#points-desc-group').show();
+            $('#points-asc-group').hide();
+        }
+    }
+    $('#points-system').on('change', updatePointsGroups);
+    updatePointsGroups();
 
     // Function to load championship rounds
     function loadChampionshipRounds(championshipId) {

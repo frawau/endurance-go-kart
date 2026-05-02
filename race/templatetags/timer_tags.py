@@ -270,12 +270,13 @@ def get_driver_time_limit(round_obj, team):
 
 @register.simple_tag
 def get_completed_sessions_count(round_team):
-    """Return count of completed sessions (with end not NULL) for a round_team"""
-
-    # Get all completed sessions for drivers in this round_team
-    count = Session.objects.filter(driver__team=round_team, end__isnull=False).count()
-
-    return count
+    """Return count of completed sessions (with end not NULL) for the active race."""
+    active_race = round_team.round.active_race
+    if active_race is None:
+        return 0
+    return Session.objects.filter(
+        driver__team=round_team, race=active_race, end__isnull=False
+    ).count()
 
 
 @register.filter

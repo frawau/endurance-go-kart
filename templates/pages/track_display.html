@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% if race %}{{ race.get_race_type_display }} - Track Display{% else %}Track Display{% endif %}</title>
+    {% load static %}
+    <style>
+        :root {
+            /* row-scale is auto-tuned in JS to fit the viewport.
+               Manual override (+/-) is also persisted in localStorage. */
+            --row-scale: 1;
+        }
+
+        * { box-sizing: border-box; }
+
+        html, body {
+            margin: 0;
+            padding: 0;
+            height: 100vh;
+            width: 100vw;
+            background: #000;
+            color: #fff;
+            font-family: 'Arial Black', 'Helvetica', sans-serif;
+            overflow: hidden;
+        }
+
+        .scale-strip {
+            flex: 0 0 56px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            padding: 12px 0;
+            opacity: 0.30;
+            transition: opacity 0.3s;
+        }
+        .scale-strip:hover { opacity: 0.95; }
+        .scale-btn {
+            width: 44px; height: 44px;
+            border: 1px solid #555;
+            border-radius: 8px;
+            background: rgba(30,30,50,0.8);
+            color: #ccc;
+            font-size: 1.6rem;
+            font-weight: 900;
+            line-height: 40px;
+            text-align: center;
+            cursor: pointer;
+            user-select: none;
+        }
+        .scale-btn:hover { background: rgba(60,60,90,0.9); color: #fff; }
+
+        .panels {
+            display: flex;
+            width: 100vw;
+            height: 100vh;
+            gap: 8px;
+            padding: 8px 12px;
+        }
+
+        .panel {
+            flex: 1;
+            background: #0a0a0a;
+            border: 2px solid #222;
+            border-radius: 6px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        table.track {
+            width: 100%;
+            border-collapse: collapse;
+            table-layout: fixed;
+        }
+
+        table.track tr {
+            border-bottom: 2px solid #1a1a1a;
+        }
+        table.track tr:nth-child(even) {
+            background: #111;
+        }
+
+        table.track td {
+            padding: calc(4px * var(--row-scale)) calc(8px * var(--row-scale));
+            font-weight: 900;
+            font-size: calc(3.2rem * var(--row-scale));
+            line-height: 1.05;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        td.team-num {
+            color: #ffd700;
+            text-align: left;
+            width: 38%;
+        }
+        td.last-lap {
+            color: #ffffff;
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+            font-feature-settings: "tnum";
+        }
+
+        /* Coloured dot to the left of the lap time. Comparator depends on
+           race type — see dotColourFor() in JS:
+             - Main: current lap vs previous lap
+             - Qualifying: current lap vs the team's prior best lap
+           green = faster, red = slower, blue = equal. */
+        .lap-dot {
+            display: inline-block;
+            width: 0.55em;
+            height: 0.55em;
+            border-radius: 50%;
+            margin-right: 0.45em;
+            vertical-align: middle;
+            background: transparent;
+        }
+        .lap-dot.green { background: #3eea84; }
+        .lap-dot.red   { background: #ff5252; }
+        .lap-dot.blue  { background: #4ea0ff; }
+
+        tr.retired td {
+            opacity: 0.35;
+            text-decoration: line-through;
+        }
+
+        .no-race {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            font-size: 4rem;
+            font-weight: 900;
+            color: #444;
+            text-align: center;
+            padding: 0 20px;
+        }
+    </style>
+</head>
+<body>
+    {% if not race %}
+    <div class="no-race">No active race</div>
+    {% else %}
+    <div class="panels">
+        <div class="panel">
+            <table class="track">
+                <tbody id="leftBody">
+                    {% for s in left_standings %}
+                    <tr class="pos-{{ s.position }}{% if s.retired %} retired{% endif %}"
+                        data-team-id="{{ s.team_id }}">
+                        <td class="team-num">{{ s.team_number }}</td>
+                        <td class="last-lap"><span class="lap-dot"></span>{{ s.last_lap_time_formatted }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <div class="scale-strip">
+            <div class="scale-btn" id="scaleUp" title="Larger rows">+</div>
+            <div class="scale-btn" id="scaleDown" title="Smaller rows">−</div>
+        </div>
+        <div class="panel">
+            <table class="track">
+                <tbody id="rightBody">
+                    {% for s in right_standings %}
+                    <tr class="pos-{{ s.position }}{% if s.retired %} retired{% endif %}"
+                        data-team-id="{{ s.team_id }}">
+                        <td class="team-num">{{ s.team_number }}</td>
+                        <td class="last-lap"><span class="lap-dot"></span>{{ s.last_lap_time_formatted }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        const raceId = {{ race.id }};
+        const raceType = "{{ race.race_type }}";
+        const isQualifying = raceType.startsWith('Q');
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${protocol}//${window.location.host}/ws/leaderboard/${raceId}/`;
+        let socket;
+        let reconnectAttempts = 0;
+
+        // Per-team lap memory:
+        //   prevLastByTeam[id]  = last_lap_time from the previous update we
+        //                         saw a change at — the comparator for Main.
+        //   prevBestByTeam[id]  = best_lap_time as it stood *before* the
+        //                         current lap was applied — the comparator
+        //                         for Qualifying. We snapshot the best on
+        //                         the first observation, then update it only
+        //                         after deciding the colour for the new lap.
+        //   colourByTeam[id]    = colour decided at the latest new lap.
+        // The colour persists across standings updates that don't change the
+        // last lap time (e.g. driver-change pushes), so the dot stays put
+        // until the team turns a new lap.
+        const prevLastByTeam = {};
+        const prevBestByTeam = {};
+        const colourByTeam = {};
+
+        function escHtml(s) {
+            return String(s == null ? '' : s)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+
+        function dotColourFor(s) {
+            // Decide the dot colour for this team given the new standings entry.
+            // Returns '', 'green', 'red', or 'blue'.
+            //   Main:        compare new last_lap to *previous* last_lap.
+            //   Qualifying:  compare new last_lap to the team's prior best.
+            // Green = faster, red = slower, blue = equal.
+            const tid = s.team_id;
+            const cur = (typeof s.last_lap_time === 'number') ? s.last_lap_time : null;
+            const lastPrev = (typeof prevLastByTeam[tid] === 'number') ? prevLastByTeam[tid] : null;
+
+            if (cur === null) {
+                // No lap yet — clear any cached colour and emit no dot.
+                delete prevLastByTeam[tid];
+                delete prevBestByTeam[tid];
+                delete colourByTeam[tid];
+                return '';
+            }
+            if (lastPrev === null) {
+                // First time we see a lap for this team — no comparison
+                // possible yet. Record state but show no dot.
+                prevLastByTeam[tid] = cur;
+                prevBestByTeam[tid] =
+                    (typeof s.best_lap_time === 'number') ? s.best_lap_time : cur;
+                colourByTeam[tid] = '';
+                return '';
+            }
+            if (cur === lastPrev) {
+                // Same value as last update → not a new lap. Keep prior colour.
+                return colourByTeam[tid] || '';
+            }
+
+            // New lap detected. Pick the comparator based on race type.
+            const reference = isQualifying
+                ? (typeof prevBestByTeam[tid] === 'number' ? prevBestByTeam[tid] : null)
+                : lastPrev;
+
+            let colour = '';
+            if (reference !== null) {
+                if (cur < reference) colour = 'green';
+                else if (cur > reference) colour = 'red';
+                else colour = 'blue';
+            }
+
+            // Update memories AFTER comparing so the prior best stays
+            // "what it was before this lap", which is what we want to
+            // compare against. The new best is whichever is smaller.
+            prevLastByTeam[tid] = cur;
+            const oldBest = prevBestByTeam[tid];
+            prevBestByTeam[tid] =
+                (typeof oldBest === 'number') ? Math.min(oldBest, cur) : cur;
+            colourByTeam[tid] = colour;
+            return colour;
+        }
+
+        function rowHtml(s) {
+            const cls = `pos-${s.position}${s.retired ? ' retired' : ''}`;
+            const colour = dotColourFor(s);
+            const dot = `<span class="lap-dot${colour ? ' ' + colour : ''}"></span>`;
+            return (
+                `<tr class="${cls}" data-team-id="${s.team_id}">` +
+                `<td class="team-num">${escHtml(s.team_number)}</td>` +
+                `<td class="last-lap">${dot}${escHtml(s.last_lap_time_formatted || '—')}</td>` +
+                `</tr>`
+            );
+        }
+
+        function updateStandings(standings) {
+            if (!standings || standings.length === 0) return;
+            const half = Math.ceil(standings.length / 2);
+            const left = standings.slice(0, half).map(rowHtml).join('');
+            const right = standings.slice(half).map(rowHtml).join('');
+            const leftBody = document.getElementById('leftBody');
+            const rightBody = document.getElementById('rightBody');
+            if (!leftBody || !rightBody) { location.reload(); return; }
+            leftBody.innerHTML = left;
+            rightBody.innerHTML = right;
+            autoFit();
+        }
+
+        function connect() {
+            socket = new WebSocket(wsUrl);
+            socket.onopen = function() { reconnectAttempts = 0; };
+            socket.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                if (data.type === 'standings_update') {
+                    updateStandings(data.standings);
+                } else if (data.type === 'race_ended') {
+                    // The leaderboard consumer broadcasts next_race_url
+                    // pointing at /leaderboard/ so the public leaderboard
+                    // rolls forward to the next race. The track display
+                    // should stay on its own page; reload so the view
+                    // reattaches to whatever race is active now.
+                    window.location.href = "{% url 'track_display' %}";
+                }
+            };
+            socket.onclose = function() {
+                reconnectAttempts++;
+                const delay = Math.min(1000 * reconnectAttempts, 30000);
+                setTimeout(connect, delay);
+            };
+            socket.onerror = function(err) { console.error('WS error', err); };
+        }
+
+        // Auto-fit row size to viewport so all teams are visible at a glance.
+        // The user can still nudge with + / -; that override is persisted.
+        const STORAGE_KEY = 'track_display_row_scale';
+        const STEP = 0.1;
+        const MIN = 0.4;
+        const MAX = 3.0;
+        let manualScale = parseFloat(localStorage.getItem(STORAGE_KEY)) || null;
+
+        function applyScale(scale) {
+            scale = Math.max(MIN, Math.min(MAX, Math.round(scale * 20) / 20));
+            document.documentElement.style.setProperty('--row-scale', scale);
+            return scale;
+        }
+
+        function autoFit() {
+            if (manualScale !== null) {
+                applyScale(manualScale);
+                return;
+            }
+            const leftRows = document.querySelectorAll('#leftBody tr').length;
+            const rightRows = document.querySelectorAll('#rightBody tr').length;
+            const maxRows = Math.max(leftRows, rightRows, 1);
+            // Available height per row (viewport - small padding).
+            const avail = (window.innerHeight - 16) / maxRows;
+            // Empirical: at scale=1 a row takes ~76 px (3.2rem * 1.05 + padding).
+            const target = avail / 76;
+            applyScale(target);
+        }
+
+        document.getElementById('scaleDown').addEventListener('click', function() {
+            manualScale = (manualScale === null
+                ? parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--row-scale')) || 1
+                : manualScale) - STEP;
+            const applied = applyScale(manualScale);
+            manualScale = applied;
+            localStorage.setItem(STORAGE_KEY, applied);
+        });
+        document.getElementById('scaleUp').addEventListener('click', function() {
+            manualScale = (manualScale === null
+                ? parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--row-scale')) || 1
+                : manualScale) + STEP;
+            const applied = applyScale(manualScale);
+            manualScale = applied;
+            localStorage.setItem(STORAGE_KEY, applied);
+        });
+
+        window.addEventListener('resize', autoFit);
+        autoFit();
+        connect();
+
+        // Resync standings when tab regains focus (browsers throttle WS in
+        // background tabs; the leaderboard consumer accepts a 'reload'
+        // poke and replies with current standings).
+        document.addEventListener('visibilitychange', function() {
+            if (!document.hidden && socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({type: 'reload'}));
+            }
+        });
+    </script>
+    {% endif %}
+</body>
+</html>

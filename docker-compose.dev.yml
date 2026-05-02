@@ -11,3 +11,7 @@ services:
     ports:
       # Expose port for direct access during development
       - "8000:5005"
+  timing-station:
+    volumes:
+      # Mount local source for live code changes
+      - ./stations/timing:/app

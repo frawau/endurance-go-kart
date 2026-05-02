@@ -5,7 +5,7 @@ from langdetect import detect, LangDetectException
 from reportlab.pdfgen import canvas
 import reportlab.lib.pagesizes as pagesz
 from reportlab.lib.units import mm
-from reportlab.lib.colors import black, darkred, white
+from reportlab.lib.colors import black, darkred, white, Color
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab_qrcode import QRCodeImage
@@ -59,12 +59,50 @@ class GenerateCardPDF(View):
 
     def textFit(self, text, canvas, max_width, fontsize, font):
         while fontsize > 0:
-            # canvas.setFont(font, fontsize)
-            text_width = canvas.stringWidth(text, "Helvetica-Bold", fontsize)
+            text_width = canvas.stringWidth(text, font, fontsize)
             if text_width <= max_width:
                 return fontsize
             fontsize -= 1
         return fontsize
+
+    def draw_crop_marks(self, canvas, pagesize):
+        """Draw small crop marks at card boundaries on the page edges."""
+        mark_len = 3 * mm
+        mark_offset = 1 * mm  # gap between mark and printable area
+        gray = Color(0, 0, 0, 0.6)
+        canvas.saveState()
+        canvas.setStrokeColor(gray)
+        canvas.setLineWidth(0.25)
+
+        page_w, page_h = pagesize
+
+        if self.rotate:
+            x_step = self.card_height
+            y_step = self.card_width
+        else:
+            x_step = self.card_width
+            y_step = self.card_height
+
+        cols = int(page_w / x_step)
+        rows = int(page_h / y_step)
+
+        # Vertical cut lines: at each column boundary (skip left and right page edges)
+        for c in range(1, cols):
+            x = x_step * c
+            # Bottom edge
+            canvas.line(x, 0, x, mark_len)
+            # Top edge
+            canvas.line(x, page_h, x, page_h - mark_len)
+
+        # Horizontal cut lines: at each row boundary (skip top and bottom page edges)
+        for r in range(1, rows):
+            y = y_step * r
+            # Left edge
+            canvas.line(0, y, mark_len, y)
+            # Right edge
+            canvas.line(page_w, y, page_w - mark_len, y)
+
+        canvas.restoreState()
 
     def draw_drivercard(self, canvas, teammember, x, y):
         """This card is designed for A5, with a 3mm margin. Let's scale things"""
@@ -88,12 +126,26 @@ class GenerateCardPDF(View):
 
         # --- Team Name at the Top ---
         team_name = team.name if team.name else "Team Name"
+        try:
+            team_lang = detect(team_name)
+        except LangDetectException:
+            team_lang = "unknown"
+        if team_lang == "th":
+            tfont = "THFontBold"
+        elif team_lang == "ja":
+            tfont = "JPFont"
+        elif team_lang == "ko":
+            tfont = "KRFont"
+        elif team_lang == "zh":
+            tfont = "ZHFont"
+        else:
+            tfont = "Helvetica-Bold"
         ftsz = self.textFit(
-            team_name, canvas, card_w, int(32 * scalefactor + 0.5), "Helvetica-Bold"
+            team_name, canvas, card_w, int(32 * scalefactor + 0.5), tfont
         )
-        text_width_team = canvas.stringWidth(team_name, "Helvetica-Bold", ftsz)
+        text_width_team = canvas.stringWidth(team_name, tfont, ftsz)
         x_team = (card_w - text_width_team) / 2
-        canvas.setFont("Helvetica-Bold", ftsz)
+        canvas.setFont(tfont, ftsz)
         canvas.drawString(x_team, card_h - 10 * scaledmm, team_name)
 
         # --- Logo  ---
@@ -308,6 +360,15 @@ class GenerateCardPDF(View):
         pdfmetrics.registerFont(
             TTFont("ENFont", "/usr/local/share/fonts/NotoSans-Regular.ttf")
         )
+        # Bold variants for Latin/Thai only. Noto CJK ships only CFF-outline
+        # Bold weights (in .ttc/.otf), which reportlab's TTFont cannot read,
+        # so CJK team names fall back to the Regular XxxFont.
+        pdfmetrics.registerFont(
+            TTFont("ENFontBold", "/usr/local/share/fonts/NotoSans-Bold.ttf")
+        )
+        pdfmetrics.registerFont(
+            TTFont("THFontBold", "/usr/local/share/fonts/NotoSansThai-Bold.ttf")
+        )
         return p, buffer
 
     def post(self, request):
@@ -332,11 +393,13 @@ class GenerateCardPDF(View):
             cards_per_col = int(pagesize[0] / self.card_width)
 
         # Initialize card position tracking
+        cards_per_page = cards_per_row * cards_per_col
         card_pos = {
             "currow": 0,
             "curcol": 0,
             "cards_per_row": cards_per_row,
             "cards_per_col": cards_per_col,
+            "cards_per_page": cards_per_page,
         }
 
         # Handle different input types
@@ -381,6 +444,14 @@ class GenerateCardPDF(View):
 
     def _draw_card(self, p, tm, card_pos):
         """Helper method to handle card drawing logic"""
+        # Draw crop marks once at the start of each page
+        if (
+            card_pos["curcol"] == 0
+            and card_pos["currow"] == 0
+            and card_pos["cards_per_page"] > 2
+        ):
+            self.draw_crop_marks(p, p._pagesize)
+
         if self.rotate:
             x_offset = self.card_height * card_pos["curcol"]
             y_offset = self.card_width * card_pos["currow"]

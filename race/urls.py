@@ -56,14 +56,30 @@ urlpatterns = [
         name="driver_info_api",
     ),
     path("round_info/", views.round_info, name="round_info"),
+    path("round_result/", views.round_result, name="round_result"),
+    path("round_result/csv/", views.round_result_csv, name="round_result_csv"),
+    path("race/<int:race_id>/replay/", views.race_replay, name="race_replay"),
+    path(
+        "api/race/<int:race_id>/team/<int:team_id>/laps/",
+        views.round_result_team_laps,
+        name="round_result_team_laps",
+    ),
     path("round_penalties/", views.round_penalties, name="round_penalties"),
     # Admin stuffs
     path("rounds/update/", views.round_list_update, name="rounds_list"),
     path("rounds/form/", views.round_form, name="round_form"),
     path("rounds/update/<int:round_id>/", views.update_round, name="update_round"),
     path("rounds/team/", TeamMembersView.as_view(), name="team_members"),
-    path("rounds/team/select/", TeamManagementSelectionView.as_view(), name="team_management_selection"),
-    path("rounds/team/<int:round_id>/", TeamMembersView.as_view(), name="team_members_by_id"),
+    path(
+        "rounds/team/select/",
+        TeamManagementSelectionView.as_view(),
+        name="team_management_selection",
+    ),
+    path(
+        "rounds/team/<int:round_id>/",
+        TeamMembersView.as_view(),
+        name="team_members_by_id",
+    ),
     path("driver/add/", views.create_driver, name="add_driver"),
     path("team/add/", views.create_team, name="add_team"),
     path("get_round_status/", views.get_round_status, name="get_round_status"),
@@ -87,6 +103,11 @@ urlpatterns = [
         "api/championship/<int:championship_id>/rounds/",
         views.get_championship_rounds,
         name="get_championship_rounds",
+    ),
+    path(
+        "transponder/manage/",
+        views.transponder_management_view,
+        name="transponder_management",
     ),
     path("penalty/manage/", views.penalty_management_view, name="penalty_management"),
     path("sponsor/manage/", views.sponsor_management_view, name="sponsor_management"),
@@ -145,5 +166,204 @@ urlpatterns = [
         "api/delay-penalty/",
         views.delay_penalty,
         name="delay_penalty",
+    ),
+    # Grid Management (Phase 4 - Qualifying & Grid System)
+    path(
+        "race/<int:race_id>/grid/",
+        views.race_grid_management,
+        name="race_grid_management",
+    ),
+    path(
+        "race/<int:race_id>/grid/pdf/",
+        views.race_grid_pdf,
+        name="race_grid_pdf",
+    ),
+    path(
+        "api/race/<int:race_id>/grid/update/",
+        views.update_grid_position,
+        name="update_grid_position",
+    ),
+    path(
+        "api/race/<int:race_id>/grid/reorder/",
+        views.reorder_grid_positions,
+        name="reorder_grid_positions",
+    ),
+    path(
+        "race/<int:race_id>/grid/lock/",
+        views.lock_grid,
+        name="lock_grid",
+    ),
+    path(
+        "race/<int:race_id>/grid/unlock/",
+        views.unlock_grid,
+        name="unlock_grid",
+    ),
+    path(
+        "race/<int:race_id>/grid/reset/",
+        views.reset_grid_to_auto,
+        name="reset_grid_to_auto",
+    ),
+    path(
+        "race/<int:race_id>/grid/auto-assign-qualifying/",
+        views.auto_assign_from_qualifying,
+        name="auto_assign_from_qualifying",
+    ),
+    path(
+        "race/<int:race_id>/grid/auto-assign-championship/",
+        views.auto_assign_from_championship,
+        name="auto_assign_from_championship",
+    ),
+    # Leaderboard (Phase 5 - Leaderboard & Displays)
+    path(
+        "leaderboard/",
+        views.public_leaderboard,
+        name="public_leaderboard",
+    ),
+    path(
+        "track-display/",
+        views.track_display,
+        name="track_display",
+    ),
+    # Lap Management (Phase 6 - Lap Splitting & Suspicious Lap Detection)
+    path(
+        "race/<int:race_id>/laps/",
+        views.race_lap_management,
+        name="race_lap_management",
+    ),
+    path(
+        "api/race/<int:race_id>/laps/",
+        views.get_race_laps,
+        name="get_race_laps",
+    ),
+    path(
+        "api/lap/<int:crossing_id>/split/",
+        views.split_lap,
+        name="split_lap",
+    ),
+    path(
+        "api/lap/<int:crossing_id>/dismiss-suspicious/",
+        views.dismiss_suspicious_lap,
+        name="dismiss_suspicious_lap",
+    ),
+    path(
+        "api/lap/<int:crossing_id>/invalidate/",
+        views.invalidate_lap,
+        name="invalidate_lap",
+    ),
+    path(
+        "api/lap/<int:crossing_id>/validate/",
+        views.validate_lap,
+        name="validate_lap",
+    ),
+    # Transponder Matching (Phase 7 - Race Director Workflow)
+    path(
+        "race/<int:race_id>/transponders/",
+        views.transponder_matching,
+        name="transponder_matching",
+    ),
+    path(
+        "api/race/<int:race_id>/transponder-assignments/",
+        views.get_transponder_assignments,
+        name="get_transponder_assignments",
+    ),
+    path(
+        "api/race/<int:race_id>/assign-transponder/",
+        views.assign_transponder,
+        name="assign_transponder",
+    ),
+    path(
+        "api/transponder-assignment/<int:assignment_id>/remove/",
+        views.remove_transponder_assignment,
+        name="remove_transponder_assignment",
+    ),
+    path(
+        "api/transponder-assignment/<int:assignment_id>/replace/",
+        views.replace_transponder_assignment,
+        name="replace_transponder_assignment",
+    ),
+    path(
+        "api/race/<int:race_id>/lock-transponder-assignments/",
+        views.lock_transponder_assignments,
+        name="lock_transponder_assignments",
+    ),
+    path(
+        "api/race/<int:race_id>/available-transponders/",
+        views.get_available_transponders,
+        name="get_available_transponders",
+    ),
+    # Championship Standings
+    path(
+        "championship/standings/",
+        views.championship_standings,
+        name="championship_standings",
+    ),
+    path(
+        "api/round/<int:round_id>/confirm-results/",
+        views.confirm_round_results,
+        name="confirm_round_results",
+    ),
+    path(
+        "api/round/<int:round_id>/unconfirm-results/",
+        views.unconfirm_round_results,
+        name="unconfirm_round_results",
+    ),
+    # Team Retirement
+    path(
+        "api/retire-team/",
+        views.retire_team,
+        name="retire_team",
+    ),
+    # Simulator support (unauthenticated, dev/test only)
+    path(
+        "api/timing/sim-transponders/",
+        views.sim_transponders,
+        name="sim_transponders",
+    ),
+    # Fix pages (emergency — hidden behind Ctrl+Shift+F)
+    path("fix/scan-in/", views.fix_scan_in, name="fix_scan_in"),
+    path(
+        "api/fix/scan-in/team/<int:team_id>/",
+        views.fix_scan_in_team,
+        name="fix_scan_in_team",
+    ),
+    path("api/fix/scan-in/", views.fix_scan_in_action, name="fix_scan_in_action"),
+    path("fix/scan-out/", views.fix_scan_out, name="fix_scan_out"),
+    path("api/fix/scan-out/", views.fix_scan_out_action, name="fix_scan_out_action"),
+    path("fix/laps/", views.fix_laps, name="fix_laps"),
+    path(
+        "api/fix/laps/<int:crossing_id>/unsplit/",
+        views.fix_laps_unsplit,
+        name="fix_laps_unsplit",
+    ),
+    path(
+        "api/fix/laps/merge/",
+        views.fix_laps_merge,
+        name="fix_laps_merge",
+    ),
+    path("fix/penalties/", views.fix_penalties, name="fix_penalties"),
+    path(
+        "api/fix/penalties/create/",
+        views.fix_penalties_create,
+        name="fix_penalties_create",
+    ),
+    path(
+        "api/fix/penalties/<int:penalty_id>/delete/",
+        views.fix_penalties_delete,
+        name="fix_penalties_delete",
+    ),
+    path(
+        "fix/grid-penalties/",
+        views.fix_grid_penalties,
+        name="fix_grid_penalties",
+    ),
+    path(
+        "api/fix/grid-penalties/create/",
+        views.fix_grid_penalties_create,
+        name="fix_grid_penalties_create",
+    ),
+    path(
+        "api/fix/grid-penalties/<int:penalty_id>/delete/",
+        views.fix_grid_penalties_delete,
+        name="fix_grid_penalties_delete",
     ),
 ]

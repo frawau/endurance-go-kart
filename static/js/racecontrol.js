@@ -5,6 +5,16 @@ let falseRestartTimeoutId = null;
 let falseRestartTimeoutExpired = false;
 let emptyTeamsSocketInstance = null;
 
+// Multi-race state
+let isLapBased = false;
+let activeRaceType = null;
+let activeRaceLabel = null;
+let activeStartMode = null;
+
+// Guard: prevent WS state updates from overwriting button state while a button
+// action fetch is in flight.  Set to true at fetch start, false on completion.
+let buttonActionInProgress = false;
+
 // Stop & Go state variables
 let stopAndGoSocket = null;
 let stopAndGoState = 'idle'; // 'idle', 'active', 'served'
@@ -192,6 +202,88 @@ function addSystemMessage(message, tag) {
 }
 
 /**
+ * Show a persistent warning alert for a suspicious (possibly double) lap.
+ * The race director can split the lap at the midpoint or dismiss the alert.
+ */
+function showSuspiciousLapAlert(teamNumber, lapNumber, crossingId, suggestedSplit, maxSplit, lapTime) {
+  const alertId = `suspicious-lap-${crossingId}`;
+  if (document.getElementById(alertId)) return; // already shown
+
+  const messagesContainer = document.getElementById("messagesContainer");
+  if (!messagesContainer) return;
+
+  const count = suggestedSplit && suggestedSplit > 1 ? suggestedSplit : 2;
+  const max = maxSplit && maxSplit > 1 ? maxSplit : count;
+  const countId = `split-count-${crossingId}`;
+  const maxAttr = `data-max="${max}"`;
+  const timeStr = lapTime ? ` (${lapTime})` : '';
+
+  const alertDiv = document.createElement("div");
+  alertDiv.id = alertId;
+  alertDiv.className = "alert alert-warning alert-dismissible fade show m-2";
+  alertDiv.setAttribute("role", "alert");
+  alertDiv.innerHTML =
+    `<strong>Suspicious lap:</strong> Team #${teamNumber}, Lap ${lapNumber}${timeStr} — ` +
+    `possible missed crossing(s). ` +
+    `<span class="ms-2">Split into: ` +
+    `<button class="btn btn-sm btn-outline-secondary py-0" onclick="adjustSplitCount('${countId}', -1)">−</button>` +
+    `<span id="${countId}" ${maxAttr} class="mx-2 fw-bold">${count}</span>` +
+    `<button class="btn btn-sm btn-outline-secondary py-0" onclick="adjustSplitCount('${countId}', +1)">+</button>` +
+    `</span>` +
+    `<button class="btn btn-sm btn-warning ms-2" onclick="splitSuspiciousLap(${crossingId}, '${alertId}', '${countId}')">` +
+    `<i class="fas fa-cut"></i> Split</button>` +
+    `<button class="btn btn-sm btn-secondary ms-2" onclick="dismissSuspiciousLap(${crossingId}, '${alertId}')">` +
+    `<i class="fas fa-times"></i> Dismiss</button>`;
+
+  messagesContainer.insertBefore(alertDiv, messagesContainer.firstChild);
+}
+
+function adjustSplitCount(countId, delta) {
+  const el = document.getElementById(countId);
+  if (!el) return;
+  const current = parseInt(el.textContent, 10) || 2;
+  const max = parseInt(el.dataset.max, 10) || 10;
+  el.textContent = Math.max(2, Math.min(current + delta, max));
+}
+
+function splitSuspiciousLap(crossingId, alertId, countId) {
+  const countEl = document.getElementById(countId);
+  const count = countEl ? (parseInt(countEl.textContent, 10) || 2) : 2;
+  fetch(`/api/lap/${crossingId}/split/`, {
+    method: "POST",
+    headers: { "X-CSRFToken": getCookie("csrftoken"), "Content-Type": "application/json" },
+    body: JSON.stringify({ count }),
+  })
+    .then((r) => r.json())
+    .then((data) => {
+      if (data.success) {
+        const el = document.getElementById(alertId);
+        if (el) el.remove();
+        addSystemMessage(data.message, "success");
+      } else {
+        addSystemMessage("Error splitting lap: " + (data.error || "unknown error"), "danger");
+      }
+    })
+    .catch(() => addSystemMessage("Failed to split lap — check connection", "danger"));
+}
+
+function dismissSuspiciousLap(crossingId, alertId) {
+  fetch(`/api/lap/${crossingId}/dismiss-suspicious/`, {
+    method: "POST",
+    headers: { "X-CSRFToken": getCookie("csrftoken"), "Content-Type": "application/json" },
+  })
+    .then((r) => r.json())
+    .then((data) => {
+      const el = document.getElementById(alertId);
+      if (el) el.remove();
+      if (!data.success) {
+        addSystemMessage("Error dismissing alert: " + (data.error || "unknown error"), "danger");
+      }
+    })
+    .catch(() => addSystemMessage("Failed to dismiss — check connection", "danger"));
+}
+
+/**
  * Function to connect to lane sockets (Keep as is)
  */
 function connectToLaneSockets() {
@@ -352,23 +444,43 @@ function updateButtonVisibility(state, options = {}) {
   if (!options.keepFalseStart) hideFalseStartButton();
   if (!options.keepFalseRestart) hideFalseRestartButton();
 
+  // Determine label suffix for lap-based rounds
+  const raceLabel = (isLapBased && activeRaceLabel) ? activeRaceLabel : "Race";
+
   // Show buttons based on state
   switch (state) {
-    case "initial": // Not ready, not started
+    case "initial": // Not ready, not started — pre-check always required
       document.getElementById("preRaceCheckButton")?.removeAttribute("hidden");
-      document
-        .getElementById("emptyTeamsCard")
-        ?.style.setProperty("display", "block", "important");
-      document
-        .getElementById("teamSelectCard")
-        ?.style.setProperty("display", "none", "important");
+      document.getElementById("emptyTeamsCard")?.style.setProperty("display", "block", "important");
+      document.getElementById("teamSelectCard")?.style.setProperty("display", "none", "important");
       break;
     case "ready": // Ready, not started
       const startBtn = document.getElementById("startButton");
       if (startBtn) {
         startBtn.removeAttribute("hidden");
-        startBtn.innerHTML = '<i class="fas fa-play me-1"></i> Start Race';
+        startBtn.innerHTML = `<i class="fas fa-play me-1"></i> Start ${raceLabel}`;
         startBtn.disabled = false;
+      }
+      document
+        .getElementById("emptyTeamsCard")
+        ?.style.setProperty("display", "none", "important");
+      document
+        .getElementById("teamSelectCard")
+        ?.style.setProperty("display", "block", "important");
+      break;
+    case "armed": // FIRST_CROSSING: waiting for first passage
+      {
+        const falseStartBtn = document.getElementById("falseStartButton");
+        if (falseStartBtn) {
+          falseStartBtn.removeAttribute("hidden");
+          falseStartBtn.innerHTML = '<i class="fas fa-undo me-1"></i> False Start';
+          falseStartBtn.disabled = false;
+        }
+        const endBtn = document.getElementById("endButton");
+        if (endBtn) {
+          endBtn.removeAttribute("hidden");
+          endBtn.innerHTML = `<i class="fas fa-stop me-1"></i> End ${raceLabel}`;
+        }
       }
       document
         .getElementById("emptyTeamsCard")
@@ -410,15 +522,43 @@ function updateButtonVisibility(state, options = {}) {
       } else {
         document.getElementById("pauseButton")?.removeAttribute("hidden");
       }
+      // Show end button during running state
+      {
+        const endBtn = document.getElementById("endButton");
+        if (endBtn) {
+          endBtn.removeAttribute("hidden");
+          endBtn.innerHTML = `<i class="fas fa-stop me-1"></i> End ${raceLabel}`;
+        }
+      }
+      document
+        .getElementById("emptyTeamsCard")
+        ?.style.setProperty("display", "none", "important");
+      document
+        .getElementById("teamSelectCard")
+        ?.style.setProperty("display", "block", "important");
       break;
 
     case "paused": // Started, paused
       const resumeBtn = document.getElementById("resumeButton");
       if (resumeBtn) {
         resumeBtn.removeAttribute("hidden");
-        resumeBtn.innerHTML = '<i class="fas fa-play-circle me-1"></i> Resume Race';
+        resumeBtn.innerHTML = '<i class="fas fa-play-circle me-1"></i> Resume';
         resumeBtn.disabled = false;
       }
+      // Show end button during paused state too
+      {
+        const endBtnP = document.getElementById("endButton");
+        if (endBtnP) {
+          endBtnP.removeAttribute("hidden");
+          endBtnP.innerHTML = `<i class="fas fa-stop me-1"></i> End ${raceLabel}`;
+        }
+      }
+      document
+        .getElementById("emptyTeamsCard")
+        ?.style.setProperty("display", "none", "important");
+      document
+        .getElementById("teamSelectCard")
+        ?.style.setProperty("display", "block", "important");
       break;
     case "ended": // Ended
       // No buttons shown by default in 'ended' state
@@ -462,6 +602,7 @@ async function handleRaceAction(event) {
   const originalButtonHTML = button.innerHTML;
   button.innerHTML = `<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>`;
   console.log(`Sending POST request to: ${url}`);
+  buttonActionInProgress = true;
 
   // --- Clear relevant timeouts when an action is initiated ---
   if (action !== "false_start") clearTimeout(falseStartTimeoutId);
@@ -527,8 +668,15 @@ async function handleRaceAction(event) {
             nextState = "ready";
             break;
           case "start":
-            nextState = "running";
-            options = { showFalseStart: true };
+            if (activeStartMode === "FIRST_CROSSING") {
+              nextState = "armed";
+            } else {
+              nextState = "running";
+              // False Start window only for non-qualifying races
+              if (!activeRaceType || !activeRaceType.startsWith("Q")) {
+                options = { showFalseStart: true };
+              }
+            }
             break;
           case "pause":
             nextState = "paused";
@@ -538,15 +686,24 @@ async function handleRaceAction(event) {
             options = { showFalseRestart: true };
             break; // Resume goes back to running
           case "end":
-            nextState = "ended";
-            // Add penalty count message if penalties were created
-            if (data.penalty_count > 0) {
+            if (data.has_next_race) {
+              // Multi-race: advance to next race's pre-check
+              nextState = "initial";
               addSystemMessage(
-                `Race ended. ${data.penalty_count} post-race penalties applied.`,
+                `${activeRaceLabel || 'Race'} ended. Advancing to ${data.next_race_label || 'next race'}...`,
                 "info"
               );
             } else {
-              addSystemMessage("Race ended successfully.", "success");
+              nextState = "ended";
+              // Add penalty count message if penalties were created
+              if (data.penalty_count > 0) {
+                addSystemMessage(
+                  `Race ended. ${data.penalty_count} post-race penalties applied.`,
+                  "info"
+                );
+              } else {
+                addSystemMessage("Race ended successfully.", "success");
+              }
             }
             break;
           case "false_start":
@@ -557,6 +714,7 @@ async function handleRaceAction(event) {
             break; // False restart goes back to paused
         }
 
+        button.innerHTML = originalButtonHTML; // Restore button label before updating visibility
         updateButtonVisibility(nextState, options); // Update UI based on FSM
 
         // Connect lanes only after successful pre-check
@@ -588,7 +746,8 @@ async function handleRaceAction(event) {
     button.innerHTML = originalButtonHTML; // Restore button text
     button.disabled = false; // Re-enable only the clicked button on network error
   }
-  // No finally block needed as enablement is handled in error/success paths now
+  // Clear in-progress flag regardless of outcome
+  buttonActionInProgress = false;
 }
 
 /**
@@ -658,30 +817,14 @@ function updateEmptyTeamsList(teams) {
 }
 
 // --- Event Listeners Setup ---
-console.log('JavaScript file loaded, setting up DOMContentLoaded listener...');
 
 // Separate function to load HMAC secret
 function loadHmacSecret() {
-  console.log('Loading HMAC secret from template data...');
   const roundData = document.getElementById('round-data');
-  console.log('Round data element:', roundData);
   if (roundData) {
-    console.log('Round data attributes:', roundData.dataset);
-    console.log('Available dataset keys:', Object.keys(roundData.dataset));
-    
-    // Try different attribute access methods
     hmacSecret = roundData.dataset.hmacSecret || roundData.getAttribute('data-hmac-secret');
-    console.log('HMAC secret loaded:', hmacSecret ? 'YES' : 'NO');
-    console.log('Secret value:', hmacSecret);
-    console.log('Secret length:', hmacSecret ? hmacSecret.length : 'N/A');
-  } else {
-    console.error('round-data element not found!');
-    
-    // Try fallback from window
-    if (window.STOPANDGO_HMAC_SECRET) {
-      hmacSecret = window.STOPANDGO_HMAC_SECRET;
-      console.log('Using fallback HMAC secret from window:', hmacSecret ? 'YES' : 'NO');
-    }
+  } else if (window.STOPANDGO_HMAC_SECRET) {
+    hmacSecret = window.STOPANDGO_HMAC_SECRET;
   }
 }
 
@@ -694,13 +837,17 @@ if (document.readyState === 'loading') {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
-  console.log('DOMContentLoaded event fired!');
-  
-  // Ensure HMAC secret is loaded
-  if (!hmacSecret) {
-    console.log('HMAC secret not loaded yet, trying again...');
-    loadHmacSecret();
+  if (!hmacSecret) loadHmacSecret();
+
+  // Initialize multi-race state from data attributes
+  const roundDataEl = document.getElementById('round-data');
+  if (roundDataEl) {
+    isLapBased = roundDataEl.dataset.lapBased === 'true';
+    activeRaceType = roundDataEl.dataset.activeRaceType || null;
+    activeRaceLabel = roundDataEl.dataset.activeRaceLabel || null;
+    activeStartMode = roundDataEl.dataset.startMode || null;
   }
+
   // Add listeners to all race action buttons
   const actionButtons = document.querySelectorAll(".race-action-btn");
   actionButtons.forEach((button) => {
@@ -710,65 +857,48 @@ document.addEventListener("DOMContentLoaded", () => {
   // Initialize Stop & Go functionality with multiple attempts
   function tryInitializeStopAndGo(attempt) {
     attempt = attempt || 1;
-    console.log(`Attempt ${attempt} to initialize Stop & Go...`);
-    
     const penaltySelect = document.getElementById('penaltySelect');
     const offenderSelect = document.getElementById('offenderSelect');
     const victimSelect = document.getElementById('victimSelect');
-    
+
     if (penaltySelect && offenderSelect && victimSelect) {
-      console.log('All Stop & Go elements found, initializing...');
-      
-      // Get current round ID
       const roundIdContainer = document.getElementById('race-control-buttons');
       currentRoundId = roundIdContainer?.dataset.roundId;
-      
-      if (currentRoundId) {
-        loadStopAndGoPenalties();
-      }
-      
+      if (currentRoundId) applyPenaltyModeFromActiveRace();
       initializeStopAndGo();
       initializeDropdownLogic();
       return true;
-    } else {
-      console.log('Stop & Go elements not found:', {
-        penalty: !!penaltySelect,
-        offender: !!offenderSelect,
-        victim: !!victimSelect
-      });
-      
-      if (attempt < 5) {
-        setTimeout(() => tryInitializeStopAndGo(attempt + 1), 1000);
-      } else {
-        console.log('Failed to initialize Stop & Go after 5 attempts');
-      }
-      return false;
+    } else if (attempt < 5) {
+      setTimeout(() => tryInitializeStopAndGo(attempt + 1), 1000);
     }
+    return false;
   }
   
   tryInitializeStopAndGo();
 
   // --- Set Initial Button State ---
   // Determine initial state based on which buttons are initially visible in the HTML
-  let initialState = "initial"; // Default
+  let initialState = "initial";
   if (document.getElementById("startButton")?.offsetParent !== null)
-    initialState = "ready"; // Check visibility more reliably
+    initialState = "ready";
   else if (document.getElementById("pauseButton")?.offsetParent !== null)
     initialState = "running";
   else if (document.getElementById("resumeButton")?.offsetParent !== null)
     initialState = "paused";
+  else if (document.getElementById("falseStartButton")?.offsetParent !== null)
+    initialState = "armed";
   else if (
     !document.querySelector(
       "#race-control-buttons .race-action-btn:not([hidden])",
     )
   )
-    initialState = "ended"; // If no buttons visible
+    initialState = "ended";
 
-  updateButtonVisibility(initialState); // Set initial visibility
+  updateButtonVisibility(initialState);
 
   // --- Initial Lane Connection Check ---
   // Connect if initial state is ready, running, or paused
-  if (["ready", "running", "paused"].includes(initialState)) {
+  if (["ready", "armed", "running", "paused"].includes(initialState)) {
     console.log(
       `Page loaded: Round state is ${initialState}. Connecting lane sockets.`,
     );
@@ -844,11 +974,71 @@ function initializeStopAndGo() {
 }
 
 /**
+ * True if the active race is a qualifying session.
+ */
+function isQualifyingActive() {
+  return !!(activeRaceType && activeRaceType.startsWith('Q'));
+}
+
+/**
+ * Switch the in-race penalty form between qualifying mode (Grid Penalty
+ * only) and main / practice mode (Stop & Go). Called on init and whenever
+ * the active race type changes.
+ *
+ * Qualifying mode:
+ *   - Penalty dropdown contains a single "Grid Penalty" entry.
+ *   - "Duration" label becomes "Positions back" (1..20).
+ *   - "Stop & Go" button label becomes "Grid Penalty".
+ *   - Lap Penalties button is hidden (lap/time penalties only on Main).
+ *   - Submission posts to fix_grid_penalties_create with round_id +
+ *     optional victim_id.
+ */
+function applyPenaltyModeFromActiveRace() {
+  const penaltySelect = document.getElementById('penaltySelect');
+  const durationLabel = document.querySelector('label[for="durationInput"]');
+  const durationInput = document.getElementById('durationInput');
+  const stopGoButton = document.getElementById('stopGoButton');
+  const lapPenaltiesButton = document.getElementById('lapPenaltiesButton');
+
+  if (!penaltySelect) return;
+
+  if (isQualifyingActive()) {
+    // Single Grid Penalty option, no server fetch needed — backend
+    // auto-creates the championship CP on first use.
+    penaltySelect.innerHTML =
+      '<option value="">Select penalty...</option>' +
+      '<option value="GRID_PENALTY" ' +
+      'data-penalty-value="1" data-penalty-option="variable" ' +
+      'data-penalty-sanction="G">Grid Penalty</option>';
+    if (durationLabel) durationLabel.textContent = 'Positions back';
+    if (durationInput) {
+      durationInput.value = '1';
+      durationInput.min = '1';
+      durationInput.max = '20';
+    }
+    if (stopGoButton) stopGoButton.textContent = 'Grid Penalty';
+    if (lapPenaltiesButton) lapPenaltiesButton.style.display = 'none';
+  } else {
+    // Restore S&G defaults and load the championship's S&G entries.
+    if (durationLabel) durationLabel.textContent = 'Duration';
+    if (durationInput) {
+      durationInput.value = '20';
+      durationInput.min = '1';
+      durationInput.max = '300';
+    }
+    if (stopGoButton) stopGoButton.textContent = 'Stop & Go';
+    if (lapPenaltiesButton) lapPenaltiesButton.style.display = '';
+    loadStopAndGoPenalties();
+  }
+  resetStopAndGoForm();
+}
+
+/**
  * Load Stop & Go penalties for current round
  */
 function loadStopAndGoPenalties() {
   if (!currentRoundId) return;
-  
+
   fetch(`/api/round/${currentRoundId}/stop-go-penalties/`)
     .then(response => response.json())
     .then(data => {
@@ -875,20 +1065,11 @@ function loadStopAndGoPenalties() {
  * Initialize dropdown interaction logic
  */
 function initializeDropdownLogic() {
-  console.log('Initializing dropdown logic...');
   const penaltySelect = document.getElementById('penaltySelect');
   const offenderSelect = document.getElementById('offenderSelect');
   const victimSelect = document.getElementById('victimSelect');
   const durationInput = document.getElementById('durationInput');
   const stopGoButton = document.getElementById('stopGoButton');
-  
-  console.log('Elements found:', {
-    penaltySelect: !!penaltySelect,
-    offenderSelect: !!offenderSelect,
-    victimSelect: !!victimSelect,
-    durationInput: !!durationInput,
-    stopGoButton: !!stopGoButton
-  });
   
   if (!penaltySelect || !offenderSelect || !victimSelect || !durationInput || !stopGoButton) {
     console.log('Some elements not found, skipping dropdown initialization');
@@ -908,7 +1089,9 @@ function initializeDropdownLogic() {
         sanction: selectedOption.dataset.penaltySanction
       };
       
-      // Enable offender dropdown
+      // Show penalty fields and enable offender dropdown
+      const penaltyFields = document.getElementById('penaltyFields');
+      if (penaltyFields) penaltyFields.style.display = '';
       offenderSelect.disabled = false;
       
       // Set default duration value
@@ -921,22 +1104,27 @@ function initializeDropdownLogic() {
         durationInput.disabled = true;
       }
       
-      // For Self Stop & Go penalties, update victim dropdown label
+      // Adjust victim dropdown label by sanction.
       if (selectedPenalty.sanction === 'D') {
         victimSelect.innerHTML = '<option value="">No victim needed</option>';
+      } else if (selectedPenalty.sanction === 'G') {
+        // Grid Penalty: victim is optional; show a clear placeholder.
+        victimSelect.innerHTML = '<option value="">No victim (optional)</option>';
       } else {
         victimSelect.innerHTML = '<option value="">Select victim team...</option>';
       }
       
     } else {
       selectedPenalty = null;
+      const penaltyFieldsEl = document.getElementById('penaltyFields');
+      if (penaltyFieldsEl) penaltyFieldsEl.style.display = 'none';
       offenderSelect.disabled = true;
       offenderSelect.value = '';
       victimSelect.disabled = true;
       victimSelect.value = '';
       durationInput.disabled = true;
       durationInput.value = '20';
-      
+
       // Clear victim options
       victimSelect.innerHTML = '<option value="">Select victim team...</option>';
     }
@@ -949,17 +1137,20 @@ function initializeDropdownLogic() {
     const selectedOffenderId = this.value;
     
     if (selectedOffenderId) {
-      // For Self Stop & Go penalties (D), don't enable victim dropdown
+      // Self Stop & Go (D) has no victim; disable the dropdown.
       if (selectedPenalty && selectedPenalty.sanction === 'D') {
-        // Disable victim dropdown for Self Stop & Go
         victimSelect.disabled = true;
         victimSelect.value = '';
         victimSelect.innerHTML = '<option value="">No victim needed</option>';
       } else {
-        // Enable victim dropdown for regular Stop & Go
+        // S (Stop & Go) and G (Grid Penalty during quali) both allow a
+        // victim. For G it's optional, for S it's required — checkFormCompletion
+        // enforces that.
         victimSelect.disabled = false;
-        
-        // Populate victim dropdown (all teams except the offender)
+        const placeholder = selectedPenalty && selectedPenalty.sanction === 'G'
+          ? 'No victim (optional)'
+          : 'Select victim team...';
+        victimSelect.innerHTML = `<option value="">${placeholder}</option>`;
         populateVictimDropdown(selectedOffenderId);
       }
     } else {
@@ -992,26 +1183,27 @@ function initializeDropdownLogic() {
   function checkFormCompletion() {
     const penaltySelected = selectedPenalty !== null;
     const offenderSelected = offenderSelect.value !== '';
-    
-    // For Self Stop & Go (D), victim is not required
+
+    // Victim is required for S (Stop & Go); optional for D (Self S&G)
+    // and G (Grid Penalty during qualifying).
     let victimRequired = true;
-    if (selectedPenalty && selectedPenalty.sanction === 'D') {
+    if (selectedPenalty && (selectedPenalty.sanction === 'D' || selectedPenalty.sanction === 'G')) {
       victimRequired = false;
     }
-    
+
     const victimSelected = victimRequired ? victimSelect.value !== '' : true;
-    
-    // Stop & Go button: enabled when form is complete (queues penalties)
+    const isGrid = selectedPenalty && selectedPenalty.sanction === 'G';
+
     if (penaltySelected && offenderSelected && victimSelected) {
       stopGoButton.disabled = false;
       stopGoButton.style.backgroundColor = '#dc3545';
       stopGoButton.style.color = 'yellow';
-      stopGoButton.textContent = 'Stop & Go';
+      stopGoButton.textContent = isGrid ? 'Grid Penalty' : 'Stop & Go';
     } else {
       stopGoButton.disabled = true;
       stopGoButton.style.backgroundColor = '#6c757d';
       stopGoButton.style.color = '#fff';
-      stopGoButton.textContent = 'Stop & Go';
+      stopGoButton.textContent = isGrid ? 'Grid Penalty' : 'Stop & Go';
     }
   }
 }
@@ -1021,11 +1213,11 @@ function initializeDropdownLogic() {
  */
 function loadQueueState() {
   if (!currentRoundId) return;
-  
+
   fetch(`/api/round/${currentRoundId}/penalty-queue-status/`)
     .then(response => response.json())
     .then(data => {
-      // Update queue management state
+      // Update internal state only — UI is updated by penalty_queue_update WebSocket
       if (data.active_penalty) {
         currentQueueId = data.active_penalty.queue_id;
         currentRoundPenaltyId = data.active_penalty.penalty_id;
@@ -1033,12 +1225,6 @@ function loadQueueState() {
         currentQueueId = null;
         currentRoundPenaltyId = null;
       }
-      
-      // Update penalty queue UI (status and buttons)
-      updatePenaltyQueueUI({
-        serving_team: data.serving_team,
-        queue_count: data.queue_count
-      });
     })
     .catch(error => {
       console.error('Error loading queue state:', error);
@@ -1062,11 +1248,15 @@ function updatePenaltyQueueUI(data = null) {
   const hasActivePenalties = (data && data.queue_count > 0);
   
   // Update status display
+  const crossingsElement = document.getElementById('crossingsSinceQueued');
   if (statusElement && servingTeamElement && queueCountElement) {
     if (hasActivePenalties && data) {
       statusElement.style.display = 'block';
       servingTeamElement.textContent = data.serving_team || '--';
       queueCountElement.textContent = data.queue_count;
+      if (crossingsElement) {
+        crossingsElement.textContent = data.crossings_since_queued || 0;
+      }
     } else {
       statusElement.style.display = 'none';
     }
@@ -1097,56 +1287,88 @@ function updateQueueButtons() {
 }
 
 /**
- * Handle Stop & Go button click - Now queues penalties
+ * Handle Stop & Go / Grid Penalty button click. The qualifying form
+ * shares the same widget and flips its semantics via selectedPenalty.sanction.
  */
 function handleStopGoButtonClick() {
   const offenderSelect = document.getElementById('offenderSelect');
   const victimSelect = document.getElementById('victimSelect');
   const durationInput = document.getElementById('durationInput');
-  
-  // Queue the penalty
+
   const offenderId = offenderSelect.value;
   const victimId = victimSelect.value || null;
   const offenderTeamNumber = offenderSelect.selectedOptions[0]?.dataset.teamNumber;
-  const duration = parseInt(durationInput.value) || 20;
-    
-  if (selectedPenalty && offenderId && offenderTeamNumber) {
-    // Queue the penalty
-    const penaltyData = {
+  const value = parseInt(durationInput.value) || 1;
+
+  if (!selectedPenalty || !offenderId || !offenderTeamNumber) return;
+
+  if (selectedPenalty.sanction === 'G') {
+    // Qualifying-mode Grid Penalty — bypass S&G queue and apply directly
+    // to the Main race grid via the fix endpoint (RD-only on the server).
+    const payload = {
       round_id: currentRoundId,
       offender_id: offenderId,
       victim_id: victimId,
-      championship_penalty_id: selectedPenalty.id,
-      value: duration
+      value: value,
     };
-    
-    fetch('/api/queue-penalty/', {
+    fetch('/api/fix/grid-penalties/create/', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-CSRFToken': getCookie('csrftoken')
+        'X-CSRFToken': getCookie('csrftoken'),
       },
-      body: JSON.stringify(penaltyData)
+      body: JSON.stringify(payload),
     })
-    .then(response => response.json())
+    .then(r => r.json())
     .then(data => {
       if (data.success) {
-        addSystemMessage(`Stop & Go penalty queued for team ${offenderTeamNumber}`, 'info');
-        
-        // Reset form after successful queueing
+        addSystemMessage(
+          data.message || `Grid penalty (-${value}) for team ${offenderTeamNumber}`,
+          'info'
+        );
         resetStopAndGoForm();
-        
-        // Refresh queue state and status display
-        loadQueueState();
       } else {
-        throw new Error(data.error || 'Failed to queue penalty');
+        throw new Error(data.error || 'Failed to assign grid penalty');
       }
     })
-    .catch(error => {
-      console.error('Failed to queue penalty:', error);
-      addSystemMessage('Failed to queue penalty: ' + error.message, 'danger');
+    .catch(err => {
+      console.error('Failed to assign grid penalty:', err);
+      addSystemMessage('Failed to assign grid penalty: ' + err.message, 'danger');
     });
+    return;
   }
+
+  // Stop & Go / Self Stop & Go (Main race or Practice) — existing flow.
+  const penaltyData = {
+    round_id: currentRoundId,
+    offender_id: offenderId,
+    victim_id: victimId,
+    championship_penalty_id: selectedPenalty.id,
+    value: value,
+  };
+
+  fetch('/api/queue-penalty/', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-CSRFToken': getCookie('csrftoken')
+    },
+    body: JSON.stringify(penaltyData)
+  })
+  .then(response => response.json())
+  .then(data => {
+    if (data.success) {
+      addSystemMessage(`Stop & Go penalty queued for team ${offenderTeamNumber}`, 'info');
+      resetStopAndGoForm();
+      loadQueueState();
+    } else {
+      throw new Error(data.error || 'Failed to queue penalty');
+    }
+  })
+  .catch(error => {
+    console.error('Failed to queue penalty:', error);
+    addSystemMessage('Failed to queue penalty: ' + error.message, 'danger');
+  });
 }
 
 /**
@@ -1343,7 +1565,7 @@ function handleStopAndGoMessage(data) {
 }
 
 /**
- * Reset Stop & Go form to initial state
+ * Reset Stop & Go / Grid Penalty form to initial state
  */
 function resetStopAndGoForm() {
   const penaltySelect = document.getElementById('penaltySelect');
@@ -1351,31 +1573,39 @@ function resetStopAndGoForm() {
   const victimSelect = document.getElementById('victimSelect');
   const durationInput = document.getElementById('durationInput');
   const stopGoButton = document.getElementById('stopGoButton');
-  
+  const penaltyFields = document.getElementById('penaltyFields');
+
+  const qualifying = isQualifyingActive();
+
   // Reset dropdowns
-  penaltySelect.value = '';
-  offenderSelect.value = '';
-  victimSelect.value = '';
-  
+  if (penaltySelect) penaltySelect.value = '';
+  if (offenderSelect) offenderSelect.value = '';
+  if (victimSelect) victimSelect.value = '';
+
   // Disable form elements
-  offenderSelect.disabled = true;
-  victimSelect.disabled = true;
-  durationInput.disabled = true;
-  
+  if (offenderSelect) offenderSelect.disabled = true;
+  if (victimSelect) victimSelect.disabled = true;
+  if (durationInput) durationInput.disabled = true;
+
+  // Hide offender/victim/duration block until a penalty is selected
+  if (penaltyFields) penaltyFields.style.display = 'none';
+
   // Clear victim options
-  victimSelect.innerHTML = '<option value="">Select victim team...</option>';
-  
-  // Reset duration
-  durationInput.value = '20';
-  
+  if (victimSelect) victimSelect.innerHTML = '<option value="">Select victim team...</option>';
+
+  // Reset duration / positions to mode-appropriate default
+  if (durationInput) durationInput.value = qualifying ? '1' : '20';
+
   // Reset penalty selection
   selectedPenalty = null;
-  
+
   // Reset button to idle state
-  stopGoButton.disabled = true;
-  stopGoButton.style.backgroundColor = '#6c757d';
-  stopGoButton.style.color = '#fff';
-  stopGoButton.textContent = 'Stop & Go';
+  if (stopGoButton) {
+    stopGoButton.disabled = true;
+    stopGoButton.style.backgroundColor = '#6c757d';
+    stopGoButton.style.color = '#fff';
+    stopGoButton.textContent = qualifying ? 'Grid Penalty' : 'Stop & Go';
+  }
 }
 
 /**
@@ -1383,7 +1613,7 @@ function resetStopAndGoForm() {
  */
 function updateFenceButton() {
   const toggleFenceButton = document.getElementById('toggleFenceButton');
-  
+
   if (toggleFenceButton && fenceEnabled !== null) {
     if (fenceEnabled) {
       toggleFenceButton.style.backgroundColor = '#28a745';
@@ -1394,6 +1624,75 @@ function updateFenceButton() {
       toggleFenceButton.style.color = 'black';
       toggleFenceButton.textContent = 'Toggle Fence';
     }
+  }
+}
+
+/**
+ * Update multi-race UI elements (header label, progress badges) from WS data.
+ */
+function updateMultiRaceUI(data) {
+  if (!isLapBased) return;
+
+  const newType = data.active_race_type;
+  const newLabel = data.active_race_label;
+
+  // When the active race changes, mark the previous one as ended
+  if (activeRaceType && activeRaceType !== newType) {
+    const prevBadge = document.querySelector(
+      `#raceProgressIndicator [data-race-type="${activeRaceType}"]`
+    );
+    if (prevBadge) {
+      prevBadge.dataset.raceEnded = 'true';
+    }
+  }
+
+  // Update cached state
+  const prevType = activeRaceType;
+  activeRaceType = newType;
+  activeRaceLabel = newLabel;
+  if (data.start_mode) activeStartMode = data.start_mode;
+
+  // If we crossed the qualifying / non-qualifying boundary, swap the
+  // in-race penalty form between Grid Penalty and Stop & Go.
+  if (typeof applyPenaltyModeFromActiveRace === 'function') {
+    const wasQ = !!(prevType && prevType.startsWith('Q'));
+    const isQ = !!(activeRaceType && activeRaceType.startsWith('Q'));
+    if (wasQ !== isQ || prevType !== activeRaceType) {
+      applyPenaltyModeFromActiveRace();
+    }
+  }
+
+  // Update header label
+  const headerLabel = document.getElementById('raceHeaderLabel');
+  const roundData = document.getElementById('round-data');
+  const roundName = roundData ? roundData.dataset.roundName : '';
+  if (headerLabel) {
+    if (newLabel) {
+      headerLabel.textContent = `${roundName} - ${newLabel}`;
+    } else {
+      headerLabel.textContent = roundName;
+    }
+  }
+
+  // Update progress badges using the data-race-ended attribute for accuracy
+  const badges = document.querySelectorAll('#raceProgressIndicator .badge');
+
+  if (!newType) {
+    // All races done — mark every badge as completed
+    badges.forEach(badge => {
+      badge.dataset.raceEnded = 'true';
+      badge.className = 'badge bg-success';
+    });
+  } else {
+    badges.forEach(badge => {
+      if (badge.dataset.raceType === newType) {
+        badge.className = 'badge bg-primary';
+      } else if (badge.dataset.raceEnded === 'true') {
+        badge.className = 'badge bg-success';
+      } else {
+        badge.className = 'badge bg-secondary';
+      }
+    });
   }
 }
 

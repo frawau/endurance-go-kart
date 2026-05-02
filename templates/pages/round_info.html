@@ -6,8 +6,8 @@
     <h1>Round Information</h1>
 
     <form method="get" id="round-form">
-        <div class="form-group">
-            <label for="round-select">Select Round:</label>
+        <div class="form-group mb-0">
+            <label for="round-select">Round:</label>
             <select class="form-control" id="round-select" name="round_id" onchange="this.form.submit()">
                 {% for championship_name, championship_rounds in rounds_by_championship.items %}
                     <optgroup label="{{ championship_name }}">

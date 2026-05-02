@@ -23,7 +23,15 @@ class DriverForm(forms.ModelForm):
                 attrs={"class": "file-input", "id": "mugshot-upload"}
             ),
             "birthdate": forms.DateInput(attrs={"type": "date"}),
+            "email": forms.EmailInput(attrs={"placeholder": "devnull@example.com"}),
         }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if not self.initial.get("birthdate") and not self.instance.pk:
+            self.initial["birthdate"] = "1875-05-20"
+        if not self.initial.get("email") and not self.instance.pk:
+            self.initial["email"] = "devnull@example.com"
 
 
 class TeamForm(forms.ModelForm):

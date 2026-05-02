@@ -10,11 +10,51 @@
             </a>
             <h1>
                 {% if round %}
-                    {{ round.name }}&nbsp;&nbsp;Remaining Time: {% timer_widget "race-control-countdown" "countdownDisplay" round %}
+                    {% if active_race %}
+                        <span id="raceHeaderLabel">{{ round.name }} - {{ active_race.get_race_type_display }}</span>
+                        &nbsp;&nbsp;Remaining Time: <span id="race-control-countdown" class="timer">--:--:--</span>
+                    {% else %}
+                        {{ round.name }}&nbsp;&nbsp;Remaining Time: <span id="race-control-countdown" class="timer">--:--:--</span>
+                    {% endif %}
                 {% else %}
                     Race Control - No Active Round
                 {% endif %}
             </h1>
+            {% if round %}
+            <script>
+                // Server-anchored countdown init (matches public_leaderboard.html).
+                // Computes remaining from server-supplied epoch + browser Date.now(),
+                // so tab-throttling or sparse WS updates don't accumulate drift.
+                (function() {
+                    const startedEpoch = {{ race_started_epoch|default:"null" }};
+                    const timeLimitSeconds = {{ race_time_limit_seconds }};
+                    const initialPaused = {{ is_paused|yesno:"true,false" }};
+                    const raceStarted = startedEpoch !== null;
+                    const elapsed = raceStarted ? (Date.now() / 1000) - startedEpoch : 0;
+                    const remaining = Math.max(0, timeLimitSeconds - elapsed);
+                    new TimerWidget({
+                        elementId: 'race-control-countdown',
+                        startValue: remaining,
+                        countDirection: 'down',
+                        timerType: 'countdownDisplay',
+                        initialPaused: !raceStarted || initialPaused,
+                        showHours: timeLimitSeconds >= 3600,
+                    });
+                })();
+            </script>
+            {% endif %}
+            {% if race_sequence %}
+            <div id="raceProgressIndicator" class="d-flex justify-content-center gap-2 mt-1">
+                {% for race in race_sequence %}
+                    <span class="badge {% if race == active_race %}bg-primary{% elif race.ended %}bg-success{% else %}bg-secondary{% endif %}"
+                          data-race-type="{{ race.race_type }}"
+                          data-race-ended="{% if race.ended %}true{% else %}false{% endif %}"
+                          id="race-badge-{{ race.race_type }}">
+                        {{ race.get_race_type_display }}
+                    </span>
+                {% endfor %}
+            </div>
+            {% endif %}
         </div>
     </div>
     <div class="row" style="height: 90%;">
@@ -30,42 +70,54 @@
                                 <button id="preRaceCheckButton" class="btn btn-warning btn-lg me-2 mb-2 race-action-btn"
                                         data-action="pre_check"
                                         data-url="{% url 'preracecheck' %}"
-                                        {% if round.ready or round.started or round.ended %}hidden{% endif %}>
+                                        {% if active_race %}
+                                            {% if active_race.ready or active_race.started or active_race.ended %}hidden{% endif %}
+                                        {% else %}
+                                            {% if round.ready or round.started or round.ended %}hidden{% endif %}
+                                        {% endif %}>
                                     <i class="fas fa-tasks me-1"></i> Pre Race Check
                                 </button>
 
                                 <button id="startButton" class="btn btn-success btn-lg me-2 mb-2 race-action-btn"
                                         data-action="start"
                                         data-url="{% url 'race_start' %}"
-                                        {% if not round.ready or round.started or round.ended %}hidden{% endif %}>
-                                    <i class="fas fa-play me-1"></i> Start Race
+                                        {% if active_race %}
+                                            {% if not active_race.ready or active_race.armed or active_race.started or active_race.ended %}hidden{% endif %}
+                                        {% else %}
+                                            {% if not round.ready or round.started or round.ended %}hidden{% endif %}
+                                        {% endif %}>
+                                    <i class="fas fa-play me-1"></i> {% if active_race %}Start {{ active_race.get_race_type_display }}{% else %}Start Race{% endif %}
                                 </button>
 
                                 <button id="pauseButton" class="btn btn-warning btn-lg me-2 mb-2 race-action-btn"
                                         data-action="pause"
                                         data-url="{% url 'racepaused' %}"
-                                        {% if not round.started or round.is_paused or round.ended %}hidden{% endif %}>
-                                    <i class="fas fa-pause me-1"></i> Pause Race
+                                        {% if not active_race or not active_race.started or active_race.ended or is_paused %}hidden{% endif %}>
+                                    <i class="fas fa-pause me-1"></i> Pause
                                 </button>
 
                                 <button id="resumeButton" class="btn btn-info btn-lg me-2 mb-2 race-action-btn"
                                         data-action="resume"
                                         data-url="{% url 'racerestart' %}"
-                                        {% if not round.started or not round.is_paused or round.ended %}hidden{% endif %}>
-                                    <i class="fas fa-play-circle me-1"></i> Resume Race
+                                        {% if not active_race or not active_race.started or active_race.ended or not is_paused %}hidden{% endif %}>
+                                    <i class="fas fa-play-circle me-1"></i> Resume
                                 </button>
 
                                 <button id="endButton" class="btn btn-danger btn-lg me-2 mb-2 race-action-btn"
                                         data-action="end"
                                         data-url="{% url 'endofrace' %}"
-                                        {% if not round.started or round.ended %}hidden{% endif %}>
-                                    <i class="fas fa-stop me-1"></i> End Race
+                                        {% if active_race %}
+                                            {% if not active_race.armed and not active_race.started or active_race.ended %}hidden{% endif %}
+                                        {% else %}
+                                            {% if not round.started or round.ended %}hidden{% endif %}
+                                        {% endif %}>
+                                    <i class="fas fa-stop me-1"></i> {% if active_race %}End {{ active_race.get_race_type_display }}{% else %}End Race{% endif %}
                                 </button>
 
                                 <button id="falseStartButton" class="btn btn-secondary btn-lg me-2 mb-2 race-action-btn"
                                         data-action="false_start"
                                         data-url="{% url 'falsestart' %}"
-                                        hidden>
+                                        {% if not active_race or not active_race.armed or active_race.started or active_race.ended %}hidden{% endif %}>
                                     <i class="fas fa-undo me-1"></i> False Start
                                 </button>
 
@@ -80,7 +132,7 @@
                             {% endif %}
                         </div>
                         <div style="width: 65%;" class="p-2" id="teamsListContainer">
-                            <div class="card h-100" id="emptyTeamsCard" {% if round and round.ready %}style="display: none;"{% endif %}>
+                            <div class="card h-100" id="emptyTeamsCard" {% if active_race and active_race.ready or not active_race and round and round.ready %}style="display: none;"{% endif %}>
                                 <div class="card-header d-flex justify-content-between align-items-center">
                                     <h5 class="mb-0">Teams with No Members</h5>
                                     <button class="btn btn-danger" id="deleteEmptyTeamsBtn">Delete All</button>
@@ -92,14 +144,15 @@
                                     <ul class="list-group" id="emptyTeamsUL"></ul>
                                 </div>
                             </div>
-                            <div class="card h-100" id="teamSelectCard" {% if not round or not round.ready %}style="display: none;"{% endif %}>
+                            <div class="card h-100" id="teamSelectCard" {% if not round or active_race and not active_race.ready or not active_race and not round.ready %}style="display: none;"{% endif %}>
                                 <div class="card-header">
                                     <div class="d-flex justify-content-between align-items-center">
                                         <h5 class="mb-0">Penalties</h5>
                                         <div id="penaltyQueueStatus" class="text-end" style="display: none;">
                                             <div class="text-muted" style="font-size: 1.1rem; font-weight: bold;">
                                                 <span>Serving Team: <span id="servingTeam" style="display: inline-block; width: 3ch; text-align: center;">--</span></span>
-                                                <span style="margin-left: 2rem;"><span id="queueCount">0</span> in Queue</span>
+                                                <span style="margin-left: 1rem;">Laps: <span id="crossingsSinceQueued" style="font-weight: bold;">0</span></span>
+                                                <span style="margin-left: 1rem;"><span id="queueCount">0</span> in Queue</span>
                                             </div>
                                         </div>
                                     </div>
@@ -115,6 +168,8 @@
                                                 <!-- Options will be populated via JavaScript -->
                                             </select>
                                             
+                                            <!-- Offender/Victim/Duration — hidden until a penalty is selected -->
+                                            <div id="penaltyFields" style="display:none">
                                             <!-- Offender Dropdown -->
                                             <label for="offenderSelect" class="form-label">Offender</label>
                                             <select class="form-select mb-2" id="offenderSelect" style="font-size: 1.0rem;" disabled>
@@ -125,16 +180,17 @@
                                                     {% endfor %}
                                                 {% endif %}
                                             </select>
-                                            
+
                                             <!-- Victim Dropdown -->
                                             <label for="victimSelect" class="form-label">Victim</label>
                                             <select class="form-select mb-2" id="victimSelect" style="font-size: 1.0rem;" disabled>
                                                 <option value="">Select victim team...</option>
                                             </select>
-                                            
+
                                             <!-- Duration Input -->
                                             <label for="durationInput" class="form-label">Duration</label>
                                             <input type="number" class="form-control" id="durationInput" value="20" min="1" max="300" style="font-size: 1.0rem;" disabled>
+                                            </div>
                                         </div>
                                         
                                         <!-- Right side - Buttons -->
@@ -175,7 +231,7 @@
                     <div class="w-100 p-2" style="height: 60%;">
                         <div class="row h-100">
                             <!-- System Messages Card -->
-                            <div class="col-md-6 h-100">
+                            <div class="col-md-4 h-100">
                                 <div class="card h-100">
                                     <div class="card-header">
                                         <h5 class="mb-0">System Messages</h5>
@@ -191,8 +247,55 @@
                                     </div>
                                 </div>
                             </div>
+                            <!-- Teams Card -->
+                            <div class="col-md-4 h-100">
+                                <div class="card h-100">
+                                    <div class="card-header">
+                                        <h5 class="mb-0">Teams</h5>
+                                    </div>
+                                    <div class="card-body overflow-auto p-2">
+                                        <table class="table table-sm mb-0" id="teams-retire-table">
+                                            <thead>
+                                                <tr>
+                                                    <th>#</th>
+                                                    <th>Team</th>
+                                                    <th></th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {% if round %}
+                                                    {% for team in round.round_team_set.all %}
+                                                        <tr id="retire-row-{{ team.id }}" class="{% if team.retired %}text-decoration-line-through text-muted{% endif %}">
+                                                            <td>{{ team.team.number }}</td>
+                                                            <td>{{ team.team.team.name }}</td>
+                                                            <td>
+                                                                {% if active_race and not round.uses_legacy_session_model %}
+                                                                <button class="btn btn-sm btn-outline-info swap-transponder-btn me-1"
+                                                                    data-team-id="{{ team.id }}"
+                                                                    data-team-name="{{ team.team.team.name }}"
+                                                                    data-team-number="{{ team.team.number }}"
+                                                                    title="Swap transponder">
+                                                                    <i class="fas fa-exchange-alt"></i>
+                                                                </button>
+                                                                {% endif %}
+                                                                <button class="btn btn-sm retire-toggle-btn {% if team.retired %}btn-success{% else %}btn-outline-danger{% endif %}"
+                                                                    data-team-id="{{ team.id }}"
+                                                                    data-retired="{{ team.retired|yesno:'true,false' }}">
+                                                                    {% if team.retired %}Unretire{% else %}Retire{% endif %}
+                                                                </button>
+                                                            </td>
+                                                        </tr>
+                                                    {% empty %}
+                                                        <tr><td colspan="3">No teams</td></tr>
+                                                    {% endfor %}
+                                                {% endif %}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
                             <!-- Pending Drivers Card -->
-                            <div class="col-md-6 h-100">
+                            <div class="col-md-4 h-100">
                                 <div class="card h-100">
                                     <div class="card-header">
                                         <h5 class="mb-0">Pending Drivers</h5>
@@ -287,8 +390,8 @@
                     <div class="card-header">
                         <h5 class="mb-0">Pit Lane {{ forloop.counter }}</h5>
                     </div>
-                    <div class="card-body">
-                        <div class="text-center text-muted">Loading...</div>
+                    <div class="card-body p-0 d-flex flex-column">
+                        <div class="text-center text-muted align-self-center mt-auto mb-auto">Loading...</div>
                     </div>
                 </div>
             {% endfor %}
@@ -301,20 +404,52 @@ data-started="{{ round.started|yesno:'true,false' }}"
 data-ended="{{ round.ended|yesno:'true,false' }}"
 data-ready="{{ round.is_ready|yesno:'true,false' }}"
 data-lanes="{{ lanes }}"
-data-hmac-secret="{{ settings.STOPANDGO_HMAC_SECRET }}">
+data-hmac-secret="{{ settings.STOPANDGO_HMAC_SECRET }}"
+data-lap-based="{% if round and not round.uses_legacy_session_model %}true{% else %}false{% endif %}"
+data-active-race-type="{% if active_race %}{{ active_race.race_type }}{% endif %}"
+data-active-race-label="{% if active_race %}{{ active_race.get_race_type_display }}{% endif %}"
+data-start-mode="{% if active_race %}{{ active_race.start_mode }}{% endif %}"
+data-round-name="{% if round %}{{ round.name }}{% endif %}">
 </div>
+
+<!-- Swap Transponder Modal -->
+{% if active_race and not round.uses_legacy_session_model %}
+<div class="modal fade" id="swapTransponderModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content bg-dark text-light">
+            <div class="modal-header border-secondary">
+                <h5 class="modal-title">Swap Transponder — <span id="swap-team-label"></span></h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label">Current Transponder:</label>
+                    <select id="swap-current-select" class="form-select bg-secondary text-light border-secondary">
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Replace With:</label>
+                    <select id="swap-new-select" class="form-select bg-secondary text-light border-secondary">
+                        <option value="">Loading...</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer border-secondary">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-info" id="swap-confirm-btn">
+                    <i class="fas fa-exchange-alt me-1"></i>Swap
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
 
 {% endblock content %}
 
-<!-- Debug: Add HMAC secret directly to script -->
-<script>
-  window.STOPANDGO_HMAC_SECRET = '{{ settings.STOPANDGO_HMAC_SECRET }}';
-  console.log('HMAC secret set via script tag:', window.STOPANDGO_HMAC_SECRET ? 'YES' : 'NO');
-</script>
-
 {% block extra_js %}
 {# Load the new JS file for button handling #}
-<script src="{% static 'js/racecontrol.js' %}"></script>
+<script src="{% static 'js/racecontrol.js' %}?v=14"></script>
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
@@ -342,30 +477,90 @@ document.addEventListener('DOMContentLoaded', function() {
                 try {
                     const data = JSON.parse(e.data);
                     console.log("Round WS received:", data);
+
+                    // Handle grid violation alerts
+                    if (data.type === 'grid_violation') {
+                        addSystemMessage(
+                            `Grid order violation: Team #${data.team_number} (${data.team_name}) ` +
+                            `crossed in position ${data.actual_position}, ` +
+                            `expected grid position ${data.expected_position}`,
+                            'warning'
+                        );
+                        return;
+                    }
+
+                    // race_finished: timing system signals the race ended automatically
+                    if (data.type === 'race_finished') {
+                        addSystemMessage(`Race finished automatically.`, 'info');
+                        return;
+                    }
+
+                    // Handle lap updates — never affect button/badge state
+                    if (data.type === 'race_lap_update') {
+                        if (data.is_suspicious && data.crossing_id) {
+                            showSuspiciousLapAlert(data.team_number, data.lap_number, data.crossing_id, data.suggested_split, data.max_split, data.lap_time);
+                        }
+                        // Sync countdown timer from server on every crossing
+                        if (data.remaining_seconds !== undefined && data.remaining_seconds !== null) {
+                            timerRegistry.countdownTimers.forEach(timer => {
+                                timer.updateRemainingTime(data.remaining_seconds);
+                            });
+                        }
+                        return;
+                    }
+
                     if (!data.session_update) {
                         // --- Timer Update ---
                         const isPaused = data.is_paused;
+                        const isStarted = data.started === true;
+
+                        // Timer should only count down when the race has actually started
+                        // and is not paused. Between races (started=false) keep it frozen.
+                        const timerEffectivelyPaused = !isStarted || isPaused;
 
                         // Handle countdown timer updates
                         if (data.remaining_seconds !== undefined && data.remaining_seconds !== null) {
                             timerRegistry.countdownTimers.forEach(timer => {
                                 timer.updateRemainingTime(data.remaining_seconds);
-                                timer.updatePauseState(isPaused);
+                                timer.updatePauseState(timerEffectivelyPaused);
                             });
                         }
 
+                        // --- Update multi-race UI if applicable ---
+                        if (isLapBased && typeof updateMultiRaceUI === 'function') {
+                            updateMultiRaceUI(data);
+                        }
+
                         // --- Determine State from WS Data ---
-                        const isStarted = data.started === true;
                         const isEnded = data.ended === true;
                         const isReady = data.ready === true;
 
                         let currentState = 'initial';
-                        if (isEnded) currentState = 'ended';
-                        else if (isStarted && isPaused) currentState = 'paused';
-                        else if (isStarted && !isPaused) currentState = 'running';
-                        else if (isReady && !isStarted) currentState = 'ready';
+                        if (isEnded && data.has_more_races) {
+                            // Race ended but more races to go — update badges and reset UI
+                            currentState = 'initial';
+                            if (isLapBased && typeof updateMultiRaceUI === 'function') {
+                                updateMultiRaceUI(data);
+                            }
+                            addSystemMessage(
+                                `${activeRaceLabel || 'Race'} ended. Advancing to ${data.active_race_label || 'next race'}...`,
+                                'info'
+                            );
+                        } else if (isEnded) {
+                            currentState = 'ended';
+                        } else if (isStarted && isPaused) {
+                            currentState = 'paused';
+                        } else if (isStarted && !isPaused) {
+                            currentState = 'running';
+                        } else if (isReady && !isStarted && data.armed) {
+                            currentState = 'armed';
+                        } else if (isReady && !isStarted) {
+                            currentState = 'ready';
+                        }
 
-                        updateButtonVisibility(currentState);
+                        if (!buttonActionInProgress) {
+                            updateButtonVisibility(currentState);
+                        }
                     }
                 } catch (err) {
                     console.error("Error processing round WS message:", err, e.data);
@@ -428,17 +623,16 @@ document.addEventListener('DOMContentLoaded', function() {
                         const driverId = data.driver_id;
                         const status = data.driver_status;
                         const completedSessions = data.completed_sessions;
+                        const teamNumber = data.team_number ? data.team_number.toString() : null;
 
-                        // Update the next change number in the pending drivers table
-                        const rows = document.querySelectorAll('.pending-row');
-                        rows.forEach(row => {
-                            if (row.getAttribute('data-driver-id') === driverId.toString()) {
-                                const nextChangeCell = row.querySelector('.next-change-number');
-                                if (nextChangeCell) {
-                                    nextChangeCell.textContent = completedSessions + 1;
-                                }
-                            }
-                        });
+                        function updateTeamRows(tNum, completed) {
+                            if (!tNum) return;
+                            const teamRows = document.querySelectorAll(`[data-team-number="${tNum}"].pending-row`);
+                            teamRows.forEach((row, idx) => {
+                                const cell = row.querySelector('.next-change-number');
+                                if (cell) cell.textContent = completed + idx + 1;
+                            });
+                        }
 
                         if (status === "register") {
                             // Add new row if it doesn't exist
@@ -458,14 +652,16 @@ document.addEventListener('DOMContentLoaded', function() {
                                         newRow.id = rowId;
                                         newRow.className = 'pending-row';
                                         newRow.setAttribute('data-driver-id', driverId);
+                                        newRow.setAttribute('data-team-number', driverInfo.team_number);
 
                                         newRow.innerHTML = `
                                             <td>${driverInfo.team_number}</td>
                                             <td>${driverInfo.nickname}</td>
-                                            <td class="next-change-number">${completedSessions + 1}</td>
+                                            <td class="next-change-number">…</td>
                                         `;
 
                                         tbody.appendChild(newRow);
+                                        updateTeamRows(driverInfo.team_number.toString(), completedSessions);
                                     })
                                     .catch(error => {
                                         console.error('Error fetching driver info:', error);
@@ -488,6 +684,10 @@ document.addEventListener('DOMContentLoaded', function() {
                                 noSessionsRow.innerHTML = '<td colspan="3">No waiting driver.</td>';
                                 tbody.appendChild(noSessionsRow);
                             }
+                            updateTeamRows(teamNumber, completedSessions);
+                        } else {
+                            // Driver ended or other update — renumber same-team pending rows
+                            updateTeamRows(teamNumber, completedSessions);
                         }
                     }
                 } catch (err) {
@@ -512,17 +712,11 @@ document.addEventListener('DOMContentLoaded', function() {
                         console.log(`Pit Lane ${i} WS received:`, data);
                         // Handle pit lane updates
                         const laneElement = document.getElementById(`lane-${i}`);
-                        if (laneElement && (data.type === 'rclane.update' || data.type === 'lane.update')) {
-                            // Fix CSS syntax errors in the HTML
-                            const fixedHtml = data.lane_html
-                                .replace('style="flex;"', 'style="flex: 1;"')
-                                .replace('left-padding:', 'padding-left:')
-                                .replace('/div>', '</div>'); // Fix malformed closing div tags
-                            
-                            // Update lane card-body content with the fixed HTML
+                        if (laneElement && data.type === 'rclane.update') {
+                            // Update lane card-body content
                             const cardBody = laneElement.querySelector('.card-body');
                             if (cardBody) {
-                                cardBody.innerHTML = fixedHtml;
+                                cardBody.innerHTML = data.lane_html;
                             } else {
                                 console.warn(`Card body not found for lane ${i}`);
                             }
@@ -747,6 +941,149 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
+    // Retire/Unretire team toggle
+    document.querySelectorAll('.retire-toggle-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            const teamId = this.dataset.teamId;
+            const button = this;
+            button.disabled = true;
+
+            fetch('/api/retire-team/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCookie('csrftoken')
+                },
+                body: JSON.stringify({ team_id: parseInt(teamId) })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    const row = document.getElementById(`retire-row-${teamId}`);
+                    if (data.retired) {
+                        row.classList.add('text-decoration-line-through', 'text-muted');
+                        button.textContent = 'Unretire';
+                        button.classList.remove('btn-outline-danger');
+                        button.classList.add('btn-success');
+                        button.dataset.retired = 'true';
+                    } else {
+                        row.classList.remove('text-decoration-line-through', 'text-muted');
+                        button.textContent = 'Retire';
+                        button.classList.remove('btn-success');
+                        button.classList.add('btn-outline-danger');
+                        button.dataset.retired = 'false';
+                    }
+                    const action = data.retired ? 'Retired' : 'Unretired';
+                    addSystemMessage(`${action} team #${data.team_number} ${data.team_name}`, 'info');
+                } else {
+                    throw new Error(data.error || 'Failed');
+                }
+            })
+            .catch(error => {
+                addSystemMessage('Error: ' + error.message, 'danger');
+            })
+            .finally(() => {
+                button.disabled = false;
+            });
+        });
+    });
+
+    // ── Swap Transponder ──
+    {% if active_race and not round.uses_legacy_session_model %}
+    const swapRaceId = {{ active_race.id }};
+    const swapModal = new bootstrap.Modal(document.getElementById('swapTransponderModal'));
+    const swapCurrentSel = document.getElementById('swap-current-select');
+    const swapNewSel = document.getElementById('swap-new-select');
+    const swapTeamLabel = document.getElementById('swap-team-label');
+    const swapConfirmBtn = document.getElementById('swap-confirm-btn');
+
+    document.querySelectorAll('.swap-transponder-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            const teamId = this.dataset.teamId;
+            const teamName = this.dataset.teamName;
+            const teamNumber = this.dataset.teamNumber;
+            swapTeamLabel.textContent = `#${teamNumber} ${teamName}`;
+            swapCurrentSel.innerHTML = '<option value="">Loading...</option>';
+            swapNewSel.innerHTML = '<option value="">Loading...</option>';
+            swapConfirmBtn.disabled = true;
+
+            // Fetch team's current assignments and available transponders in parallel
+            Promise.all([
+                fetch(`/api/race/${swapRaceId}/transponder-assignments/`).then(r => r.json()),
+                fetch(`/api/race/${swapRaceId}/available-transponders/`).then(r => r.json())
+            ]).then(([assignData, availData]) => {
+                // Populate current transponder dropdown (only this team's)
+                const teamAssignments = assignData.assignments.filter(a => a.team_id == teamId);
+                swapCurrentSel.innerHTML = '';
+                if (teamAssignments.length === 0) {
+                    swapCurrentSel.innerHTML = '<option value="">No transponder assigned</option>';
+                } else {
+                    teamAssignments.forEach(a => {
+                        const opt = document.createElement('option');
+                        opt.value = a.id;
+                        opt.textContent = a.transponder_id;
+                        swapCurrentSel.appendChild(opt);
+                    });
+                }
+
+                // Populate available transponders dropdown
+                swapNewSel.innerHTML = '';
+                if (availData.transponders.length === 0) {
+                    swapNewSel.innerHTML = '<option value="">No transponders available</option>';
+                } else {
+                    availData.transponders.forEach(t => {
+                        const opt = document.createElement('option');
+                        opt.value = t.transponder_id;
+                        opt.textContent = t.transponder_id + (t.description ? ` (${t.description})` : '');
+                        swapNewSel.appendChild(opt);
+                    });
+                }
+
+                swapConfirmBtn.disabled = (teamAssignments.length === 0 || availData.transponders.length === 0);
+            });
+
+            swapModal.show();
+        });
+    });
+
+    swapConfirmBtn.addEventListener('click', function() {
+        const assignmentId = swapCurrentSel.value;
+        const newTransponderId = swapNewSel.value;
+        if (!assignmentId || !newTransponderId) return;
+
+        this.disabled = true;
+        fetch(`/api/transponder-assignment/${assignmentId}/replace/`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCookie('csrftoken')
+            },
+            body: JSON.stringify({ transponder_id: newTransponderId })
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                addSystemMessage(data.message, 'info');
+                swapModal.hide();
+            } else {
+                addSystemMessage('Swap failed: ' + (data.error || 'Unknown error'), 'danger');
+            }
+        })
+        .catch(err => {
+            addSystemMessage('Swap error: ' + err.message, 'danger');
+        })
+        .finally(() => {
+            this.disabled = false;
+        });
+    });
+    {% endif %}
+
+    // Resync timer when tab regains focus
+    document.addEventListener('visibilitychange', function() {
+        if (!document.hidden) {
+            roundSocket.send(JSON.stringify({type: 'resync'}));
+        }
+    });
 });
 </script>
 {% endblock extra_js %}

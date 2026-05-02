@@ -1,0 +1,152 @@
+#!/usr/bin/env python3
+"""
+Serial port proxy/sniffer for protocol analysis.
+
+Forwards data bidirectionally between two serial ports and logs all
+traffic to a file with timestamps, direction, hex and ASCII representation.
+
+Requires: pyserial-asyncio  (pip install pyserial-asyncio)
+
+Usage:
+    ./serial_proxy /dev/ttyUSB0 /dev/ttyUSB1
+    ./serial_proxy /dev/ttyUSB0 /dev/ttyUSB1 -b 19200 -o capture.log
+"""
+
+import argparse
+import asyncio
+import datetime
+import sys
+
+
+# ── Formatting ────────────────────────────────────────────────────────────────
+
+def _format_entry(direction: str, data: bytes) -> str:
+    now = datetime.datetime.now().isoformat(timespec="milliseconds")
+    hex_str  = " ".join(f"{b:02x}" for b in data)
+    ascii_str = "".join(chr(b) if 0x20 <= b < 0x7F else "." for b in data)
+    return f"{now}  {direction}  [{len(data):4d}]  {hex_str:<48}  |{ascii_str}|\n"
+
+
+# ── Relay coroutine ───────────────────────────────────────────────────────────
+
+async def relay(
+    direction: str,
+    reader: asyncio.StreamReader,
+    writer: asyncio.StreamWriter,
+    log_file,
+    stop_event: asyncio.Event,
+) -> None:
+    try:
+        while not stop_event.is_set():
+            try:
+                data = await asyncio.wait_for(reader.read(4096), timeout=0.1)
+            except asyncio.TimeoutError:
+                continue
+
+            if not data:
+                # Port closed
+                break
+
+            line = _format_entry(direction, data)
+            sys.stdout.write(line)
+            sys.stdout.flush()
+            log_file.write(line)
+            log_file.flush()
+
+            writer.write(data)
+            await writer.drain()
+
+    except asyncio.CancelledError:
+        pass
+    except Exception as exc:
+        print(f"\n[{direction}] Error: {exc}", file=sys.stderr)
+    finally:
+        stop_event.set()
+
+
+# ── Main ──────────────────────────────────────────────────────────────────────
+
+async def run(port_a: str, port_b: str, baudrate: int, output: str) -> None:
+    try:
+        import serial_asyncio
+    except ImportError:
+        sys.exit("pyserial-asyncio is required: pip install pyserial-asyncio")
+
+    print(f"Opening  {port_a}  <->  {port_b}  @ {baudrate} baud")
+    print(f"Logging to {output}")
+    print("Press Ctrl+C to stop.\n")
+
+    try:
+        reader_a, writer_a = await serial_asyncio.open_serial_connection(
+            url=port_a, baudrate=baudrate
+        )
+        reader_b, writer_b = await serial_asyncio.open_serial_connection(
+            url=port_b, baudrate=baudrate
+        )
+    except Exception as exc:
+        sys.exit(f"Failed to open serial ports: {exc}")
+
+    stop_event = asyncio.Event()
+
+    header = (
+        f"# serial_proxy  {port_a} <-> {port_b}  baudrate={baudrate}\n"
+        f"# started {datetime.datetime.now().isoformat()}\n"
+        f"# columns: timestamp  direction  [bytes]  hex  |ascii|\n\n"
+    )
+
+    with open(output, "w") as log_file:
+        log_file.write(header)
+        sys.stdout.write(header)
+
+        a_label = f"{port_a} -> {port_b}"
+        b_label = f"{port_b} -> {port_a}"
+
+        tasks = [
+            asyncio.create_task(relay(a_label, reader_a, writer_b, log_file, stop_event)),
+            asyncio.create_task(relay(b_label, reader_b, writer_a, log_file, stop_event)),
+        ]
+
+        try:
+            await asyncio.gather(*tasks)
+        except asyncio.CancelledError:
+            pass
+        finally:
+            for t in tasks:
+                t.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            writer_a.close()
+            writer_b.close()
+            footer = f"\n# stopped {datetime.datetime.now().isoformat()}\n"
+            log_file.write(footer)
+            sys.stdout.write(footer)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Bidirectional serial port proxy/sniffer for protocol analysis."
+    )
+    parser.add_argument("port_a", help="First serial port  (e.g. /dev/ttyUSB0)")
+    parser.add_argument("port_b", help="Second serial port (e.g. /dev/ttyUSB1)")
+    parser.add_argument(
+        "-b", "--baudrate",
+        type=int,
+        default=9600,
+        metavar="RATE",
+        help="Baud rate (default: 9600)",
+    )
+    parser.add_argument(
+        "-o", "--output",
+        default="serial_capture.log",
+        metavar="FILE",
+        help="Output log file (default: serial_capture.log)",
+    )
+    args = parser.parse_args()
+
+    try:
+        asyncio.run(run(args.port_a, args.port_b, args.baudrate, args.output))
+    except KeyboardInterrupt:
+        print("\nStopped.")
+
+
+if __name__ == "__main__":
+    main()

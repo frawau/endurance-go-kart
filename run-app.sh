@@ -24,6 +24,12 @@ except Exception as e:
 done
 echo "PostgreSQL started"
 
+# Sync freshly-built static files from the image into the persistent volume.
+# The static_volume mounts at /static and shadows whatever the image has there,
+# so without this step code changes to JS/CSS would never be served.
+echo "Syncing static files from image..."
+cp -rf /static_baked/. /static/
+
 # Always run collectstatic (safe to run multiple times)
 echo "Collecting static files..."
 python manage.py collectstatic --no-input
@@ -41,16 +47,23 @@ except Exception as e:
 
 if [ "$PENALTY_EXISTS" = "MISSING" ]; then
     echo "First run detected - running initial setup..."
-    python manage.py makemigrations
+    python manage.py makemigrations race
     python manage.py migrate
-    python manage.py setup_essential_data
     python manage.py createsuperuser_with_password --username ${DJANGO_SUPERUSER_USERNAME} --password ${DJANGO_SUPERUSER_PASSWORD}
     echo "First run setup complete"
 else
     echo "Database already initialized - checking for new migrations..."
-    python manage.py makemigrations
+    python manage.py makemigrations race
     python manage.py migrate
+    # sync_race_schema adds columns/tables that makemigrations+migrate miss
+    # because Django skips 0001_initial when it is already recorded as applied.
+    python manage.py sync_race_schema
 fi
+
+# setup_essential_data is idempotent — always run it so newly added
+# Config / MandatoryPenalty entries (e.g. time_in_lieu) get seeded on
+# rebuilds of existing deployments without touching previous data.
+python manage.py setup_essential_data
 
 # Start the application
 echo "Starting Gunicorn..."

@@ -4,10 +4,13 @@ from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 from .models import (
     ChangeLane,
+    Config,
     round_pause,
     team_member,
     round_team,
     Round,
+    Race,
+    RaceTransponderAssignment,
     Session,
     PenaltyQueue,
 )
@@ -17,6 +20,7 @@ from django.db.models import Count
 # Custom signal for race end requests
 # Arguments: round_id (int)
 race_end_requested = Signal()
+
 
 # Function to update all connected clients
 def update_empty_teams(round_id):
@@ -113,54 +117,140 @@ def change_lane_deleted(sender, instance, **kwargs):
     pass
 
 
+def _build_round_update_payload(cround):
+    """Build the common payload dict for round/race/pause updates."""
+    active = cround.active_race  # None for legacy rounds
+
+    # is_paused: check actual RoundPause records, not round.started
+    # (round.started is never set for multi-race rounds, making is_paused always True)
+    is_paused = cround.round_pause_set.filter(end__isnull=True).exists()
+
+    if active:
+        remaining = max(
+            0,
+            round(
+                (active.duration - active.time_elapsed).total_seconds()
+                if active.started
+                else active.duration.total_seconds()
+            ),
+        )
+        started = active.started is not None
+        ready = active.ready
+        ended = False  # active_race is always unfinished
+        # armed: FIRST_CROSSING mode, start button pressed, waiting for first crossing
+        armed = (
+            active.armed
+            and active.started is None
+            and active.start_mode == "FIRST_CROSSING"
+        )
+        start_mode = active.start_mode
+    else:
+        # Legacy round or all races finished
+        if not cround.uses_legacy_session_model and cround.ended:
+            # All races done
+            remaining = 0
+            started = True
+            ready = True
+            ended = True
+        else:
+            # Legacy path
+            remaining = round(
+                (cround.duration - cround.time_elapsed).total_seconds()
+                if cround.started
+                else cround.duration.total_seconds()
+            )
+            started = cround.started is not None
+            ready = cround.ready
+            ended = cround.ended is not None
+
+    return {
+        "is paused": is_paused,
+        "remaining seconds": remaining,
+        "started": started,
+        "ready": ready,
+        "ended": ended,
+        "armed": armed if active else False,
+        "start_mode": start_mode if active else None,
+        "active_race_type": active.race_type if active else None,
+        "active_race_label": active.get_race_type_display() if active else None,
+        "has_more_races": active is not None,
+    }
+
+
 @receiver(post_save, sender=round_pause)
 def handle_pause_change(sender, instance, **kwargs):
     cround = instance.round
-    is_paused = cround.is_paused
-    is_ready = cround.ready
-    started = cround.started != None
-    ended = cround.ended != None
-    remaining = round((cround.duration - cround.time_elapsed).total_seconds())
+    payload = _build_round_update_payload(cround)
+    payload["type"] = "pause_update"
 
     channel_layer = get_channel_layer()
-    async_to_sync(channel_layer.group_send)(
-        f"round_{cround.id}",
-        {
-            "type": "pause_update",
-            "is paused": is_paused,
-            "remaining seconds": remaining,
-            "started": started,
-            "ready": is_ready,
-            "ended": ended,
-        },
-    )
+    async_to_sync(channel_layer.group_send)(f"round_{cround.id}", payload)
 
 
 @receiver(post_save, sender=Round)
 def handle_round_change(sender, instance, **kwargs):
     """Handle round state changes (started, ended) for timer updates"""
-    is_paused = instance.is_paused
-    is_ready = instance.ready
-    started = instance.started != None
-    ended = instance.ended != None
-    remaining = round(
-        (instance.duration - instance.time_elapsed).total_seconds()
-        if instance.started
-        else instance.duration.total_seconds()
-    )
+    payload = _build_round_update_payload(instance)
+    payload["type"] = "round_update"
 
     channel_layer = get_channel_layer()
-    async_to_sync(channel_layer.group_send)(
-        f"round_{instance.id}",
-        {
-            "type": "round_update",
-            "is paused": is_paused,
-            "remaining seconds": remaining,
-            "started": started,
-            "ready": is_ready,
-            "ended": ended,
-        },
-    )
+    async_to_sync(channel_layer.group_send)(f"round_{instance.id}", payload)
+
+
+@receiver(post_save, sender=Race)
+def handle_race_change(sender, instance, **kwargs):
+    """Handle race state changes for multi-race rounds."""
+    cround = instance.round
+    payload = _build_round_update_payload(cround)
+    payload["type"] = "round_update"
+
+    # When pre-race check fires for a new race, flag it so displays can reset
+    if instance.ready and instance.started is None and instance.ended is None:
+        payload["race_ready"] = True
+
+    channel_layer = get_channel_layer()
+    async_to_sync(channel_layer.group_send)(f"round_{cround.id}", payload)
+
+    if instance.ready and instance.started is None and instance.ended is None:
+        # Tell the previous race's leaderboard to redirect here
+        prev_ended = (
+            Race.objects.filter(
+                round=cround,
+                sequence_number__lt=instance.sequence_number,
+                ended__isnull=False,
+            )
+            .order_by("-sequence_number")
+            .first()
+        )
+        if prev_ended:
+            from django.urls import reverse
+
+            next_url = reverse("public_leaderboard")
+            async_to_sync(channel_layer.group_send)(
+                f"leaderboard_{prev_ended.id}",
+                {"type": "race_ended", "next_race_url": next_url},
+            )
+
+    # When a race ends, push final standings to its leaderboard so end-flags
+    # appear immediately (standings are otherwise only pushed on lap crossings).
+    update_fields = kwargs.get("update_fields")
+    if instance.ended is not None and (
+        update_fields is None or "ended" in update_fields
+    ):
+        async_to_sync(channel_layer.group_send)(
+            f"leaderboard_{instance.id}",
+            {"type": "race_standings_refresh"},
+        )
+
+    # When a race ends, carry over its transponder assignments to the next race
+    # so the director only needs to review/edit and click "Lock all assignments"
+    if instance.ended is not None:
+        next_race = Race.objects.filter(depends_on_race=instance).first()
+        if (
+            next_race
+            and not RaceTransponderAssignment.objects.filter(race=next_race).exists()
+        ):
+            next_race.clone_transponder_assignments_from(instance)
 
 
 @receiver(post_save, sender=Session)
@@ -179,11 +269,15 @@ def handle_session_change(sender, instance, **kwargs):
     # Get the round_team for this driver
     round_team = driver.team
 
-    # Count completed sessions for this team
+    # Count completed sessions for this team in the current race only
     if round_instance.started:
-        completed_sessions_count = Session.objects.filter(
-            driver__team=round_team, end__isnull=False
-        ).count()
+        race = instance.race or round_instance.active_race
+        if race:
+            completed_sessions_count = Session.objects.filter(
+                driver__team=round_team, race=race, end__isnull=False
+            ).count()
+        else:
+            completed_sessions_count = 0
     else:
         completed_sessions_count = -1
 
@@ -198,8 +292,23 @@ def handle_session_change(sender, instance, **kwargs):
             "driver id": driver.id,
             "driver status": dstatus,
             "completed sessions": completed_sessions_count,
+            "team number": round_team.team.number,
         },
     )
+
+
+def reset_next_penalty_timestamp(round_id):
+    """Reset the next-in-queue penalty's timestamp to now, so the crossing
+    count starts fresh when a new team reaches the top of the queue."""
+    import datetime as dt
+
+    next_penalty = PenaltyQueue.get_next_penalty(round_id)
+    if next_penalty:
+        next_penalty.timestamp = dt.datetime.now()
+        # Use update to avoid triggering post_save signal loop
+        PenaltyQueue.objects.filter(pk=next_penalty.pk).update(
+            timestamp=next_penalty.timestamp
+        )
 
 
 def send_penalty_queue_update(round_id):
@@ -212,10 +321,28 @@ def send_penalty_queue_update(round_id):
     # Count total penalties in queue for this round
     queue_count = PenaltyQueue.objects.filter(round_penalty__round_id=round_id).count()
 
-    # Get serving team number if there's an active penalty
+    # Get serving team number and crossings since queued
     serving_team = None
+    crossings_since_queued = 0
     if next_penalty and next_penalty.round_penalty.offender:
         serving_team = next_penalty.round_penalty.offender.team.number
+        team = next_penalty.round_penalty.offender
+        from .models import LapCrossing, Race
+
+        active_race = (
+            Race.objects.filter(
+                round_id=round_id, started__isnull=False, ended__isnull=True
+            )
+            .order_by("sequence_number")
+            .first()
+        )
+        if active_race:
+            crossings_since_queued = LapCrossing.objects.filter(
+                race=active_race,
+                team=team,
+                is_valid=True,
+                crossing_time__gte=next_penalty.timestamp,
+            ).count()
 
     # Send update to stopandgo channel
     async_to_sync(channel_layer.group_send)(
@@ -224,6 +351,7 @@ def send_penalty_queue_update(round_id):
             "type": "penalty_queue_update",
             "serving_team": serving_team,
             "queue_count": queue_count,
+            "crossings_since_queued": crossings_since_queued,
             "round_id": round_id,
         },
     )
@@ -241,12 +369,16 @@ def handle_session_delete(sender, instance, **kwargs):
     round_instance = instance.round
     driver = instance.driver
     dstatus = "reset"
-    # Count completed sessions for this team
+    # Count completed sessions for this team in the current race only
     if round_instance.started:
         try:
-            completed_sessions_count = Session.objects.filter(
-                driver__team=driver.team, end__isnull=False
-            ).count()
+            race = instance.race or round_instance.active_race
+            if race:
+                completed_sessions_count = Session.objects.filter(
+                    driver__team=driver.team, race=race, end__isnull=False
+                ).count()
+            else:
+                completed_sessions_count = 0
         except:
             return
     else:
@@ -262,5 +394,12 @@ def handle_session_delete(sender, instance, **kwargs):
             "driver id": driver.id,
             "driver status": dstatus,
             "completed sessions": completed_sessions_count,
+            "team number": driver.team.team.number,
         },
     )
+
+
+@receiver([post_save, post_delete], sender=Config)
+def config_changed(sender, instance, **kwargs):
+    """Clear Config cache when any config entry is modified."""
+    Config.clear_cache()

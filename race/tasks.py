@@ -4,12 +4,55 @@ import asyncio as aio
 import datetime as dt
 from django.db.models import Q
 from asgiref.sync import sync_to_async
-from .signals import race_end_requested
+from django.template.loader import render_to_string
+from channels.layers import get_channel_layer
 
 
 class RaceTasks:
 
     _lock = aio.Semaphore(1)
+
+    @classmethod
+    async def _set_lane_open(cls, alane, open_value):
+        """Update ChangeLane.open and send WS lane/rclane notifications.
+
+        Bypasses the post_save signal to avoid async_to_sync inside aio.run().
+        Call _send_changedriver_update() after processing all lanes in a batch.
+        """
+        alane.open = open_value
+        await sync_to_async(
+            lambda: alane.__class__.objects.filter(pk=alane.pk).update(open=open_value)
+        )()
+        channel_layer = get_channel_layer()
+        lane_html = await sync_to_async(render_to_string)(
+            "layout/changelane_detail.html", {"change_lane": alane}
+        )
+        await channel_layer.group_send(
+            f"lane_{alane.lane}", {"type": "lane.update", "lane_html": lane_html}
+        )
+        lane_html = await sync_to_async(render_to_string)(
+            "layout/changelane_small_detail.html", {"change_lane": alane}
+        )
+        await channel_layer.group_send(
+            f"lane_{alane.lane}", {"type": "rclane.update", "lane_html": lane_html}
+        )
+
+    @classmethod
+    async def _send_changedriver_update(cls):
+        """Broadcast the changedriver panel with all currently-open lanes."""
+        from .models import ChangeLane
+
+        channel_layer = get_channel_layer()
+        open_lanes = await sync_to_async(list)(
+            ChangeLane.objects.filter(open=True).order_by("lane")
+        )
+        driverc_html = await sync_to_async(render_to_string)(
+            "layout/changedriver_detail.html", {"change_lanes": open_lanes}
+        )
+        await channel_layer.group_send(
+            "changedriver",
+            {"type": "changedriver.update", "driverc_html": driverc_html},
+        )
 
     @classmethod
     async def race_events(cls):
@@ -26,27 +69,54 @@ class RaceTasks:
                 if not cround:
                     return
                 if not cround.ready:
-                    # nothing to do
                     return
-
                 if not cround.started:
-                    # Nothing to do
                     return
-
                 if cround.ended:
-                    # Nothing to do
                     return
 
-                elapsed = await cround.async_time_elapsed()
+                from .models import Race
+
+                active_race = (
+                    await Race.objects.filter(
+                        round=cround, started__isnull=False, ended__isnull=True
+                    )
+                    .order_by("sequence_number")
+                    .afirst()
+                )
+
+                # Qualifying (non-MAIN) race: open or close based on setting.
+                if active_race and active_race.race_type != "MAIN":
+                    if cround.allow_quali_changes:
+                        change_lanes = await sync_to_async(list)(
+                            ChangeLane.objects.filter(round=cround, open=False)
+                        )
+                        for alane in change_lanes:
+                            await cls._set_lane_open(alane, True)
+                        if change_lanes:
+                            await cls._send_changedriver_update()
+                    else:
+                        change_lanes = await sync_to_async(list)(
+                            ChangeLane.objects.filter(round=cround, open=True)
+                        )
+                        for alane in change_lanes:
+                            await cls._set_lane_open(alane, False)
+                        if change_lanes:
+                            await cls._send_changedriver_update()
+                    return
+
+                # pit_elapsed / pit_duration on Round handle the multi-race case:
+                # for a MAIN race they measure from Race.started, not Round.started.
+                elapsed = await cround.async_pit_elapsed()
+                race_duration = await sync_to_async(lambda: cround.pit_duration)()
+
                 if elapsed < cround.pitlane_open_after:
                     # Do we wait for it?
-                    if (cround.pitlane_open_after) - elapsed <= dt.timedelta(
-                        seconds=65
-                    ):
+                    if cround.pitlane_open_after - elapsed <= dt.timedelta(seconds=65):
                         dowait = (cround.pitlane_open_after - elapsed).total_seconds()
                         while int(dowait) > 0:
                             await aio.sleep(dowait)
-                            elapsed = await cround.async_time_elapsed()
+                            elapsed = await cround.async_pit_elapsed()
                             dowait = (
                                 cround.pitlane_open_after - elapsed
                             ).total_seconds()
@@ -54,32 +124,45 @@ class RaceTasks:
                             ChangeLane.objects.filter(round=cround, open=False)
                         )
                         for alane in change_lanes:
-                            alane.open = True
-                            await alane.asave()
-                elif cround.duration - elapsed < dt.timedelta(seconds=65):
-                    # Check for end before check for close pit lane. Would not be reached otherwise
-                    dowait = (cround.duration - elapsed).total_seconds()
+                            await cls._set_lane_open(alane, True)
+                        if change_lanes:
+                            await cls._send_changedriver_update()
+                elif race_duration - elapsed < dt.timedelta(seconds=65):
+                    # Near end of race — wait for the time limit to expire.
+                    dowait = (race_duration - elapsed).total_seconds()
                     print(f"\n\n\nClosing in {dowait} seconds!\n\n\n")
                     while int(dowait) > 0:
                         await aio.sleep(dowait)
-                        elapsed = await cround.async_time_elapsed()
-                        dowait = (cround.duration - elapsed).total_seconds()
-                        if not cround.ended:
-                            await race_end_requested.asend(
-                                sender=cls, round_id=cround.id
-                            )
+                        elapsed = await cround.async_pit_elapsed()
+                        dowait = (race_duration - elapsed).total_seconds()
+                    # Only auto-end for modes where the timer IS the end
+                    # condition.  Crossing-based modes (CROSS_AFTER_TIME,
+                    # CROSS_AFTER_LEADER, QUALIFYING_PLUS, AUTO_TRANSFORM)
+                    # are ended by handle_lap_crossing() when teams cross.
+                    _TIMER_END_MODES = ("QUALIFYING", "TIME_ONLY")
+                    await sync_to_async(cround.refresh_from_db)()
+                    if not cround.ended:
+                        if active_race:
+                            await sync_to_async(active_race.refresh_from_db)()
+                            if (
+                                not active_race.ended
+                                and active_race.ending_mode in _TIMER_END_MODES
+                            ):
+                                await sync_to_async(active_race.end_this_race)()
+                        elif not active_race:
+                            await sync_to_async(cround.end_race)()
                 elif (
-                    cround.duration - elapsed - cround.pitlane_close_before
+                    race_duration - elapsed - cround.pitlane_close_before
                     < dt.timedelta(seconds=65)
                 ):
                     dowait = (
-                        cround.duration - elapsed - cround.pitlane_close_before
+                        race_duration - elapsed - cround.pitlane_close_before
                     ).total_seconds()
                     while int(dowait) > 0:
                         await aio.sleep(dowait)
-                        elapsed = await cround.async_time_elapsed()
+                        elapsed = await cround.async_pit_elapsed()
                         dowait = (
-                            cround.duration - elapsed - cround.pitlane_close_before
+                            race_duration - elapsed - cround.pitlane_close_before
                         ).total_seconds()
                     change_lanes = await sync_to_async(list)(
                         ChangeLane.objects.filter(
@@ -87,8 +170,21 @@ class RaceTasks:
                         )
                     )
                     for alane in change_lanes:
-                        alane.open = False
-                        await alane.asave()
+                        await cls._set_lane_open(alane, False)
+                    if change_lanes:
+                        await cls._send_changedriver_update()
+                else:
+                    # Elapsed is between pitlane_open_after and
+                    # (race_duration - pitlane_close_before): pit lane should be open.
+                    # Catch-up: open any lanes still closed (e.g. first scheduler tick
+                    # after MAIN starts with elapsed already past pitlane_open_after).
+                    change_lanes = await sync_to_async(list)(
+                        ChangeLane.objects.filter(round=cround, open=False)
+                    )
+                    for alane in change_lanes:
+                        await cls._set_lane_open(alane, True)
+                    if change_lanes:
+                        await cls._send_changedriver_update()
 
         else:
             # bail out

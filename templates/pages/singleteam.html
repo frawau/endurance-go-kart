@@ -105,17 +105,12 @@ table, table th, table td {
 {% block main_content %}
 <div class="container">
     {% if round is None %}
-        <h2>Hu?</h2>
-        <div class="card" style="background-color: transparent;">
-            <div class="card-body">
-                <h1>No race today</h1>
-            </div>
-        </div>
+        {% include 'layout/no_race_today.html' %}
     {% else %}
         <div class="content-wrapper">
             <div class="row mb-4">
                 <div class="col-12 text-left">
-                    <h1>{{ round.name }}&nbsp;&nbsp;Remaining Time: {% timer_widget "race-countdown" "countdownDisplay" round %}</h1>
+                    <h1>{{ round.name }}&nbsp;&nbsp;Remaining Time: {% timer_widget "race-countdown" "countdownDisplay" active_race|default:round %}</h1>
                 </div>
             </div>
 
@@ -171,7 +166,6 @@ document.addEventListener('DOMContentLoaded', function() {
     const roundId = {{ round.id }};
     let socket = null;
     let reconnectAttempts = 0;
-    const maxReconnectAttempts = 50;
     const reconnectDelay = 3000;
 
     function connectWebSocket() {
@@ -193,7 +187,15 @@ document.addEventListener('DOMContentLoaded', function() {
             const data = JSON.parse(event.data);
             console.log("WebSocket received:", data);
 
-            if (data.session_update) {
+            if (data.type === 'race_lap_update') {
+                // Sync countdown timer from server on every crossing
+                if (data.remaining_seconds !== undefined && data.remaining_seconds !== null) {
+                    timerRegistry.countdownTimers.forEach(timer => {
+                        timer.updateRemainingTime(data.remaining_seconds);
+                    });
+                }
+                return;
+            } else if (data.session_update) {
                 // Handle driver session updates
                 console.log(`Handling session update for driver ${data.driver_id}, active: ${data.driver_active}, status ${data.driver_status}`);
                 const driverTimers = timerRegistry.byDriverId[data.driver_id];
@@ -230,13 +232,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             } else {
                 const isPaused = data.is_paused;
+                const effectivelyPaused = isPaused || !data.started || !!data.ended;
 
                 // Handle countdown timer updates
                 if (data.remaining_seconds !== undefined && data.remaining_seconds !== null) {
                     // Normal case - update all timers based on pause state
                     timerRegistry.countdownTimers.forEach(timer => {
                         timer.updateRemainingTime(data.remaining_seconds);
-                        timer.updatePauseState(isPaused);
+                        timer.updatePauseState(effectivelyPaused);
                     });
 
                     // For all other timers, update based on round state
@@ -244,7 +247,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     timerRegistry.allTimers
                         .filter(timer => ['sessiontime', 'totaltime'].includes(timer.timerType))
                         .forEach(timer => {
-                            timer.updatePauseState(isPaused);
+                            timer.updatePauseState(effectivelyPaused);
                         });
                 }
             }
@@ -256,31 +259,29 @@ document.addEventListener('DOMContentLoaded', function() {
                 return;
             }
             console.warn('WebSocket connection lost, attempting to reconnect...');
-            if (reconnectAttempts < maxReconnectAttempts) {
-                const delay = Math.min(reconnectDelay * Math.pow(1.5, reconnectAttempts), 30000);
-                reconnectAttempts++;
-                console.log(`Reconnecting in ${delay/1000} seconds... (attempt ${reconnectAttempts}/${maxReconnectAttempts})`);
-                setTimeout(connectWebSocket, delay);
-            } else {
-                console.error('Maximum reconnection attempts reached. Please refresh the page.');
-            }
+            const delay = Math.min(reconnectDelay * Math.pow(1.5, reconnectAttempts), 30000);
+            reconnectAttempts++;
+            console.log(`Reconnecting in ${delay/1000} seconds... (attempt ${reconnectAttempts})`);
+            setTimeout(connectWebSocket, delay);
         };
 
         socket.onerror = function(error) {
             console.error('WebSocket error:', error);
-            if (reconnectAttempts < maxReconnectAttempts) {
-                const delay = Math.min(reconnectDelay * Math.pow(1.5, reconnectAttempts), 30000);
-                reconnectAttempts++;
-                console.log(`Reconnecting in ${delay/1000} seconds... (attempt ${reconnectAttempts}/${maxReconnectAttempts})`);
-                setTimeout(connectWebSocket, delay);
-            } else {
-                console.error('Maximum reconnection attempts reached after error. Please refresh the page.');
-            }
+            const delay = Math.min(reconnectDelay * Math.pow(1.5, reconnectAttempts), 30000);
+            reconnectAttempts++;
+            setTimeout(connectWebSocket, delay);
         };
     }
 
     // Initial connection
     connectWebSocket();
+
+    // Resync timer when tab regains focus
+    document.addEventListener('visibilitychange', function() {
+        if (!document.hidden && socket && socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify({type: 'resync'}));
+        }
+    });
 });
 </script>
 {% endif %}

@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+*.log
+*.db
+timing-station.toml
+timing-station.service.template
+.dockerignore
+Dockerfile
+README.md

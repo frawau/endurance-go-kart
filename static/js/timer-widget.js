@@ -288,6 +288,7 @@ class TimerWidget {
                 this.reset(tspent);
                 this.start();
             } else if (status === "end") {
+                this.reset(tspent);
                 this.deactivate();
             } else if (status === "reset") {
                 this.deactivate();

@@ -5,15 +5,7 @@
 
 {% block content %}
 {% if not round %}
-    <!-- Show "No Race Today" message when there's no current round -->
-    <div style="height: 100vh; width: 100vw; display: flex; align-items: center; justify-content: center; flex-direction: column; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
-        <div class="text-center text-white">
-            <div class="mb-5">
-                <i class="fas fa-calendar-times" style="font-size: 8rem;"></i>
-            </div>
-            <h1 class="mb-4" style="font-size: 4rem; font-weight: bold;">No Race Today</h1>
-        </div>
-    </div>
+    {% include 'layout/no_race_today.html' %}
 {% elif not change_lanes %}
     <!-- Show loading message when pit lanes don't exist yet -->
     <div id="loading-container" style="height: 100vh; width: 100vw; display: flex; align-items: center; justify-content: center; flex-direction: column; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
@@ -27,6 +19,7 @@
             <h2 class="mb-5" style="font-size: 2.5rem;">Waiting for pre-race checks to complete...</h2>
         </div>
     </div>
+    <script>setTimeout(function () { location.reload(); }, 15000);</script>
 {% else %}
     <!-- Normal pit lanes view -->
     <div style="height: 100vh; width: 100vw; display: flex; align-items: stretch; justify-content: center; margin: 0; padding: 0;">
@@ -58,6 +51,22 @@
             startPitLaneChecker();
         {% else %}
             // Pit lanes are available - set up WebSocket connections
+
+            // Round WebSocket: reload when the active race changes (race ends → next race)
+            const pitLaneRaceType = '{{ active_race.race_type|default:"" }}';
+            const roundSocket = new WebSocket(`${wsScheme}://${window.location.host}/ws/round/{{ round.id }}/`);
+            roundSocket.onmessage = function(e) {
+                try {
+                    const d = JSON.parse(e.data);
+                    if (!d.session_update && 'active_race_type' in d) {
+                        const newType = d.active_race_type || '';
+                        if (newType !== pitLaneRaceType) {
+                            window.location.reload();
+                        }
+                    }
+                } catch (err) {}
+            };
+
             {% for change_lane in change_lanes %}
             const socket{{ change_lane.lane }} = new WebSocket(wsScheme + "://" + window.location.host + "/ws/pitlanes/{{ change_lane.lane }}/");
             

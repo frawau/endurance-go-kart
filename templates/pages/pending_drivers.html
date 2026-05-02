@@ -48,11 +48,11 @@
 {% block main_content %}
 <div class="container-fluid">
     {% if round is None %}
-        <h2>No race today.</h2>
+        {% include 'layout/no_race_today.html' %}
     {% else %}
         <div class="row mb-4">
             <div class="col-12 text-left">
-                <h2>Remaining Time: {% timer_widget "race-countdown" "countdownDisplay" round %}&nbsp;&nbsp;&nbsp;Waiting Drivers: <span id="pending-drivers-count">{{ pending_sessions|length }}</span></h2>
+                <h2>Remaining Time: {% timer_widget "race-countdown" "countdownDisplay" active_race|default:round %}&nbsp;&nbsp;&nbsp;Waiting Drivers: <span id="pending-drivers-count">{{ pending_sessions|length }}</span></h2>
             </div>
         </div>
 
@@ -104,7 +104,6 @@ document.addEventListener('DOMContentLoaded', function() {
     const roundId = {{ round.id }};
     let socket = null;
     let reconnectAttempts = 0;
-    const maxReconnectAttempts = 50;
     const reconnectDelay = 3000;
 
     function connectWebSocket() {
@@ -126,30 +125,43 @@ document.addEventListener('DOMContentLoaded', function() {
             const data = JSON.parse(event.data);
             console.log("WebSocket received:", data);
 
-            if (data.session_update) {
+            if (data.type === 'race_lap_update') {
+                // Sync countdown timer from server on every crossing
+                if (data.remaining_seconds !== undefined && data.remaining_seconds !== null) {
+                    timerRegistry.countdownTimers.forEach(timer => {
+                        timer.updateRemainingTime(data.remaining_seconds);
+                    });
+                }
+                return;
+            } else if (data.session_update) {
                 const driverId = data.driver_id;
                 const status = data.driver_status;
                 const completedSessions = data.completed_sessions;
-
-                // Update "Next Change #" for all rows of the same team
-                updateTeamNextChangeNumbers(driverId, completedSessions);
+                const teamNumber = data.team_number;
 
                 if (status === "register") {
-                    // A new session was registered - add a row
-                    addPendingDriverRow(driverId, data);
+                    // Add row first, then renumber all same-team rows
+                    addPendingDriverRow(driverId, data, () => {
+                        updateTeamNextChangeNumbers(teamNumber, completedSessions);
+                    });
                 } else if (status === "start") {
-                    // A session was started - remove the row
+                    // Remove row first, then renumber remaining same-team rows
                     removePendingDriverRow(driverId);
+                    updateTeamNextChangeNumbers(teamNumber, completedSessions);
+                } else {
+                    // Driver ended or other update — renumber same-team pending rows
+                    updateTeamNextChangeNumbers(teamNumber, completedSessions);
                 }
             } else {
                 const isPaused = data.is_paused;
+                const effectivelyPaused = isPaused || !data.started || !!data.ended;
 
                 // Handle countdown timer updates
                 if (data.remaining_seconds !== undefined && data.remaining_seconds !== null) {
                     // Normal case - update all timers based on pause state
                     timerRegistry.countdownTimers.forEach(timer => {
                         timer.updateRemainingTime(data.remaining_seconds);
-                        timer.updatePauseState(isPaused);
+                        timer.updatePauseState(effectivelyPaused);
                     });
                 }
             }
@@ -161,53 +173,37 @@ document.addEventListener('DOMContentLoaded', function() {
                 return;
             }
             console.warn('WebSocket connection lost, attempting to reconnect...');
-            if (reconnectAttempts < maxReconnectAttempts) {
-                const delay = Math.min(reconnectDelay * Math.pow(1.5, reconnectAttempts), 30000);
-                reconnectAttempts++;
-                console.log(`Reconnecting in ${delay/1000} seconds... (attempt ${reconnectAttempts}/${maxReconnectAttempts})`);
-                setTimeout(connectWebSocket, delay);
-            } else {
-                console.error('Maximum reconnection attempts reached. Please refresh the page.');
-            }
+            const delay = Math.min(reconnectDelay * Math.pow(1.5, reconnectAttempts), 30000);
+            reconnectAttempts++;
+            setTimeout(connectWebSocket, delay);
         };
 
         socket.onerror = function(error) {
             console.error('WebSocket error:', error);
-            if (reconnectAttempts < maxReconnectAttempts) {
-                const delay = Math.min(reconnectDelay * Math.pow(1.5, reconnectAttempts), 30000);
-                reconnectAttempts++;
-                console.log(`Reconnecting in ${delay/1000} seconds... (attempt ${reconnectAttempts}/${maxReconnectAttempts})`);
-                setTimeout(connectWebSocket, delay);
-            } else {
-                console.error('Maximum reconnection attempts reached after error. Please refresh the page.');
-            }
+            const delay = Math.min(reconnectDelay * Math.pow(1.5, reconnectAttempts), 30000);
+            reconnectAttempts++;
+            setTimeout(connectWebSocket, delay);
         };
     }
 
-    // Update "Next Change #" for all rows with the same team as the driver
-    function updateTeamNextChangeNumbers(driverId, completedSessions) {
-        // Find the driver's row to get the team
-        const driverRow = document.querySelector(`[data-driver-id="${driverId}"]`);
-        if (!driverRow) return;
-
-        const teamNumber = driverRow.getAttribute('data-team-number');
+    // Update "Next Change #" for all pending rows of a team, positionally
+    function updateTeamNextChangeNumbers(teamNumber, completedSessions) {
         if (!teamNumber) return;
-
-        // Find all rows with the same team number
         const teamRows = document.querySelectorAll(`[data-team-number="${teamNumber}"]`);
-        teamRows.forEach(row => {
+        teamRows.forEach((row, idx) => {
             const nextChangeCell = row.querySelector('.next-change-number');
             if (nextChangeCell) {
-                nextChangeCell.textContent = completedSessions + 1;
+                nextChangeCell.textContent = completedSessions + idx + 1;
             }
         });
     }
 
     // Add a new row for a registered session
-    function addPendingDriverRow(driverId, data) {
+    function addPendingDriverRow(driverId, data, callback) {
         // Check if we already have this driver's row
         if (document.querySelector(`[data-driver-id="${driverId}"]`)) {
-            return; // Row already exists
+            if (callback) callback();
+            return;
         }
 
         // We need to fetch some additional info from the server
@@ -240,10 +236,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 driverCell.textContent = driverInfo.nickname;
                 newRow.appendChild(driverCell);
 
-                // Next change number cell
+                // Next change number cell (placeholder; callback will renumber)
                 const changeCell = document.createElement('td');
                 changeCell.className = 'next-change-number';
-                changeCell.textContent = data.completed_sessions + 1;
+                changeCell.textContent = '…';
                 newRow.appendChild(changeCell);
 
                 tableBody.appendChild(newRow);
@@ -256,6 +252,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 setTimeout(() => {
                     newRow.classList.remove('highlight');
                 }, 1000);
+
+                if (callback) callback();
             })
             .catch(error => {
                 console.error('Error fetching driver info:', error);
@@ -297,6 +295,13 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Initial connection
     connectWebSocket();
+
+    // Resync timer when tab regains focus
+    document.addEventListener('visibilitychange', function() {
+        if (!document.hidden && socket && socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify({type: 'resync'}));
+        }
+    });
 });
 </script>
 {% endif %}

@@ -82,13 +82,55 @@
                           </a>
                         </li>
                         {% if user|has_group:"Race Director" %}
+                        {% if active_race_id and active_round_has_timing %}
+                        <li class="nav-item list-group-item border-0 p-0">
+                          <a class="dropdown-item py-2 ps-3 border-radius-md"
+                          href="/race/{{ active_race_id }}/transponders/">
+                            <h6
+                            class="dropdown-header text-dark font-weight-bolder d-flex justify-content-cente align-items-center p-0">
+                            Transponder Matching</h6>
+                            <span class="text-sm">Assign transponders to teams.</span>
+                          </a>
+                        </li>
+                        <li class="nav-item list-group-item border-0 p-0">
+                          <a class="dropdown-item py-2 ps-3 border-radius-md"
+                          href="/race/{{ active_race_id }}/grid/">
+                            <h6
+                            class="dropdown-header text-dark font-weight-bolder d-flex justify-content-cente align-items-center p-0">
+                            Grid Management</h6>
+                            <span class="text-sm">Set starting grid positions.</span>
+                          </a>
+                        </li>
+                        {% endif %}
+                        {% if grid_penalty_available and active_main_race_id %}
+                        <li class="nav-item list-group-item border-0 p-0">
+                          <a class="dropdown-item py-2 ps-3 border-radius-md"
+                          href="{% url 'fix_grid_penalties' %}?race_id={{ active_main_race_id }}">
+                            <h6
+                            class="dropdown-header text-dark font-weight-bolder d-flex justify-content-cente align-items-center p-0">
+                            Grid Penalties</h6>
+                            <span class="text-sm">Move teams back on this round's Main grid before it is locked.</span>
+                          </a>
+                        </li>
+                        {% endif %}
+                        {% if post_race_penalty_available and active_main_race_id %}
+                        <li class="nav-item list-group-item border-0 p-0">
+                          <a class="dropdown-item py-2 ps-3 border-radius-md"
+                          href="{% url 'fix_penalties' %}?race_id={{ active_main_race_id }}">
+                            <h6
+                            class="dropdown-header text-dark font-weight-bolder d-flex justify-content-cente align-items-center p-0">
+                            Lap &amp; Time Penalties</h6>
+                            <span class="text-sm">Add or remove this round's lap / time penalties before confirming results.</span>
+                          </a>
+                        </li>
+                        {% endif %}
                         <li class="nav-item list-group-item border-0 p-0">
                           <a class="dropdown-item py-2 ps-3 border-radius-md"
                           href="/racecontrol/">
                             <h6
                             class="dropdown-header text-dark font-weight-bolder d-flex justify-content-cente align-items-center p-0">
                             Race Control</h6>
-                            <span class="text-sm">Controlling the current Round..</span>
+                            <span class="text-sm">Controlling the current Round.</span>
                           </a>
                         </li>
                         {% endif %}
@@ -153,6 +195,15 @@
                             <span class="text-sm">Add, edit, and delete sponsor and organiser logos.</span>
                           </a>
                         </li>
+                        <li class="nav-item list-group-item border-0 p-0">
+                          <a class="dropdown-item py-2 ps-3 border-radius-md"
+                            href="/transponder/manage/">
+                            <h6
+                              class="dropdown-header text-dark font-weight-bolder d-flex justify-content-cente align-items-center p-0">
+                              Manage Transponders</h6>
+                            <span class="text-sm">Add, edit, and delete transponders.</span>
+                          </a>
+                        </li>
                       </ul>
                     </div>
                   </ul>
@@ -170,6 +221,7 @@
                     aria-labelledby="dropdownMenuDocs">
                     <div class="d-none d-lg-block">
                       <ul class="list-group">
+                        {% if has_active_round %}
                         <li class="nav-item list-group-item border-0 p-0">
                           <a class="dropdown-item py-2 ps-3 border-radius-md"
                             href="/pending_drivers-nav/">
@@ -179,6 +231,7 @@
                             <span class="text-sm">Show drivers waiting for relay..</span>
                           </a>
                         </li>
+                        {% endif %}
                         <li class="nav-item list-group-item border-0 p-0">
                           <a class="dropdown-item py-2 ps-3 border-radius-md"
                             href="/alldrivers/">
@@ -225,6 +278,7 @@
                     aria-labelledby="dropdownMenuDocs">
                     <div class="d-none d-lg-block">
                       <ul class="list-group">
+                        {% if has_active_round %}
                         <li class="nav-item list-group-item border-0 p-0">
                           <a class="dropdown-item py-2 ps-3 border-radius-md"
                             href="/singleteam/">
@@ -243,6 +297,7 @@
                             <span class="text-sm">Display all team status sequentially.</span>
                           </a>
                         </li>
+                        {% endif %}
                         <li class="nav-item list-group-item border-0 p-0">
                           <a class="dropdown-item py-2 ps-3 border-radius-md"
                             href="/allteams/">
@@ -355,6 +410,24 @@
                             <span class="text-sm">Display driver queue status.</span>
                           </a>
                         </li>
+                        <li class="nav-item list-group-item border-0 p-0">
+                          <a class="dropdown-item py-2 ps-3 border-radius-md"
+                            href="{% url 'public_leaderboard' %}">
+                            <h6
+                              class="dropdown-header text-dark font-weight-bolder d-flex justify-content-cente align-items-center p-0">
+                              Leaderboard</h6>
+                            <span class="text-sm">Live race standings.</span>
+                          </a>
+                        </li>
+                        <li class="nav-item list-group-item border-0 p-0">
+                          <a class="dropdown-item py-2 ps-3 border-radius-md"
+                            href="{% url 'track_display' %}">
+                            <h6
+                              class="dropdown-header text-dark font-weight-bolder d-flex justify-content-cente align-items-center p-0">
+                              Track Display</h6>
+                            <span class="text-sm">Trackside two-column team-number / last-lap display.</span>
+                          </a>
+                        </li>
                       </ul>
                     </div>
                   </ul>
@@ -384,6 +457,15 @@
                         </li>
                         <li class="nav-item list-group-item border-0 p-0">
                           <a class="dropdown-item py-2 ps-3 border-radius-md"
+                            href="{% url 'round_result' %}">
+                            <h6
+                              class="dropdown-header text-dark font-weight-bolder d-flex justify-content-cente align-items-center p-0">
+                              Round Result</h6>
+                            <span class="text-sm">Race standings by round.</span>
+                          </a>
+                        </li>
+                        <li class="nav-item list-group-item border-0 p-0">
+                          <a class="dropdown-item py-2 ps-3 border-radius-md"
                             href="/round_penalties/">
                             <h6
                               class="dropdown-header text-dark font-weight-bolder d-flex justify-content-cente align-items-center p-0">
@@ -391,11 +473,79 @@
                             <span class="text-sm">View penalties assigned in rounds.</span>
                           </a>
                         </li>
+                        <li class="nav-item list-group-item border-0 p-0">
+                          <a class="dropdown-item py-2 ps-3 border-radius-md"
+                            href="{% url 'championship_standings' %}">
+                            <h6
+                              class="dropdown-header text-dark font-weight-bolder d-flex justify-content-cente align-items-center p-0">
+                              Championship Standings</h6>
+                            <span class="text-sm">Overall championship points table.</span>
+                          </a>
+                        </li>
                       </ul>
                     </div>
                   </ul>
                 </li>
                 {% if request.user.is_authenticated %}
+                {% if user|has_group:"Queue Scanner" or user|has_group:"Driver Scanner" or user|has_group:"Race Director" %}
+                <li class="nav-item dropdown dropdown-hover mx-2" id="fix-menu" style="display:none;">
+                  <a class="nav-link ps-2 d-flex cursor-pointer align-items-center font-weight-semibold"
+                    id="dropdownMenuFix" data-bs-toggle="dropdown" aria-expanded="false">
+                    <i class="material-symbols-rounded opacity-6 me-2 text-md" style="color:#dc3545;">build</i>
+                    <span style="color:#dc3545;">Fix</span>
+                    <img src="{% static "assets/img/down-arrow-dark.svg" %}" alt="down-arrow" class="arrow ms-auto ms-md-2">
+                  </a>
+                  <ul
+                    class="dropdown-menu dropdown-menu-end dropdown-menu-animation dropdown-md dropdown-md-responsive mt-0 mt-lg-3 p-3 border-radius-lg"
+                    aria-labelledby="dropdownMenuFix">
+                    <div class="d-none d-lg-block">
+                      <ul class="list-group">
+                        {% if user|has_group:"Queue Scanner" %}
+                        <li class="nav-item list-group-item border-0 p-0">
+                          <a class="dropdown-item py-2 ps-3 border-radius-md" href="{% url 'fix_scan_in' %}">
+                            <h6 class="dropdown-header text-dark font-weight-bolder d-flex justify-content-cente align-items-center p-0">
+                              Scan In</h6>
+                            <span class="text-sm">Add/remove driver from pit lane queue.</span>
+                          </a>
+                        </li>
+                        {% endif %}
+                        {% if user|has_group:"Driver Scanner" %}
+                        <li class="nav-item list-group-item border-0 p-0">
+                          <a class="dropdown-item py-2 ps-3 border-radius-md" href="{% url 'fix_scan_out' %}">
+                            <h6 class="dropdown-header text-dark font-weight-bolder d-flex justify-content-cente align-items-center p-0">
+                              Scan Out</h6>
+                            <span class="text-sm">Force-end a driver session.</span>
+                          </a>
+                        </li>
+                        {% endif %}
+                        {% if user|has_group:"Race Director" %}
+                        <li class="nav-item list-group-item border-0 p-0">
+                          <a class="dropdown-item py-2 ps-3 border-radius-md" href="{% url 'fix_laps' %}">
+                            <h6 class="dropdown-header text-dark font-weight-bolder d-flex justify-content-cente align-items-center p-0">
+                              Lap Fix</h6>
+                            <span class="text-sm">Split/unsplit laps after race ends.</span>
+                          </a>
+                        </li>
+                        <li class="nav-item list-group-item border-0 p-0">
+                          <a class="dropdown-item py-2 ps-3 border-radius-md" href="{% url 'fix_penalties' %}">
+                            <h6 class="dropdown-header text-dark font-weight-bolder d-flex justify-content-cente align-items-center p-0">
+                              Lap &amp; Time Penalties</h6>
+                            <span class="text-sm">Add or remove lap / time penalties on any unconfirmed Main race.</span>
+                          </a>
+                        </li>
+                        <li class="nav-item list-group-item border-0 p-0">
+                          <a class="dropdown-item py-2 ps-3 border-radius-md" href="{% url 'fix_grid_penalties' %}">
+                            <h6 class="dropdown-header text-dark font-weight-bolder d-flex justify-content-cente align-items-center p-0">
+                              Grid Penalties</h6>
+                            <span class="text-sm">Move teams back on any unstarted, unlocked Main grid.</span>
+                          </a>
+                        </li>
+                        {% endif %}
+                      </ul>
+                    </div>
+                  </ul>
+                </li>
+                {% endif %}
                 <li class="nav-item ms-lg-auto">
                     <form method="post" action="{% url 'logout' %}" style="display: inline;">
                         {% csrf_token %}
@@ -423,3 +573,12 @@
       </div>
     </div>
 </div>
+<script>
+document.addEventListener('keydown', function(e) {
+    if (e.ctrlKey && e.shiftKey && e.key === 'F') {
+        e.preventDefault();
+        var m = document.getElementById('fix-menu');
+        if (m) m.style.display = m.style.display === 'none' ? '' : 'none';
+    }
+});
+</script>

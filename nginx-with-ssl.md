@@ -49,7 +49,7 @@ Required in `.env` file:
 
 ```bash
 SSL_MODE=letsencrypt                    # or 'acme', 'manual', or 'none'
-APP_DOMAIN=your-domain.com              # Your domain name
+APP_HOSTNAME=host.your-domain.com              # Your domain name
 SSL_EMAIL=admin@your-domain.com         # Email for certificate notifications
 APP_PORT=5085                           # Optional: custom port for HTTP-only mode
 ```
@@ -149,7 +149,7 @@ The `race-manager` script simplifies SSL management:
 Edit `.env` file:
 ```bash
 SSL_MODE=letsencrypt               # or 'acme' for ZeroSSL, 'none' for HTTP-only
-APP_DOMAIN=your-domain.com
+APP_HOSTNAME=host.your-domain.com
 SSL_EMAIL=admin@your-domain.com
 APP_PORT=5085                      # Optional: used only in HTTP-only mode
 ```
@@ -157,7 +157,7 @@ APP_PORT=5085                      # Optional: used only in HTTP-only mode
 Or use the helper command:
 ```bash
 ./race-manager enable-letsencrypt   # or enable-acme for ZeroSSL
-# Then edit .env to set APP_DOMAIN and SSL_EMAIL
+# Then edit .env to set APP_HOSTNAME and SSL_EMAIL
 ```
 
 **2. Generate Certificate**

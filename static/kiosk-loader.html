@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Kiosk Loader</title>
+<style>
+  body { margin:0; background:#0a0e1a; color:#a0a0b0; font-family:sans-serif;
+         display:flex; align-items:center; justify-content:center; height:100vh; }
+  iframe { border:none; width:100vw; height:100vh; position:absolute; top:0; left:0; }
+  #status { text-align:center; z-index:1; }
+  #status h1 { color:#ffd700; font-size:2rem; }
+</style>
+</head>
+<body>
+<div id="status">
+  <h1>Connecting to Race Server...</h1>
+  <p id="msg">Waiting for server to come online.</p>
+</div>
+<iframe id="frame" style="display:none;"></iframe>
+<script>
+// Usage: open this file locally in the kiosk browser.
+// Set TARGET to your race server page URL.
+const TARGET = window.location.href.replace(/\/static\/kiosk-loader\.html.*/, '/all_pitlanes/');
+const RETRY_INTERVAL = 10000; // 10 seconds
+
+function tryLoad() {
+  document.getElementById('msg').textContent = 'Attempting to connect...';
+  fetch(TARGET, { mode: 'no-cors' })
+    .then(function() {
+      // Server responded — load in iframe (covers the status message)
+      const frame = document.getElementById('frame');
+      frame.src = TARGET;
+      frame.style.display = 'block';
+    })
+    .catch(function() {
+      document.getElementById('msg').textContent =
+        'Server not available. Retrying in ' + (RETRY_INTERVAL/1000) + 's...';
+      setTimeout(tryLoad, RETRY_INTERVAL);
+    });
+}
+tryLoad();
+</script>
+</body>
+</html>
