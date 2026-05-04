@@ -116,7 +116,7 @@
                             data-team-number="{{ session.driver.team.team.number }}">
                             <td>{{ session.driver.team.team.number }}</td>
                             <td>{{ session.driver.member.nickname }}</td>
-                            {% if round.started %}
+                            {% if active_race and active_race.started or not active_race and round.started %}
                                 <td class="next-change-number">{{ session.team_completed_count|add:1 }}</td>
                             {% else %}
                                 <td class="next-change-number">{{ session.team_completed_count }}</td>

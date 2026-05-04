@@ -269,9 +269,18 @@ def handle_session_change(sender, instance, **kwargs):
     # Get the round_team for this driver
     round_team = driver.team
 
-    # Count completed sessions for this team in the current race only
-    if round_instance.started:
-        race = instance.race or round_instance.active_race
+    # Count completed sessions for this team in the current race only.
+    # The "race in progress" gate must use the *active race*'s started
+    # flag, not Round.started — in a multi-race round Round.started is
+    # already True during the Main race's pre-race check (it was set
+    # when Q1 started), but the Main race itself hasn't started yet,
+    # so drivers waiting to race the Main are still "starters", not
+    # change-#1 / #2 / ... .
+    race = instance.race or round_instance.active_race
+    race_in_progress = (
+        race.started is not None if race else round_instance.started is not None
+    )
+    if race_in_progress:
         if race:
             completed_sessions_count = Session.objects.filter(
                 driver__team=round_team, race=race, end__isnull=False
@@ -369,18 +378,24 @@ def handle_session_delete(sender, instance, **kwargs):
     round_instance = instance.round
     driver = instance.driver
     dstatus = "reset"
-    # Count completed sessions for this team in the current race only
-    if round_instance.started:
-        try:
-            race = instance.race or round_instance.active_race
-            if race:
-                completed_sessions_count = Session.objects.filter(
-                    driver__team=driver.team, race=race, end__isnull=False
-                ).count()
-            else:
-                completed_sessions_count = 0
-        except:
-            return
+    # Count completed sessions for this team in the current race only.
+    # See handle_session_change: the gate is the *active race*'s started
+    # flag, not Round.started, so multi-race rounds correctly report
+    # "no change yet" during a later race's pre-check window.
+    try:
+        race = instance.race or round_instance.active_race
+    except Exception:
+        return
+    race_in_progress = (
+        race.started is not None if race else round_instance.started is not None
+    )
+    if race_in_progress:
+        if race:
+            completed_sessions_count = Session.objects.filter(
+                driver__team=driver.team, race=race, end__isnull=False
+            ).count()
+        else:
+            completed_sessions_count = 0
     else:
         completed_sessions_count = -1
     channel_layer = get_channel_layer()
