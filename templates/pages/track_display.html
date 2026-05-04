@@ -128,6 +128,23 @@
             text-decoration: line-through;
         }
 
+        /* Compact layout for narrow / low-resolution trackside displays
+           (e.g. 416×416 square LCDs). Hide the +/- strip, tighten gaps,
+           and shrink the dot. The compact lap-time format (M:SS.s) is
+           applied in JS — see useCompactFormat. The class is toggled by
+           applyCompactLayout() based on window.innerWidth. */
+        body.compact .scale-strip { display: none; }
+        body.compact .panels { gap: 4px; padding: 4px 6px; }
+        body.compact .panel { border-width: 1px; border-radius: 4px; }
+        body.compact .lap-dot {
+            width: 0.45em;
+            height: 0.45em;
+            margin-right: 0.30em;
+        }
+        body.compact table.track td {
+            padding: calc(2px * var(--row-scale)) calc(4px * var(--row-scale));
+        }
+
         .no-race {
             display: flex;
             align-items: center;
@@ -153,7 +170,7 @@
                     <tr class="pos-{{ s.position }}{% if s.retired %} retired{% endif %}"
                         data-team-id="{{ s.team_id }}">
                         <td class="team-num">{{ s.team_number }}</td>
-                        <td class="last-lap"><span class="lap-dot"></span>{{ s.last_lap_time_formatted }}</td>
+                        <td class="last-lap" data-secs="{{ s.last_lap_time|default_if_none:'' }}"><span class="lap-dot"></span>{{ s.last_lap_time_formatted }}</td>
                     </tr>
                     {% endfor %}
                 </tbody>
@@ -170,7 +187,7 @@
                     <tr class="pos-{{ s.position }}{% if s.retired %} retired{% endif %}"
                         data-team-id="{{ s.team_id }}">
                         <td class="team-num">{{ s.team_number }}</td>
-                        <td class="last-lap"><span class="lap-dot"></span>{{ s.last_lap_time_formatted }}</td>
+                        <td class="last-lap" data-secs="{{ s.last_lap_time|default_if_none:'' }}"><span class="lap-dot"></span>{{ s.last_lap_time_formatted }}</td>
                     </tr>
                     {% endfor %}
                 </tbody>
@@ -186,6 +203,51 @@
         const wsUrl = `${protocol}//${window.location.host}/ws/leaderboard/${raceId}/`;
         let socket;
         let reconnectAttempts = 0;
+
+        // Compact layout below this many CSS pixels — primarily for square
+        // / portrait LCDs at the trackside (e.g. 416×416). Above this, the
+        // existing large-screen layout is used unchanged.
+        const COMPACT_BREAKPOINT = 480;
+        let useCompactFormat = false;
+
+        function applyCompactLayout() {
+            useCompactFormat = window.innerWidth <= COMPACT_BREAKPOINT;
+            document.body.classList.toggle('compact', useCompactFormat);
+        }
+
+        function formatLapTime(secs) {
+            // Compact: M:SS.s (drop millisecond noise that's unreadable
+            // at small sizes anyway). Full: MM:SS.mmm.
+            if (typeof secs !== 'number' || !isFinite(secs) || secs < 0) return '—';
+            if (useCompactFormat) {
+                const m = Math.floor(secs / 60);
+                const s = secs - m * 60;
+                return `${m}:${s.toFixed(1).padStart(4, '0')}`;
+            }
+            const totalMs = Math.round(secs * 1000);
+            const ms = totalMs % 1000;
+            const totalS = Math.floor(totalMs / 1000);
+            const s = totalS % 60;
+            const m = Math.floor(totalS / 60);
+            return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(ms).padStart(3, '0')}`;
+        }
+
+        function relabelInitialLapTimes() {
+            // The server pre-rendered MM:SS.mmm in each cell's text. In
+            // compact mode we want M:SS.s — re-format from the numeric
+            // data-secs attribute so the first paint matches subsequent
+            // WS-driven updates.
+            document.querySelectorAll('td.last-lap').forEach((td) => {
+                const raw = td.dataset.secs;
+                const secs = raw !== '' ? parseFloat(raw) : NaN;
+                const dot = td.querySelector('.lap-dot');
+                td.textContent = '';
+                if (dot) td.appendChild(dot);
+                td.appendChild(document.createTextNode(
+                    isFinite(secs) ? formatLapTime(secs) : '—'
+                ));
+            });
+        }
 
         // Per-team lap memory:
         //   prevLastByTeam[id]  = last_lap_time from the previous update we
@@ -267,10 +329,14 @@
             const cls = `pos-${s.position}${s.retired ? ' retired' : ''}`;
             const colour = dotColourFor(s);
             const dot = `<span class="lap-dot${colour ? ' ' + colour : ''}"></span>`;
+            const lapText =
+                typeof s.last_lap_time === 'number'
+                    ? formatLapTime(s.last_lap_time)
+                    : (s.last_lap_time_formatted || '—');
             return (
                 `<tr class="${cls}" data-team-id="${s.team_id}">` +
                 `<td class="team-num">${escHtml(s.team_number)}</td>` +
-                `<td class="last-lap">${dot}${escHtml(s.last_lap_time_formatted || '—')}</td>` +
+                `<td class="last-lap">${dot}${escHtml(lapText)}</td>` +
                 `</tr>`
             );
         }
@@ -334,11 +400,20 @@
             const leftRows = document.querySelectorAll('#leftBody tr').length;
             const rightRows = document.querySelectorAll('#rightBody tr').length;
             const maxRows = Math.max(leftRows, rightRows, 1);
-            // Available height per row (viewport - small padding).
-            const avail = (window.innerHeight - 16) / maxRows;
-            // Empirical: at scale=1 a row takes ~76 px (3.2rem * 1.05 + padding).
-            const target = avail / 76;
-            applyScale(target);
+
+            // Height target: at scale=1 a row takes ~76 px (3.2rem * 1.05 + padding).
+            const availH = (window.innerHeight - 16) / maxRows;
+            const heightTarget = availH / 76;
+
+            // Width target: empirical row-content width at scale=1.
+            //   compact (M:SS.s):   ~190 px
+            //   full (MM:SS.mmm):   ~310 px
+            const baseRowWidth = useCompactFormat ? 190 : 310;
+            const panel = document.querySelector('.panel');
+            const panelWidth = panel ? panel.clientWidth : window.innerWidth / 2;
+            const widthTarget = panelWidth / baseRowWidth;
+
+            applyScale(Math.min(heightTarget, widthTarget));
         }
 
         document.getElementById('scaleDown').addEventListener('click', function() {
@@ -358,7 +433,12 @@
             localStorage.setItem(STORAGE_KEY, applied);
         });
 
-        window.addEventListener('resize', autoFit);
+        window.addEventListener('resize', function() {
+            applyCompactLayout();
+            autoFit();
+        });
+        applyCompactLayout();
+        relabelInitialLapTimes();
         autoFit();
         connect();
 
