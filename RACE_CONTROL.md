@@ -40,7 +40,7 @@ Validates:
 On success: sets `Round.ready = True`, creates ChangeLane objects (one per pit lane).
 
 ### Start Race
-Sets `Round.started = now`. All registered-but-unstarted sessions get `start = now`.
+Sets `Round.started = now`. All registered-but-unstarted sessions get `start = now`. (Legacy rounds don't have a separate `armed` flag — pre-check + start go straight from "ready" to "running".)
 
 ### During the Race
 - **Pit lane**: opens after `pitlane_open_after`, closes `pitlane_close_before` the end
@@ -192,10 +192,23 @@ Splits can also be performed after the race from the **Lap Management** page
 
 ### Start Race
 
-- Sets `Race.started = now`
-- First race only: also sets `Round.started = now`
-- All registered sessions get `start = now` and `Session.race = active_race`
-- Clones transponder assignments from `depends_on_race` if needed
+Pressing **Start** moves the race from "ready" into one of two armed states depending on the race's `start_mode`:
+
+| `start_mode` | What "Start" does | When `Race.started` is set |
+|---|---|---|
+| `IMMEDIATE` | Sets `Race.armed = True` **and** `Race.started = now` | At click |
+| `FIRST_CROSSING` | Sets `Race.armed = True` only — clock stays frozen | At first transponder crossing |
+
+The **`armed` flag** is the gate the timing consumer uses to decide whether incoming transponder crossings should be processed. Crossings that arrive while `armed = False` are silently dropped — this is what stops a warm-up lap from accidentally starting a `FIRST_CROSSING` race before the director has actually pressed Start. Once `armed` is `True`:
+
+- In `IMMEDIATE` mode the race is already running.
+- In `FIRST_CROSSING` mode the consumer accepts the next crossing as the race start: it sets `Race.started = crossing_time` and rewrites every active `Session.start` to that same value, so any time spent on the warm-up lap before the actual start doesn't count.
+
+Also at Start time, regardless of mode:
+
+- First race only: sets `Round.started = now`.
+- All registered sessions get `start = now` and `Session.race = active_race` (in FIRST_CROSSING mode these starts are corrected to the crossing time once it arrives).
+- Clones transponder assignments from `depends_on_race` if needed.
 
 ### During the Race
 
@@ -205,11 +218,11 @@ Same as legacy (pit lanes, pauses, driver changes). Pauses are **round-level** �
 
 - Sets `Race.ended = now`, ends all active sessions, deletes pending sessions
 - If there's a **next race**: auto-advances to its pre-check state (progress badges update)
-- If this was the **last race**: sets `Round.ended = now`, runs `post_race_check()`
+- If this was the **last race**: sets `Round.ended = now`, runs `post_race_check()` (which also auto-converts any unserved Stop & Go penalties — see [Penalty Sanctions](#penalty-sanctions))
 
 ### False Start
 
-- Resets `Race.started = None` and all session starts
+- Resets `Race.started = None`, `Race.armed = False`, and all session starts
 - If no other race has ever started: also resets `Round.started = None`
 
 ---
@@ -255,11 +268,13 @@ Qualifying races (Q1, Q2, Q3) have special behaviour:
 - Both filters use: `Q(race__race_type="MAIN") | Q(race__isnull=True)`
 
 ### Grid positions
-After a qualifying race ends, results can set starting grid positions for subsequent races via:
-- **Best time method**: `combine_qualifying_results()` picks each team's best lap
-- **Elimination method**: `QualifyingKnockoutRule` records define cutoff positions
+After a qualifying race ends, results set starting grid positions for the Main race in three steps:
 
-Grid positions are stored in `GridPosition` and can be manually overridden.
+1. **Knockout placement** (optional): `process_qualifying_knockout()` reads any `QualifyingKnockoutRule` records on the Q-race and pins eliminated teams at fixed back-of-grid positions (`source="KNOCKOUT"`).
+2. **Combined-Q ranking**: `combine_qualifying_results()` reorders the survivors by best lap time across all ended Q-races, writing positions 1..N from the front of the grid (`source="COMBINED_Q"`). KNOCKOUT placements are kept untouched; CHAMPIONSHIP / MANUAL / previous COMBINED_Q rows are wiped first to avoid `(race, position)` collisions.
+3. **Grid penalties**: `apply_grid_penalties()` walks the round's `RoundPenalty` rows with `sanction='G'`, ordered by `imposed`, and pops each offender out of its current slot and reinserts it `value` positions further back. Intervening teams shift up by one. Multiple penalties on one team stack because each is applied to the post-previous grid.
+
+Grid positions are stored in `GridPosition` and can be manually overridden via the Grid Management page. Manual edits use `source="MANUAL"` and survive subsequent recomputes only if the grid is locked; "Reset to Auto" / "Auto-Assign from Qualifying" wipe non-KNOCKOUT rows and rebuild from steps 1–3.
 
 ---
 
@@ -294,7 +309,7 @@ Pauses are always round-level (`round_pause` model). `Race.time_elapsed` correct
 
 ## Post-Race Penalties
 
-`post_race_check()` runs once when the round ends (guarded by `post_race_check_completed` flag). It checks three penalty types by matching `ChampionshipPenalty.penalty.name`:
+`post_race_check()` runs once when the round ends (guarded by `post_race_check_completed` flag). It checks three transgression penalties by matching `ChampionshipPenalty.penalty.name`:
 
 | Penalty name | What it checks | Scope |
 |---|---|---|
@@ -303,6 +318,16 @@ Pauses are always round-level (`round_pause` model). `Race.time_elapsed` correct
 | `"time limit min"` | Driver drove less than `Round.limit_time_min` | Per driver |
 
 Penalties create `RoundPenalty` records. If the penalty's `option` is `"per_hour"`, the value is multiplied by the round duration in hours.
+
+### Time-in-lieu conversion
+
+After the transgression checks, `post_race_check()` also converts any **unserved Stop & Go** penalties (sanction `S` or `D`, `RoundPenalty.served IS NULL`) into equivalent **time penalties** under the championship's `time_in_lieu` mandatory penalty:
+
+- A new `RoundPenalty` is created with `sanction='T'`, `value` set to the original S&G duration in seconds, and `served=now` (post-race penalties have nothing to "serve").
+- The original S&G is marked `served=now` and its `PenaltyQueue` row is removed.
+- `time_in_lieu` is auto-seeded by `setup_essential_data` and the per-championship `ChampionshipPenalty` row is auto-created on first use.
+
+The standings calculator already adds sanction-`T` values into each team's `total_time`, so converted penalties appear in the leaderboard without further action.
 
 ### Driving time limit calculation
 
@@ -315,6 +340,60 @@ Penalties create `RoundPenalty` records. If the penalty's `option` is `"per_hour
 | `"percent"` | N | `(round.duration / driver_count) * (1 + N/100)` |
 
 The `limit_type` (`"race"` or `"session"`) determines whether the check is against total driving time or per-stint time.
+
+---
+
+## Penalty Sanctions
+
+Every `ChampionshipPenalty` carries a one-character `sanction` code that determines what the penalty does and where it can be issued:
+
+| Code | Name | Effect | Where issued |
+|---|---|---|---|
+| `S` | Stop & Go | Queued on the S&G station; team must serve while race is running | Race Control during the race |
+| `D` | Self Stop & Go | Same queue, but no victim required (driver-error infringement) | Race Control during the race |
+| `L` | Laps | Subtracted from `laps_completed` in standings | Race Control during the race; Setup Round / Fix → Lap & Time Penalties (post-race, pre-confirm) |
+| `P` | Post Race Laps | Same effect as `L`; auto-created by `post_race_check()` for transgressions | Auto; or manually via the Lap & Time Penalties page |
+| `T` | Time Penalty | Adds N seconds to `total_time` in standings | Setup Round / Fix → Lap & Time Penalties (post-race, pre-confirm); auto-created by time-in-lieu conversion |
+| `G` | Grid Penalty | Moves the team back N positions on the Main grid (sequential, in `imposed` order) | Race Control during a Q-race; Setup Round / Fix → Grid Penalties (any time before the Main grid is locked) |
+
+`L`, `P`, and `T` only apply to the Main race standings. `G` only applies to the Main race grid. Qualifying standings ignore all of them.
+
+A **race reset** (`./race-manager manage racereset`) clears `S/D/L/P/T` rows for the round but keeps `G` rows, since grid penalties are pre-race setup that should still be in effect when the grid is rebuilt.
+
+---
+
+## Race Director Menus
+
+Beyond the always-visible navigation, two menus carry race-day actions.
+
+### Setup Round
+
+Visible to users in the **Admin** group. The Race-Director-only entries are gated separately and adapt to the active round's state:
+
+| Entry | Visible when | Purpose |
+|---|---|---|
+| Manage Round / Manage Round Team | Always (Admin) | Configure rounds and round teams |
+| Transponder Matching | Active timing race exists | Assign + lock transponders before pre-check |
+| Grid Management | Active timing race exists | Manual grid edits, lock/unlock |
+| **Grid Penalties** | Main race exists, hasn't started, grid not locked | Add/remove sanction-`G` penalties; pre-selected to the active round's Main race |
+| **Lap & Time Penalties** | Main race ended **and** round results not yet confirmed | Add/remove sanction-`L`/`P`/`T` penalties; pre-selected to the active round's Main race |
+| Race Control | Active race exists (RD) | The live race-control dashboard |
+
+The two penalty entries appear only during their respective windows and disappear as soon as the state changes (grid locked, race started, results confirmed). They both use `?race_id=<active_main_race_id>` so the page opens straight on the relevant Main race.
+
+### Fix
+
+Visible to users in the **Race Director**, **Queue Scanner**, or **Driver Scanner** groups. Hidden by default — toggle with **Ctrl + Shift + F**. Always available regardless of round state, so it can be used to clean up after a finished round.
+
+| Entry | Group | Purpose |
+|---|---|---|
+| Scan In | Queue Scanner | Manually add/remove a driver from the pit-lane queue |
+| Scan Out | Driver Scanner | Force-end an active driver session |
+| Lap Fix | Race Director | Split / merge lap crossings on a recent or live race |
+| Lap & Time Penalties | Race Director | Same as the Setup Round entry but with a race picker — useful for editing penalties on an *earlier* round whose results are still under review |
+| Grid Penalties | Race Director | Same as the Setup Round entry but with a race picker — useful when no active round exists or the Main is in a different round |
+
+The Setup Round and Fix entries hit the same backend endpoints (`fix_penalties`, `fix_grid_penalties` and their `_create` / `_delete` siblings); the only difference is whether a race is pre-selected. Both server endpoints enforce the same state gates (race ended / not started, results not confirmed, grid not locked), so URL fiddling can't bypass them.
 
 ---
 
