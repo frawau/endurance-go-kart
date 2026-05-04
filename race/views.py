@@ -6099,6 +6099,24 @@ def _is_superuser(user):
     return user.is_authenticated and user.is_superuser
 
 
+PAPER_SIZES = ["A0", "A1", "A2", "A3", "A4", "A5", "A6", "A7", "A8", "A9"]
+
+# Per-config UI hints. Keys are Config.name; values describe how to
+# render the row in the management page.
+#   kind: "select" → dropdown of `options`, "number" → numeric input
+#   suffix: optional unit shown next to the input ("%", "seconds", ...)
+CONFIG_META = {
+    "page size": {"kind": "select", "options": PAPER_SIZES, "row": "paper"},
+    "card size": {"kind": "select", "options": PAPER_SIZES, "row": "paper"},
+    "in lieu penalty factor": {"kind": "number", "suffix": "%"},
+    "display timeout": {"kind": "number", "suffix": "seconds"},
+    "sim driver change delay": {"kind": "number", "suffix": "seconds"},
+    "driver change suspicious buffer": {"kind": "number", "suffix": "seconds"},
+    "sg penalty suspicious buffer": {"kind": "number", "suffix": "seconds"},
+    "sim sg penalty extra delay": {"kind": "number", "suffix": "seconds"},
+}
+
+
 @login_required
 @user_passes_test(_is_superuser)
 def manage_configs(request):
@@ -6108,26 +6126,80 @@ def manage_configs(request):
     `value:<config_name>` becomes the new value for that Config row.
     Cache for the active_round_data context processor is invalidated
     after a save so updated values become visible immediately.
+
+    Page Size and Card Size are rendered as paper-size dropdowns on a
+    single row, and validated so the page is at least as large as the
+    card (lower numeric A-size means larger paper).
     """
     saved = False
+    error = None
     if request.method == "POST":
-        for cfg in Config.objects.all():
-            field = f"value:{cfg.name}"
-            if field in request.POST:
-                new_val = request.POST[field].strip()
-                if new_val != cfg.value:
-                    cfg.value = new_val
-                    cfg.save(update_fields=["value"])
-        # Invalidate the cached config snapshot used by the context
-        # processor so the new values flow into the next request.
-        from django.core.cache import cache
+        # Validate page/card pairing first so we either save both or neither.
+        new_page = request.POST.get("value:page size", "").strip()
+        new_card = request.POST.get("value:card size", "").strip()
+        if new_page in PAPER_SIZES and new_card in PAPER_SIZES:
+            page_num = int(new_page[1:])
+            card_num = int(new_card[1:])
+            if page_num > card_num:
+                # Larger A number = smaller paper. Page must be ≥ card.
+                error = (
+                    f"Page size ({new_page}) must be at least as large as "
+                    f"card size ({new_card})."
+                )
 
-        cache.delete("active_cache_keys")
-        saved = True
+        if error is None:
+            for cfg in Config.objects.all():
+                field = f"value:{cfg.name}"
+                if field in request.POST:
+                    new_val = request.POST[field].strip()
+                    if new_val != cfg.value:
+                        cfg.value = new_val
+                        cfg.save(update_fields=["value"])
+            from django.core.cache import cache
 
-    configs = list(Config.objects.order_by("name"))
+            cache.delete("active_cache_keys")
+            saved = True
+
+    # Build per-row context so the template can render selects / numbers /
+    # suffixes uniformly. The "paper" pair is grouped onto one row; every
+    # other config sits on its own row.
+    configs_by_name = {c.name: c for c in Config.objects.all()}
+    paper_row = []
+    other_rows = []
+    extra_rows = []  # configs without metadata fall here
+
+    for name in [
+        "page size",
+        "card size",
+        "in lieu penalty factor",
+        "display timeout",
+        "sim driver change delay",
+        "driver change suspicious buffer",
+        "sg penalty suspicious buffer",
+        "sim sg penalty extra delay",
+    ]:
+        cfg = configs_by_name.pop(name, None)
+        if cfg is None:
+            continue
+        meta = CONFIG_META[name]
+        entry = {"cfg": cfg, **meta}
+        if meta.get("row") == "paper":
+            paper_row.append(entry)
+        else:
+            other_rows.append(entry)
+
+    for name in sorted(configs_by_name):
+        cfg = configs_by_name[name]
+        extra_rows.append({"cfg": cfg, "kind": "text"})
+
     return render(
         request,
         "pages/manage_configs.html",
-        {"configs": configs, "saved": saved},
+        {
+            "paper_row": paper_row,
+            "other_rows": other_rows,
+            "extra_rows": extra_rows,
+            "saved": saved,
+            "error": error,
+        },
     )
