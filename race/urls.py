@@ -366,4 +366,5 @@ urlpatterns = [
         views.fix_grid_penalties_delete,
         name="fix_grid_penalties_delete",
     ),
+    path("admin/configs/", views.manage_configs, name="manage_configs"),
 ]

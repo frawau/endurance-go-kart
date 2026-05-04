@@ -6090,3 +6090,44 @@ def fix_grid_penalties_delete(request, penalty_id):
     if main_race is not None:
         _refresh_main_grid(main_race)
     return JsonResponse({"success": True, "message": "Grid penalty removed."})
+
+
+# ── Configuration table editor ─────────────────────────────────────────────
+
+
+def _is_superuser(user):
+    return user.is_authenticated and user.is_superuser
+
+
+@login_required
+@user_passes_test(_is_superuser)
+def manage_configs(request):
+    """List and edit rows in the Config table.
+
+    Superuser-only. POST submits a key/value form: every input named
+    `value:<config_name>` becomes the new value for that Config row.
+    Cache for the active_round_data context processor is invalidated
+    after a save so updated values become visible immediately.
+    """
+    saved = False
+    if request.method == "POST":
+        for cfg in Config.objects.all():
+            field = f"value:{cfg.name}"
+            if field in request.POST:
+                new_val = request.POST[field].strip()
+                if new_val != cfg.value:
+                    cfg.value = new_val
+                    cfg.save(update_fields=["value"])
+        # Invalidate the cached config snapshot used by the context
+        # processor so the new values flow into the next request.
+        from django.core.cache import cache
+
+        cache.delete("active_cache_keys")
+        saved = True
+
+    configs = list(Config.objects.order_by("name"))
+    return render(
+        request,
+        "pages/manage_configs.html",
+        {"configs": configs, "saved": saved},
+    )

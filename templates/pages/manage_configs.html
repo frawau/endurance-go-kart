@@ -1,0 +1,57 @@
+{% extends 'layout/content.html' %}
+
+{% block main_content %}
+<div class="container mt-5">
+    <div class="card">
+        <div class="card-header bg-secondary text-white">
+            <h4 class="mb-0"><i class="fas fa-cog me-2"></i>Configuration</h4>
+        </div>
+        <div class="card-body">
+            <p class="text-muted">
+                Edit values stored in the <code>Config</code> table. Changes take effect
+                on the next request that reads the value (the cached snapshot is
+                invalidated on save).
+            </p>
+
+            {% if saved %}
+            <div class="alert alert-success" role="alert">
+                Configuration saved.
+            </div>
+            {% endif %}
+
+            {% if configs %}
+            <form method="post">
+                {% csrf_token %}
+                <table class="table table-sm align-middle">
+                    <thead>
+                        <tr>
+                            <th style="width: 40%;">Name</th>
+                            <th>Value</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for cfg in configs %}
+                        <tr>
+                            <td><code>{{ cfg.name }}</code></td>
+                            <td>
+                                <input type="text"
+                                       class="form-control"
+                                       name="value:{{ cfg.name }}"
+                                       value="{{ cfg.value }}">
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                <button type="submit" class="btn btn-primary mt-2">
+                    <i class="fas fa-save me-1"></i>Save
+                </button>
+            </form>
+            {% else %}
+            <p class="text-muted">No Config rows defined yet — run
+                <code>./race-manager manage setup_essential_data</code>.</p>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock main_content %}

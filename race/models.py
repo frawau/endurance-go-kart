@@ -793,6 +793,16 @@ class Round(models.Model):
                 ).select_related("offender", "penalty")
             )
             if unserved_sg:
+                # Configurable: percentage applied to the original S&G
+                # duration when converting it into a time-in-lieu penalty.
+                # Default 100 (% = no scaling). Stored in the Config table
+                # as "in lieu penalty factor".
+                til_factor_pct = 100.0
+                try:
+                    raw = Config.objects.get(name="in lieu penalty factor").value
+                    til_factor_pct = float(raw)
+                except (Config.DoesNotExist, ValueError, TypeError):
+                    pass
                 # Use a single championship-level "Time in Lieu" entry of
                 # sanction='T'. Auto-create on first need so admins don't have
                 # to seed it manually before the race ends.
@@ -814,12 +824,27 @@ class Round(models.Model):
                     )
 
                 for sg in unserved_sg:
+                    # Apply the configurable factor and round to the nearest
+                    # whole second (round-half-up so e.g. 31.5 → 32, never
+                    # the banker's-rounding 31.5 → 32 / 30.5 → 30 surprise).
+                    # RoundPenalty.value carries a 1..120 validator, so cap
+                    # on overflow rather than crash.
+                    raw_seconds = sg.value * til_factor_pct / 100.0
+                    til_value = max(1, int(raw_seconds + 0.5))
+                    if til_value > 120:
+                        print(
+                            f"  - WARNING: time-in-lieu value capped at 120s "
+                            f"(was {til_value}s for team "
+                            f"{sg.offender.team.number}, factor "
+                            f"{til_factor_pct:g}%)"
+                        )
+                        til_value = 120
                     RoundPenalty.objects.create(
                         round=self,
                         offender=sg.offender,
                         victim=None,
                         penalty=til_cp,
-                        value=sg.value,
+                        value=til_value,
                         imposed=penalty_timestamp,
                         served=penalty_timestamp,
                     )
@@ -829,7 +854,8 @@ class Round(models.Model):
                     penalties_created += 1
                     print(
                         f"  - Converted unserved S&G for "
-                        f"team {sg.offender.team.number} into +{sg.value}s "
+                        f"team {sg.offender.team.number}: "
+                        f"{sg.value}s × {til_factor_pct:g}% → +{til_value}s "
                         f"time-in-lieu penalty"
                     )
 

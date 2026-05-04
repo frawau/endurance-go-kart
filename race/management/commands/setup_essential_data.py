@@ -27,6 +27,10 @@ class Command(BaseCommand):
             ("driver change suspicious buffer", "30"),
             ("sg penalty suspicious buffer", "10"),
             ("sim sg penalty extra delay", "5"),
+            # Percentage applied to an unserved Stop & Go duration when it
+            # is converted into a time-in-lieu penalty at the end of the
+            # race. 100 = same length; 105 = 5% extra; etc.
+            ("in lieu penalty factor", "100"),
         ]
         for key, val in configs:
             config, created = Config.objects.get_or_create(
