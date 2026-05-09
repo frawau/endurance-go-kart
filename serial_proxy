@@ -2,150 +2,335 @@
 """
 Serial port proxy/sniffer for protocol analysis.
 
-Forwards data bidirectionally between two serial ports and logs all
-traffic to a file with timestamps, direction, hex and ASCII representation.
+Sits between two serial ports (typically: SMS timing software <-> decoder)
+and forwards bytes bidirectionally while logging every exchange. Bytes are
+forwarded as soon as they arrive — gap-based grouping only affects how the
+log is rendered, not the wire.
+
+Two log outputs:
+    - Human-readable text log: one line per "frame" (burst of bytes
+      separated from the next by --gap-ms of silence).
+        ISO_TS  DIR  (count B)  HEX | ASCII
+    - Optional binary capture (--bin FILE): pcap-like records, ideal for
+      replay or automated parsing later.
+        Header: b"SP01" + u32 reserved (=0)
+        Record: u8 dir (0=A->B, 1=B->A) | u64 LE Unix-epoch ns
+                | u32 LE length | length bytes of data
+
+Hardware setup for a TAG/Chronelec capture:
+    SMS PC --[null modem]-- USB-Serial #1 -- (this host) -- USB-Serial #2 --[null modem]-- decoder
+                            ^ port_a                       ^ port_b
 
 Requires: pyserial-asyncio  (pip install pyserial-asyncio)
 
 Usage:
     ./serial_proxy /dev/ttyUSB0 /dev/ttyUSB1
-    ./serial_proxy /dev/ttyUSB0 /dev/ttyUSB1 -b 19200 -o capture.log
+    ./serial_proxy /dev/ttyUSB0 /dev/ttyUSB1 -b 19200 --label-a SMS --label-b DEC
+    ./serial_proxy /dev/ttyUSB0 /dev/ttyUSB1 --bin capture.bin --gap-ms 30
 """
 
 import argparse
 import asyncio
-import datetime
+import logging
+import signal
+import struct
 import sys
+import time
+from datetime import datetime, timezone
+
+_log = logging.getLogger("serial_proxy")
+
+BIN_MAGIC = b"SP01\x00\x00\x00\x00"
+DIR_A_TO_B = 0
+DIR_B_TO_A = 1
 
 
-# ── Formatting ────────────────────────────────────────────────────────────────
-
-def _format_entry(direction: str, data: bytes) -> str:
-    now = datetime.datetime.now().isoformat(timespec="milliseconds")
-    hex_str  = " ".join(f"{b:02x}" for b in data)
+def _hex_ascii(data: bytes) -> tuple[str, str]:
+    hex_str = " ".join(f"{b:02x}" for b in data)
     ascii_str = "".join(chr(b) if 0x20 <= b < 0x7F else "." for b in data)
-    return f"{now}  {direction}  [{len(data):4d}]  {hex_str:<48}  |{ascii_str}|\n"
+    return hex_str, ascii_str
 
 
-# ── Relay coroutine ───────────────────────────────────────────────────────────
+class CaptureWriter:
+    """Writes both the human-readable text log and (optionally) a binary capture."""
 
-async def relay(
-    direction: str,
+    def __init__(self, text_path: str, bin_path: str | None):
+        self._text = open(text_path, "w", buffering=1)  # line-buffered
+        self._bin = open(bin_path, "wb", buffering=0) if bin_path else None
+        if self._bin:
+            self._bin.write(BIN_MAGIC)
+        self.bytes_a = 0
+        self.bytes_b = 0
+        self.frames_a = 0
+        self.frames_b = 0
+
+    def write_header(
+        self, port_a: str, port_b: str, label_a: str, label_b: str, params: str
+    ):
+        header = (
+            f"# serial_proxy  {label_a}={port_a}  <->  {label_b}={port_b}  {params}\n"
+            f"# started {datetime.now(timezone.utc).isoformat()}\n"
+            f"# columns: ISO_TS  DIR  (count B)  HEX | ASCII\n\n"
+        )
+        self._text.write(header)
+
+    def write_frame(
+        self,
+        direction: int,
+        label_arrow: str,
+        ts_ns: int,
+        data: bytes,
+    ) -> None:
+        ts_iso = datetime.fromtimestamp(ts_ns / 1e9, tz=timezone.utc).isoformat(
+            timespec="microseconds"
+        )
+        hex_str, ascii_str = _hex_ascii(data)
+        self._text.write(
+            f"{ts_iso}  {label_arrow}  ({len(data):4d}B)  {hex_str}  | {ascii_str}\n"
+        )
+        if self._bin:
+            self._bin.write(struct.pack("<BQI", direction, ts_ns, len(data)) + data)
+        if direction == DIR_A_TO_B:
+            self.bytes_a += len(data)
+            self.frames_a += 1
+        else:
+            self.bytes_b += len(data)
+            self.frames_b += 1
+
+    def close(self):
+        footer = f"\n# stopped {datetime.now(timezone.utc).isoformat()}\n"
+        self._text.write(footer)
+        self._text.close()
+        if self._bin:
+            self._bin.close()
+
+
+async def _relay(
+    direction: int,
+    label_arrow: str,
     reader: asyncio.StreamReader,
     writer: asyncio.StreamWriter,
-    log_file,
+    capture: CaptureWriter,
+    gap_s: float,
     stop_event: asyncio.Event,
 ) -> None:
+    """Forward bytes from reader to writer, grouping into frames for the log.
+
+    Bytes are forwarded the moment they arrive; the grouping is purely
+    log-side. A frame ends when no further bytes arrive for `gap_s` seconds.
+    """
+    buf = bytearray()
+    frame_start_ns: int | None = None
+
     try:
         while not stop_event.is_set():
+            timeout = gap_s if buf else 0.5
             try:
-                data = await asyncio.wait_for(reader.read(4096), timeout=0.1)
+                chunk = await asyncio.wait_for(reader.read(4096), timeout=timeout)
             except asyncio.TimeoutError:
+                if buf:
+                    capture.write_frame(
+                        direction, label_arrow, frame_start_ns, bytes(buf)
+                    )
+                    buf.clear()
+                    frame_start_ns = None
                 continue
 
-            if not data:
-                # Port closed
+            if not chunk:
                 break
 
-            line = _format_entry(direction, data)
-            sys.stdout.write(line)
-            sys.stdout.flush()
-            log_file.write(line)
-            log_file.flush()
+            now_ns = time.time_ns()
+            if not buf:
+                frame_start_ns = now_ns
+            buf.extend(chunk)
 
-            writer.write(data)
-            await writer.drain()
-
+            # Forward immediately to keep the proxy transparent on the wire.
+            try:
+                writer.write(chunk)
+                await writer.drain()
+            except Exception as exc:
+                _log.error("[%s] forward write failed: %s", label_arrow, exc)
+                break
     except asyncio.CancelledError:
         pass
     except Exception as exc:
-        print(f"\n[{direction}] Error: {exc}", file=sys.stderr)
+        _log.error("[%s] relay error: %s", label_arrow, exc)
     finally:
+        if buf and frame_start_ns is not None:
+            capture.write_frame(direction, label_arrow, frame_start_ns, bytes(buf))
         stop_event.set()
 
 
-# ── Main ──────────────────────────────────────────────────────────────────────
-
-async def run(port_a: str, port_b: str, baudrate: int, output: str) -> None:
+async def _run(args: argparse.Namespace) -> None:
     try:
         import serial_asyncio
     except ImportError:
         sys.exit("pyserial-asyncio is required: pip install pyserial-asyncio")
 
-    print(f"Opening  {port_a}  <->  {port_b}  @ {baudrate} baud")
-    print(f"Logging to {output}")
-    print("Press Ctrl+C to stop.\n")
+    serial_kw = dict(
+        baudrate=args.baudrate,
+        parity=args.parity,
+        stopbits=(
+            float(args.stopbits) if args.stopbits in ("1.5",) else int(args.stopbits)
+        ),
+        bytesize=args.bytesize,
+        rtscts=args.rtscts,
+        xonxoff=args.xonxoff,
+        dsrdtr=args.dsrdtr,
+    )
+    params_str = (
+        f"{args.baudrate} {args.bytesize}{args.parity}{args.stopbits}"
+        f"{' rtscts' if args.rtscts else ''}"
+        f"{' xonxoff' if args.xonxoff else ''}"
+        f"{' dsrdtr' if args.dsrdtr else ''}"
+    )
+
+    _log.info(
+        "Opening %s=%s <-> %s=%s  [%s]",
+        args.label_a,
+        args.port_a,
+        args.label_b,
+        args.port_b,
+        params_str,
+    )
+    _log.info(
+        "Text log: %s%s", args.output, f"   binary: {args.bin}" if args.bin else ""
+    )
 
     try:
         reader_a, writer_a = await serial_asyncio.open_serial_connection(
-            url=port_a, baudrate=baudrate
+            url=args.port_a, **serial_kw
         )
         reader_b, writer_b = await serial_asyncio.open_serial_connection(
-            url=port_b, baudrate=baudrate
+            url=args.port_b, **serial_kw
         )
     except Exception as exc:
         sys.exit(f"Failed to open serial ports: {exc}")
 
-    stop_event = asyncio.Event()
-
-    header = (
-        f"# serial_proxy  {port_a} <-> {port_b}  baudrate={baudrate}\n"
-        f"# started {datetime.datetime.now().isoformat()}\n"
-        f"# columns: timestamp  direction  [bytes]  hex  |ascii|\n\n"
+    capture = CaptureWriter(args.output, args.bin)
+    capture.write_header(
+        args.port_a, args.port_b, args.label_a, args.label_b, params_str
     )
 
-    with open(output, "w") as log_file:
-        log_file.write(header)
-        sys.stdout.write(header)
+    stop_event = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, stop_event.set)
 
-        a_label = f"{port_a} -> {port_b}"
-        b_label = f"{port_b} -> {port_a}"
+    gap_s = args.gap_ms / 1000.0
+    a_arrow = f"{args.label_a:>4} -> {args.label_b:<4}"
+    b_arrow = f"{args.label_b:>4} -> {args.label_a:<4}"
 
-        tasks = [
-            asyncio.create_task(relay(a_label, reader_a, writer_b, log_file, stop_event)),
-            asyncio.create_task(relay(b_label, reader_b, writer_a, log_file, stop_event)),
-        ]
+    started = time.monotonic()
+    tasks = [
+        asyncio.create_task(
+            _relay(DIR_A_TO_B, a_arrow, reader_a, writer_b, capture, gap_s, stop_event)
+        ),
+        asyncio.create_task(
+            _relay(DIR_B_TO_A, b_arrow, reader_b, writer_a, capture, gap_s, stop_event)
+        ),
+    ]
 
+    try:
+        await stop_event.wait()
+    finally:
+        for t in tasks:
+            t.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
         try:
-            await asyncio.gather(*tasks)
-        except asyncio.CancelledError:
-            pass
-        finally:
-            for t in tasks:
-                t.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
             writer_a.close()
             writer_b.close()
-            footer = f"\n# stopped {datetime.datetime.now().isoformat()}\n"
-            log_file.write(footer)
-            sys.stdout.write(footer)
+        except Exception:
+            pass
+        capture.close()
+        elapsed = time.monotonic() - started
+        _log.info(
+            "Stopped after %.1fs.  %s->%s: %d frames / %d B    %s->%s: %d frames / %d B",
+            elapsed,
+            args.label_a,
+            args.label_b,
+            capture.frames_a,
+            capture.bytes_a,
+            args.label_b,
+            args.label_a,
+            capture.frames_b,
+            capture.bytes_b,
+        )
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Bidirectional serial port proxy/sniffer for protocol analysis."
+        description="Bidirectional serial port proxy/sniffer for protocol analysis.",
     )
     parser.add_argument("port_a", help="First serial port  (e.g. /dev/ttyUSB0)")
     parser.add_argument("port_b", help="Second serial port (e.g. /dev/ttyUSB1)")
+    parser.add_argument("--label-a", default="A", help="Label for port_a (default: A)")
+    parser.add_argument("--label-b", default="B", help="Label for port_b (default: B)")
     parser.add_argument(
-        "-b", "--baudrate",
-        type=int,
-        default=9600,
-        metavar="RATE",
-        help="Baud rate (default: 9600)",
+        "-b", "--baudrate", type=int, default=9600, help="Baud rate (default: 9600)"
     )
     parser.add_argument(
-        "-o", "--output",
+        "--bytesize",
+        type=int,
+        default=8,
+        choices=[5, 6, 7, 8],
+        help="Data bits (default: 8)",
+    )
+    parser.add_argument(
+        "--parity",
+        default="N",
+        choices=["N", "E", "O", "M", "S"],
+        help="Parity: N(one) E(ven) O(dd) M(ark) S(pace)  (default: N)",
+    )
+    parser.add_argument(
+        "--stopbits",
+        default="1",
+        choices=["1", "1.5", "2"],
+        help="Stop bits (default: 1)",
+    )
+    parser.add_argument(
+        "--rtscts", action="store_true", help="Enable RTS/CTS hardware flow control"
+    )
+    parser.add_argument(
+        "--xonxoff", action="store_true", help="Enable XON/XOFF software flow control"
+    )
+    parser.add_argument(
+        "--dsrdtr", action="store_true", help="Enable DSR/DTR hardware flow control"
+    )
+    parser.add_argument(
+        "--gap-ms",
+        type=float,
+        default=20.0,
+        help="Silence (ms) that ends a log frame; bytes still forwarded immediately (default: 20)",
+    )
+    parser.add_argument(
+        "-o",
+        "--output",
         default="serial_capture.log",
-        metavar="FILE",
-        help="Output log file (default: serial_capture.log)",
+        help="Human-readable log file (default: serial_capture.log)",
+    )
+    parser.add_argument(
+        "--bin",
+        default=None,
+        help="Optional binary capture path for replay/parsing (pcap-like, see header docstring)",
+    )
+    parser.add_argument(
+        "--log-level",
+        default="INFO",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        help="Status logging level (does not affect capture, default: INFO)",
     )
     args = parser.parse_args()
 
+    logging.basicConfig(
+        level=getattr(logging, args.log_level),
+        format="%(asctime)s [%(levelname)s] %(message)s",
+    )
+
     try:
-        asyncio.run(run(args.port_a, args.port_b, args.baudrate, args.output))
+        asyncio.run(_run(args))
     except KeyboardInterrupt:
-        print("\nStopped.")
+        pass
 
 
 if __name__ == "__main__":
