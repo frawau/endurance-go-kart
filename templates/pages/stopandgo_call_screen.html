@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>S&amp;G Call</title>
+    <style>
+        * { box-sizing: border-box; }
+
+        html, body {
+            margin: 0;
+            padding: 0;
+            height: 100vh;
+            width: 100vw;
+            overflow: hidden;
+            font-family: 'Arial Black', 'Helvetica', sans-serif;
+            background: #000;
+            color: #ffd700;
+        }
+
+        body.calling {
+            background: #c80000;
+        }
+
+        #team {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 900;
+            color: #ffd700;
+            line-height: 1;
+            text-align: center;
+            user-select: none;
+            /* Sized in JS to fill the viewport. */
+            font-size: 10vw;
+        }
+
+        body:not(.calling) #team {
+            visibility: hidden;
+        }
+    </style>
+</head>
+<body class="{% if serving_team %}calling{% endif %}">
+    <div id="team">{% if serving_team %}{{ serving_team }}{% endif %}</div>
+
+    <script>
+        const teamEl = document.getElementById('team');
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${protocol}//${window.location.host}/ws/stopandgo-display/`;
+        let socket;
+        let reconnectAttempts = 0;
+
+        function setTeam(team) {
+            if (team === null || team === undefined || team === '') {
+                document.body.classList.remove('calling');
+                teamEl.textContent = '';
+            } else {
+                teamEl.textContent = String(team);
+                document.body.classList.add('calling');
+                autoFit();
+            }
+        }
+
+        // Scale the team number to fill the viewport. Run after the text
+        // changes and on resize so it stays as large as possible.
+        function autoFit() {
+            if (!document.body.classList.contains('calling')) return;
+            const text = teamEl.textContent;
+            if (!text) return;
+            // Start large, shrink until it fits both axes.
+            const vw = window.innerWidth;
+            const vh = window.innerHeight;
+            // 0.9 keeps a margin so digits don't kiss the edge.
+            let size = Math.min(vw, vh) * 0.9;
+            teamEl.style.fontSize = size + 'px';
+            // If it overflows (rare with 1–3 digit numbers), shrink.
+            let guard = 20;
+            while (
+                guard-- > 0 &&
+                (teamEl.scrollWidth > vw * 0.95 || teamEl.scrollHeight > vh * 0.95)
+            ) {
+                size *= 0.9;
+                teamEl.style.fontSize = size + 'px';
+            }
+        }
+
+        function connect() {
+            socket = new WebSocket(wsUrl);
+            socket.onopen = function() { reconnectAttempts = 0; };
+            socket.onmessage = function(event) {
+                let data;
+                try { data = JSON.parse(event.data); } catch (e) { return; }
+                if (data.type === 'display_update') {
+                    setTeam(data.serving_team);
+                }
+            };
+            socket.onclose = function() {
+                reconnectAttempts++;
+                const delay = Math.min(1000 * reconnectAttempts, 30000);
+                setTimeout(connect, delay);
+            };
+            socket.onerror = function(err) { console.error('WS error', err); };
+        }
+
+        window.addEventListener('resize', autoFit);
+        autoFit();
+        connect();
+    </script>
+</body>
+</html>

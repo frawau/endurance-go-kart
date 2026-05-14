@@ -365,6 +365,17 @@ def send_penalty_queue_update(round_id):
         },
     )
 
+    # Mirror the top-of-queue team to the S&G call screen group. Kept
+    # separate from "stopandgo" so the display consumer only has to
+    # handle one event type instead of every station/race-control type.
+    async_to_sync(channel_layer.group_send)(
+        "stopandgo_display",
+        {
+            "type": "display_update",
+            "serving_team": serving_team,
+        },
+    )
+
 
 @receiver([post_save, post_delete], sender=PenaltyQueue)
 def penalty_queue_changed(sender, instance, **kwargs):

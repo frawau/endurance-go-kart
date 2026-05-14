@@ -224,6 +224,11 @@ urlpatterns = [
         views.track_display,
         name="track_display",
     ),
+    path(
+        "stopandgo-call/",
+        views.stopandgo_call_screen,
+        name="stopandgo_call_screen",
+    ),
     # Lap Management (Phase 6 - Lap Splitting & Suspicious Lap Detection)
     path(
         "race/<int:race_id>/laps/",

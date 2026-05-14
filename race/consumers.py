@@ -384,6 +384,60 @@ class RoundConsumer(SafeSendMixin, AsyncWebsocketConsumer):
         )
 
 
+class StopAndGoCallScreenConsumer(SafeSendMixin, AsyncWebsocketConsumer):
+    """Pushes the top-of-queue S&G team number to a wall-mounted call screen.
+
+    Joined to "stopandgo_display" rather than the station group so it only
+    has to handle the single `display_update` event emitted from
+    send_penalty_queue_update().
+    """
+
+    group_name = "stopandgo_display"
+
+    async def connect(self):
+        await self.channel_layer.group_add(self.group_name, self.channel_name)
+        await self.accept()
+        # Replay current state so a screen that connects mid-penalty
+        # immediately shows the team, instead of waiting for the next
+        # queue change.
+        serving_team = await self.get_serving_team()
+        await self.safe_send(
+            json.dumps({"type": "display_update", "serving_team": serving_team})
+        )
+
+    async def disconnect(self, close_code):
+        await self.channel_layer.group_discard(self.group_name, self.channel_name)
+
+    async def receive(self, text_data):
+        # Display-only client; ignore anything it sends.
+        return
+
+    async def display_update(self, event):
+        await self.safe_send(
+            json.dumps(
+                {"type": "display_update", "serving_team": event.get("serving_team")}
+            )
+        )
+
+    @database_sync_to_async
+    def get_serving_team(self):
+        cround = Round.objects.filter(ended__isnull=True).order_by("start").first()
+        if not cround:
+            return None
+        pq = (
+            PenaltyQueue.objects.filter(
+                round_penalty__round_id=cround.id,
+                round_penalty__served__isnull=True,
+            )
+            .select_related("round_penalty__offender__team")
+            .order_by("timestamp")
+            .first()
+        )
+        if not pq:
+            return None
+        return pq.round_penalty.offender.team.number
+
+
 class StopAndGoConsumer(SafeSendMixin, AsyncWebsocketConsumer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

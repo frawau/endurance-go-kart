@@ -4751,6 +4751,32 @@ def track_display(request):
     )
 
 
+@xframe_options_exempt
+def stopandgo_call_screen(request):
+    """Full-page S&G call screen: red bg + yellow team number when a
+    penalty is queued, blank when none. Updates over
+    /ws/stopandgo-display/."""
+    cround = Round.objects.filter(ended__isnull=True).order_by("start").first()
+    serving_team = None
+    if cround:
+        pq = (
+            PenaltyQueue.objects.filter(
+                round_penalty__round_id=cround.id,
+                round_penalty__served__isnull=True,
+            )
+            .select_related("round_penalty__offender__team")
+            .order_by("timestamp")
+            .first()
+        )
+        if pq:
+            serving_team = pq.round_penalty.offender.team.number
+    return render(
+        request,
+        "pages/stopandgo_call_screen.html",
+        {"serving_team": serving_team},
+    )
+
+
 # ============================================================
 # Lap Management Views (Phase 6 - Lap Splitting & Suspicious Lap Detection)
 # ============================================================
