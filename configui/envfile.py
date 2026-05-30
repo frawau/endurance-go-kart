@@ -11,6 +11,31 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+# A value made only of these characters is safe to write unquoted: it survives
+# both `source .env` (bash) and docker compose's interpolation. Anything else
+# (notably spaces and shell metacharacters like ! $ " etc.) is single-quoted so
+# a password such as "G0 F4Ster!" doesn't break `source .env`.
+_SAFE_VALUE_RE = re.compile(r"^[A-Za-z0-9_./:@%+,=-]*$")
+
+
+def shell_quote(value: str) -> str:
+    """Quote *value* for a ``.env`` line if it isn't already shell-safe."""
+    if _SAFE_VALUE_RE.match(value):
+        return value
+    # Single-quote, escaping embedded single quotes the POSIX way ('\'').
+    return "'" + value.replace("'", "'\\''") + "'"
+
+
+def shell_unquote(raw: str) -> str:
+    """Inverse of :func:`shell_quote` for reading a ``.env`` value."""
+    s = raw.strip()
+    if len(s) >= 2 and s[0] == s[-1] and s[0] in ("'", '"'):
+        inner = s[1:-1]
+        if s[0] == "'":
+            inner = inner.replace("'\\''", "'")
+        return inner
+    return raw.rstrip()
+
 
 class EnvFile:
     """A line-oriented, comment-preserving view of a ``.env`` file."""
@@ -61,10 +86,10 @@ class EnvFile:
         """
         active_idx, commented_idx = self._find(key)
         if active_idx is not None:
-            return self.lines[active_idx].split("=", 1)[1].rstrip(), True
+            return shell_unquote(self.lines[active_idx].split("=", 1)[1]), True
         if commented_idx is not None:
             raw = self.lines[commented_idx].split("=", 1)[1]
-            return self._strip_inline_comment(raw), False
+            return shell_unquote(self._strip_inline_comment(raw)), False
         return None, False
 
     def set(self, key: str, value: str) -> None:
@@ -74,7 +99,7 @@ class EnvFile:
         appends a new line — in that order of preference.
         """
         active_idx, commented_idx = self._find(key)
-        new_line = f"{key}={value}"
+        new_line = f"{key}={shell_quote(value)}"
         if active_idx is not None:
             self.lines[active_idx] = new_line
         elif commented_idx is not None:
