@@ -93,13 +93,14 @@ cp .env.example .env               # Create .env from template
 ./race-manager generate-secret  # Generate and add secure secrets to .env
 # Edit .env: Set APP_HOSTNAME, configure timezone, adjust other settings
 
-# 3. Start the application
+# 3. Start the application (prompts for an admin username/password on first run)
 ./race-manager start
 ```
 
 **That's it!** Access at `http://your-domain:5085`
 
-Default login: `admin` / `admin` (change immediately!)
+Log in with the admin credentials you set when `start` first ran
+(or run `./race-manager create-admin` to create/recreate it).
 
 ### Enable HTTPS (Optional)
 
@@ -215,29 +216,22 @@ For production deployment, Docker provides easier setup and consistent environme
 
 3. **Start the application**
 
-   Using race-manager (recommended):
    ```bash
    ./race-manager start
    ```
 
-   Or using Docker Compose directly:
-   ```bash
-   docker compose up -d
-   ```
+   On a fresh install, `start` detects that no admin user exists yet and
+   **prompts you for an admin username and password** (skipped automatically
+   when run non-interactively, e.g. from a deploy script). You can also create
+   or recreate it any time with `./race-manager create-admin`.
 
-   The application will be available at `http://your-domain:5085`
+   The application will be available at `http://your-domain:5085`.
 
 4. **Initial setup and configuration**
 
-   a. **Create the admin user** (prompts for username/password)
-      ```bash
-      ./race-manager create-admin
-      ```
+   a. **Log in** with the admin credentials you set during `start`
 
-   b. **Log in**
-      - Navigate to your site and log in with the credentials you just set
-
-   c. **Create additional users (optional)**
+   b. **Create additional users (optional)**
       - In Django admin, go to Users
       - Add a new user with your preferred credentials
       - Assign the user to groups: `Admin` and `Race Director`

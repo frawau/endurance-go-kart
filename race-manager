@@ -262,6 +262,9 @@ start_services() {
     docker compose $profiles up -d
     log_success "Services started!"
 
+    # On a fresh, interactive install, offer to create the admin user now.
+    ensure_admin_interactive
+
     if [ "${HTTP_PORT}" = "80" ]; then
         log_info "Application available at: http://${APP_HOSTNAME}"
     else
@@ -966,6 +969,72 @@ configui_status() {
     systemctl status configui --no-pager 2>/dev/null || true
 }
 
+# Wait until the app container's database schema is ready (migrations applied).
+# Returns 0 when ready, 1 on timeout.
+wait_db_ready() {
+    local i
+    for i in $(seq 1 30); do
+        if docker compose exec -T appseed-app python manage.py migrate --check >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 2
+    done
+    return 1
+}
+
+# Returns 0 if a Django superuser already exists.
+superuser_exists() {
+    docker compose exec -T appseed-app python manage.py shell -c \
+        "from django.contrib.auth import get_user_model as g; print(g().objects.filter(is_superuser=True).exists())" \
+        2>/dev/null | grep -q True
+}
+
+# Prompt for credentials and create the superuser. Assumes the DB is ready.
+prompt_and_create_admin() {
+    local username password password2 email
+    read -r -p "Admin username [admin]: " username
+    username="${username:-admin}"
+    read -r -s -p "Admin password: " password
+    echo
+    read -r -s -p "Confirm password: " password2
+    echo
+    if [ -z "$password" ]; then
+        log_error "Password cannot be empty."
+        return 1
+    fi
+    if [ "$password" != "$password2" ]; then
+        log_error "Passwords do not match."
+        return 1
+    fi
+    read -r -p "Admin email [admin@${APP_HOSTNAME:-localhost}]: " email
+    email="${email:-admin@${APP_HOSTNAME:-localhost}}"
+
+    # createsuperuser_with_password creates the user only if it does not already
+    # exist (it reports if the username is taken); change an existing password
+    # from the Django admin instead.
+    docker compose exec -T appseed-app \
+        python manage.py createsuperuser_with_password \
+        --username "$username" --password "$password" --email "$email"
+}
+
+# Called by `start` on a fresh, interactive install: if there's no admin yet and
+# we have a terminal, offer to create one now. Non-interactive runs just print a
+# hint so deploy scripts/CI never block.
+ensure_admin_interactive() {
+    if [ ! -t 0 ]; then
+        return 0
+    fi
+    if ! wait_db_ready; then
+        return 0
+    fi
+    if superuser_exists; then
+        return 0
+    fi
+    echo ""
+    log_info "No admin user exists yet — let's create one (Ctrl-C to skip)."
+    prompt_and_create_admin || log_warning "Admin not created. Run '$0 create-admin' later."
+}
+
 create_admin() {
     log_info "Create the Django admin user (interactive)..."
 
@@ -977,42 +1046,11 @@ create_admin() {
     # On a fresh install the container is up but still migrating; wait until the
     # database schema is ready before trying to create the user.
     log_info "Waiting for the application database to be ready..."
-    local ready=0 i
-    for i in $(seq 1 30); do
-        if docker compose exec -T appseed-app python manage.py migrate --check >/dev/null 2>&1; then
-            ready=1
-            break
-        fi
-        sleep 2
-    done
-    if [ "$ready" -ne 1 ]; then
+    if ! wait_db_ready; then
         log_warning "Database not confirmed ready after 60s — trying anyway."
     fi
 
-    local username password password2 email
-    read -r -p "Admin username [admin]: " username
-    username="${username:-admin}"
-    read -r -s -p "Admin password: " password
-    echo
-    read -r -s -p "Confirm password: " password2
-    echo
-    if [ -z "$password" ]; then
-        log_error "Password cannot be empty."
-        exit 1
-    fi
-    if [ "$password" != "$password2" ]; then
-        log_error "Passwords do not match."
-        exit 1
-    fi
-    read -r -p "Admin email [admin@${APP_HOSTNAME:-localhost}]: " email
-    email="${email:-admin@${APP_HOSTNAME:-localhost}}"
-
-    # createsuperuser_with_password creates the user only if it does not already
-    # exist (it reports if the username is taken); change an existing password
-    # from the Django admin instead.
-    docker compose exec -T appseed-app \
-        python manage.py createsuperuser_with_password \
-        --username "$username" --password "$password" --email "$email"
+    prompt_and_create_admin
 }
 
 reset_system() {
