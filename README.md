@@ -644,6 +644,13 @@ certificate under `/var/lib/configui/ssl/`. Access it at
 `https://<APP_HOSTNAME>:7443/` (override with `CONFIGUI_PORT`). Keep it on a
 trusted network — it can change configuration and run deployment commands.
 
+In automatic SSL modes (`letsencrypt`/`acme`) the issued certificate lives in the
+acme.sh Docker volume, not on the host. `deploy-configui` therefore **exports it
+into `./ssl/`** and installs a **daily timer** (`configui-cert-sync.timer`) that
+re-copies it after each renewal and restarts the Config UI — so it serves the
+real certificate with no manual steps. You can run the export on demand with
+`./race-manager sync-acme-cert`.
+
 > **Tip:** run `deploy-configui` as the final step of a fresh install — from
 > then on the rest of the system can be configured entirely from the browser.
 

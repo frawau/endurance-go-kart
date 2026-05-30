@@ -127,6 +127,7 @@ show_help() {
     echo "  deploy-configui    Install the web config UI as a systemd service (HTTPS)"
     echo "  undeploy-configui  Stop and remove the config UI service"
     echo "  configui-status    Show config UI service status"
+    echo "  sync-acme-cert     Copy the Let's Encrypt cert into ./ssl for the config UI"
     echo ""
     echo "Test Data Management:"
     echo "  manage <command>   Run Django management command (e.g., generate_test_data)"
@@ -937,6 +938,24 @@ deploy_configui() {
     sudo systemctl enable configui
     sudo systemctl restart configui
 
+    # In automatic SSL modes the real certificate lives in the acme.sh Docker
+    # volume, not on the host. Export it for the (native) Config UI and install a
+    # daily timer that refreshes it after renewals.
+    if [ "${SSL_MODE:-none}" = "acme" ] || [ "${SSL_MODE:-none}" = "letsencrypt" ]; then
+        local sync_svc_tmpl="$CONFIGUI_DIR/configui-cert-sync.service.template"
+        local sync_timer_tmpl="$CONFIGUI_DIR/configui-cert-sync.timer.template"
+        if [ -f "$sync_svc_tmpl" ] && [ -f "$sync_timer_tmpl" ]; then
+            sed -e "s|__WORKDIR__|$SCRIPT_DIR|g" "$sync_svc_tmpl" \
+                | sudo tee /etc/systemd/system/configui-cert-sync.service > /dev/null
+            sudo cp "$sync_timer_tmpl" /etc/systemd/system/configui-cert-sync.timer
+            sudo systemctl daemon-reload
+            sudo systemctl enable --now configui-cert-sync.timer
+            log_success "Installed daily ACME cert sync (configui-cert-sync.timer)"
+        fi
+        # Initial export so the Config UI uses the real cert right away.
+        sync_acme_cert
+    fi
+
     local cfg_port="${CONFIGUI_PORT:-7443}"
     log_success "Config UI service deployed and started!"
     log_info "Access:   ${GREEN}https://${APP_HOSTNAME:-localhost}:${cfg_port}/${NC}"
@@ -945,12 +964,59 @@ deploy_configui() {
     log_info "View logs:    journalctl -u configui -f"
 }
 
+# Export the ACME-issued certificate from the acme.sh container into <repo>/ssl/
+# so the native Config UI can serve the real cert. Only acts in automatic SSL
+# modes and only restarts configui when the certificate actually changed (so the
+# daily timer is a no-op between renewals).
+sync_acme_cert() {
+    if [ "${SSL_MODE:-none}" != "acme" ] && [ "${SSL_MODE:-none}" != "letsencrypt" ]; then
+        log_info "SSL_MODE is '${SSL_MODE:-none}' — no ACME certificate to sync."
+        return 0
+    fi
+
+    local ssl_dir="$SCRIPT_DIR/ssl"
+    mkdir -p "$ssl_dir"
+    local tmpd
+    tmpd="$(mktemp -d)"
+    if ! docker compose cp acme-sh:/etc/ssl/certs/fullchain.pem "$tmpd/fullchain.pem" >/dev/null 2>&1 \
+        || ! docker compose cp acme-sh:/etc/ssl/certs/privkey.pem "$tmpd/privkey.pem" >/dev/null 2>&1; then
+        rm -rf "$tmpd"
+        log_warning "Could not read the ACME certificate from the acme-sh container."
+        log_info "Is SSL set up and the acme-sh service running? (try: $0 generate-cert)"
+        return 0
+    fi
+
+    local changed=0
+    cmp -s "$tmpd/fullchain.pem" "$ssl_dir/fullchain.pem" 2>/dev/null || changed=1
+    cmp -s "$tmpd/privkey.pem" "$ssl_dir/privkey.pem" 2>/dev/null || changed=1
+
+    if [ "$changed" -eq 0 ]; then
+        rm -rf "$tmpd"
+        log_info "Config UI certificate already up to date."
+        return 0
+    fi
+
+    mv "$tmpd/fullchain.pem" "$ssl_dir/fullchain.pem"
+    mv "$tmpd/privkey.pem" "$ssl_dir/privkey.pem"
+    chmod 600 "$ssl_dir/privkey.pem"
+    rm -rf "$tmpd"
+    log_success "Synced ACME certificate to $ssl_dir/"
+
+    if systemctl is-active --quiet configui 2>/dev/null; then
+        sudo systemctl restart configui
+        log_success "Restarted configui to load the updated certificate."
+    fi
+}
+
 undeploy_configui() {
     log_info "Removing Config UI systemd service..."
 
     sudo systemctl stop configui 2>/dev/null || true
     sudo systemctl disable configui 2>/dev/null || true
+    sudo systemctl disable --now configui-cert-sync.timer 2>/dev/null || true
     sudo rm -f /etc/systemd/system/configui.service
+    sudo rm -f /etc/systemd/system/configui-cert-sync.service
+    sudo rm -f /etc/systemd/system/configui-cert-sync.timer
     sudo rm -f /etc/sudoers.d/configui
     sudo systemctl daemon-reload
 
@@ -1311,6 +1377,9 @@ case "${1:-help}" in
         ;;
     "configui-status")
         configui_status
+        ;;
+    "sync-acme-cert")
+        sync_acme_cert
         ;;
     "create-admin")
         create_admin
