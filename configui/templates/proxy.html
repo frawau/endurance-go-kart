@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}Decoder Proxy{% endblock %}
+{% block content %}
+<div class="wrap">
+  <div class="page-head">
+    <h1>Decoder Proxy</h1>
+    <p>The proxy reads the timing decoder once and reliably fans the frames out to
+      multiple clients. Edit it here, then run <strong>Deploy nettag proxy</strong> on the
+      Dashboard — that also repoints and (re)deploys the timing station.</p>
+  </div>
+
+  {% if saved %}
+  <div class="alert alert-success">Proxy configuration saved.
+    Run <a href="/">Deploy nettag proxy</a> to apply.</div>
+  {% endif %}
+
+  <form method="post" action="/proxy">
+    <input type="hidden" name="csrf" value="{{ csrf }}" />
+
+    <div class="card">
+      <div class="card-header"><h4>Decoder (upstream)</h4></div>
+      <div class="card-body">
+        <div class="grid">
+          <div class="field">
+            <label for="decoder_host">Decoder host</label>
+            <input type="text" id="decoder_host" name="decoder_host"
+                   value="{{ data.upstream.decoder_host }}" placeholder="192.168.0.11" />
+            <span class="hint">The real timing decoder / Lantronix address.</span>
+          </div>
+          <div class="field">
+            <label for="decoder_port">Decoder port</label>
+            <input type="number" id="decoder_port" name="decoder_port" value="{{ data.upstream.decoder_port }}" />
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><h4>Local timing station</h4></div>
+      <div class="card-body">
+        <div class="grid">
+          <div class="field">
+            <label for="local_port">Client port (on 127.0.0.1)</label>
+            <input type="number" id="local_port" name="local_port" value="{{ local_port or 2011 }}" />
+            <span class="hint">deploy-proxy points the timing station at 127.0.0.1 on this port
+              (sets TIMING_NETTAG_PORT).</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><h4>Downstream delivery</h4></div>
+      <div class="card-body">
+        <div class="grid">
+          <div class="field">
+            <label for="listen_port">ACK listen port</label>
+            <input type="number" id="listen_port" name="listen_port" value="{{ data.downstream.listen_port }}" />
+            <span class="hint">Port the proxy binds for client ACKs.</span>
+          </div>
+          <div class="field">
+            <label for="resend_interval">Resend interval (s)</label>
+            <input type="number" step="any" id="resend_interval" name="resend_interval"
+                   value="{{ data.downstream.resend_interval }}" />
+          </div>
+          <div class="field">
+            <label for="log_level">Log level</label>
+            <select id="log_level" name="log_level">
+              {% for lvl in log_levels %}
+              <option value="{{ lvl }}" {% if lvl == data.logging.level %}selected{% endif %}>{{ lvl }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <h4>Additional clients</h4>
+        <button type="button" id="add-client" class="btn btn-sm btn-ghost"
+                style="background: rgba(255,255,255,.15); color:#fff; border-color: transparent;">+ Add client</button>
+      </div>
+      <div class="card-body">
+        <p class="muted-note" style="margin-top:0;">Other consumers of the decoder feed
+          (a second timing system, scoreboard, …). The local timing station above is added
+          automatically — list only the extras here.</p>
+        <div id="clients">
+          {% for c in extras %}
+          <div class="input-row client-row" style="margin-bottom:.6rem;">
+            <input type="text" name="client_host" value="{{ c.host }}" placeholder="host / IP" />
+            <input type="number" name="client_port" value="{{ c.port }}" placeholder="port" style="max-width:140px;" />
+            <button type="button" class="btn btn-sm btn-danger remove-client">Remove</button>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+
+    <div class="actions">
+      <button type="submit" class="btn btn-primary" {% if lock and lock.locked %}disabled title="Locked during a live round"{% endif %}>Save proxy config</button>
+      <a href="/proxy" class="btn btn-ghost">Reset</a>
+    </div>
+  </form>
+</div>
+
+<template id="client-tpl">
+  <div class="input-row client-row" style="margin-bottom:.6rem;">
+    <input type="text" name="client_host" placeholder="host / IP" />
+    <input type="number" name="client_port" placeholder="port" style="max-width:140px;" />
+    <button type="button" class="btn btn-sm btn-danger remove-client">Remove</button>
+  </div>
+</template>
+
+<script>
+  const clients = document.getElementById("clients");
+  const tpl = document.getElementById("client-tpl");
+  document.getElementById("add-client").addEventListener("click", () => {
+    clients.appendChild(tpl.content.cloneNode(true));
+  });
+  clients.addEventListener("click", (e) => {
+    if (e.target.classList.contains("remove-client")) e.target.closest(".client-row").remove();
+  });
+</script>
+{% endblock %}

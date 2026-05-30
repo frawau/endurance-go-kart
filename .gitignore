@@ -21,6 +21,11 @@ env
 /backups/
 gokart_backup_*.tar.gz
 
+# Config UI virtualenv (created by `race-manager deploy-configui`)
+/configui/venv/
+# .env.bak left behind when switching Locations via the Config UI
+.env.bak
+
 # Station runtime configs — derived from the *.toml.example templates by
 # `race-manager configure-stations` and patched with .env values. The
 # templates stay tracked; the runtime files are local-only so a git

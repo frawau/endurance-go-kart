@@ -53,6 +53,45 @@ get_all_profiles() {
     echo "--profile ssl-acme"
 }
 
+# Set KEY=VALUE in .env: update an active line, else uncomment a commented one,
+# else append. Values here are IPs/ports/identifiers (no '|'), so the sed
+# delimiter is safe.
+set_env_var() {
+    local key="$1" value="$2"
+    if grep -q "^${key}=" "$ENV_FILE"; then
+        sed -i "s|^${key}=.*|${key}=${value}|" "$ENV_FILE"
+    elif grep -q "^# *${key}=" "$ENV_FILE"; then
+        sed -i "s|^# *${key}=.*|${key}=${value}|" "$ENV_FILE"
+    else
+        echo "${key}=${value}" >> "$ENV_FILE"
+    fi
+}
+
+# Read a value out of the nettag-proxy TOML using stdlib tomllib.
+#   proxy_toml_get <file> upstream-host | upstream-port | local-client-port
+proxy_toml_get() {
+    python3 - "$1" "$2" <<'PY'
+import sys, tomllib
+
+try:
+    with open(sys.argv[1], "rb") as f:
+        cfg = tomllib.load(f)
+except (OSError, tomllib.TOMLDecodeError):
+    sys.exit(0)
+
+what = sys.argv[2]
+if what == "upstream-host":
+    print(cfg.get("upstream", {}).get("decoder_host", ""))
+elif what == "upstream-port":
+    print(cfg.get("upstream", {}).get("decoder_port", ""))
+elif what == "local-client-port":
+    for client in cfg.get("client", []):
+        if client.get("host") in ("127.0.0.1", "localhost"):
+            print(client.get("port", ""))
+            break
+PY
+}
+
 show_help() {
     echo "GoKartRace Manager - One Script to Rule Them All"
     echo ""
@@ -84,6 +123,11 @@ show_help() {
     echo "  undeploy-proxy     Stop and remove nettag-proxy systemd service"
     echo "  proxy-status       Show nettag-proxy service status"
     echo ""
+    echo "Config UI (web configurator):"
+    echo "  deploy-configui    Install the web config UI as a systemd service (HTTPS)"
+    echo "  undeploy-configui  Stop and remove the config UI service"
+    echo "  configui-status    Show config UI service status"
+    echo ""
     echo "Test Data Management:"
     echo "  manage <command>   Run Django management command (e.g., generate_test_data)"
     echo "  manage assign_transponders           Assign transponders to all teams (first race only)"
@@ -109,6 +153,7 @@ show_help() {
     echo "  $0 rebuild                  # Rebuild after git pull"
     echo "  $0 deploy-timing            # Install timing station as native service"
     echo "  $0 deploy-proxy             # Install nettag-proxy systemd service"
+    echo "  $0 deploy-configui          # Install the web config UI (HTTPS)"
     echo "  $0 manage generate_test_data --teams 50  # Generate test data"
     echo ""
 }
@@ -637,6 +682,44 @@ deploy_proxy() {
     log_success "nettag-proxy service deployed and started!"
     log_info "Config: $STATE_DIR/nettag-proxy.toml (source: $PROXY_DIR/nettag-proxy.toml)"
     log_info "Buffer: $STATE_DIR/nettag_buffer.db"
+
+    # --- Couple the timing station to the proxy -----------------------------
+    # In direct mode the timing station reads the decoder (TIMING_NETTAG_HOST/PORT).
+    # With a proxy in front, it must instead read the proxy's local client port on
+    # 127.0.0.1; the real decoder address now lives in the proxy's [upstream].
+    local proxy_toml="$PROXY_DIR/nettag-proxy.toml"
+    local local_port upstream_host
+    local_port="$(proxy_toml_get "$proxy_toml" local-client-port)"
+    upstream_host="$(proxy_toml_get "$proxy_toml" upstream-host)"
+
+    if [ -z "$local_port" ]; then
+        local_port="${TIMING_NETTAG_PORT:-2011}"
+        log_warning "No local (127.0.0.1) client in proxy config — using port ${local_port}."
+        log_warning "Add a client { host = \"127.0.0.1\", port = ${local_port} } to $proxy_toml"
+    fi
+
+    # Warn if the proxy upstream does not match the decoder the timing station
+    # was talking to directly (likely a mis-set decoder address).
+    if [ -n "${TIMING_NETTAG_HOST:-}" ] && [ "${TIMING_NETTAG_HOST}" != "127.0.0.1" ] \
+       && [ -n "$upstream_host" ] && [ "$upstream_host" != "${TIMING_NETTAG_HOST}" ]; then
+        log_warning "Proxy upstream decoder (${upstream_host}) differs from current"
+        log_warning "TIMING_NETTAG_HOST (${TIMING_NETTAG_HOST}). Check the proxy's [upstream]."
+    fi
+
+    set_env_var TIMING_PLUGIN_TYPE nettag
+    set_env_var TIMING_NETTAG_HOST 127.0.0.1
+    set_env_var TIMING_NETTAG_PORT "$local_port"
+    log_success "Repointed timing station to proxy at 127.0.0.1:${local_port}"
+
+    # A proxy is pointless without a timing station: deploy it, or refresh the
+    # already-deployed one (configure_stations restarts it when running).
+    if [ -f /etc/systemd/system/timing-station.service ]; then
+        configure_stations
+    else
+        log_info "Timing station not deployed yet — deploying it (a proxy needs one)..."
+        deploy_timing
+    fi
+
     log_info "Check status: $0 proxy-status"
     log_info "View logs: journalctl -u nettag-proxy -f"
 }
@@ -648,6 +731,21 @@ undeploy_proxy() {
     sudo systemctl disable nettag-proxy 2>/dev/null || true
     sudo rm -f /etc/systemd/system/nettag-proxy.service
     sudo systemctl daemon-reload
+
+    # Revert the timing station to talk directly to the decoder. The decoder
+    # address was moved into the proxy's [upstream] when we deployed it.
+    local proxy_toml="$SCRIPT_DIR/proxy/nettag-proxy.toml"
+    local decoder_host decoder_port
+    decoder_host="$(proxy_toml_get "$proxy_toml" upstream-host)"
+    decoder_port="$(proxy_toml_get "$proxy_toml" upstream-port)"
+    if [ "${TIMING_NETTAG_HOST:-}" = "127.0.0.1" ] && [ -n "$decoder_host" ]; then
+        set_env_var TIMING_NETTAG_HOST "$decoder_host"
+        [ -n "$decoder_port" ] && set_env_var TIMING_NETTAG_PORT "$decoder_port"
+        log_success "Reverted timing station to decoder at ${decoder_host}:${decoder_port}"
+        if [ -f /etc/systemd/system/timing-station.service ]; then
+            configure_stations
+        fi
+    fi
 
     log_success "nettag-proxy service removed"
     log_info "Buffer data preserved in /var/lib/nettag-proxy/"
@@ -742,6 +840,117 @@ proxy_status() {
         log_warning "nettag-proxy is not running"
     fi
     systemctl status nettag-proxy --no-pager 2>/dev/null || true
+}
+
+deploy_configui() {
+    log_info "Deploying Config UI as a systemd service..."
+
+    CONFIGUI_DIR="$SCRIPT_DIR/configui"
+    SERVICE_TEMPLATE="$CONFIGUI_DIR/configui.service.template"
+    SUDOERS_TEMPLATE="$CONFIGUI_DIR/configui.sudoers.template"
+    SERVICE_FILE="/etc/systemd/system/configui.service"
+    SUDOERS_FILE="/etc/sudoers.d/configui"
+    STATE_DIR="/var/lib/configui"
+    VENV_DIR="$CONFIGUI_DIR/venv"
+
+    if [ ! -f "$SERVICE_TEMPLATE" ] || [ ! -f "$SUDOERS_TEMPLATE" ]; then
+        log_error "Config UI templates not found in $CONFIGUI_DIR"
+        exit 1
+    fi
+
+    # Detect current user/group
+    CONFIGUI_USER="${SUDO_USER:-$(whoami)}"
+    CONFIGUI_GROUP="$(id -gn "$CONFIGUI_USER")"
+    log_info "Installing service as user=$CONFIGUI_USER group=$CONFIGUI_GROUP"
+
+    # Create venv and install dependencies
+    if [ ! -d "$VENV_DIR" ]; then
+        log_info "Creating Python virtual environment at $VENV_DIR..."
+        python3 -m venv "$VENV_DIR"
+        chown -R "$CONFIGUI_USER:$CONFIGUI_GROUP" "$VENV_DIR"
+    fi
+    log_info "Installing dependencies..."
+    "$VENV_DIR/bin/pip" install --quiet -r "$CONFIGUI_DIR/requirements.txt"
+
+    # Generate a login password if none is set in .env
+    if ! grep -qE '^CONFIGUI_PASSWORD=.+' "$ENV_FILE"; then
+        CONFIGUI_PASSWORD=$(openssl rand -base64 18 | tr -d '\n')
+        if grep -q "^CONFIGUI_PASSWORD=" "$ENV_FILE"; then
+            sed -i "s|^CONFIGUI_PASSWORD=.*|CONFIGUI_PASSWORD=${CONFIGUI_PASSWORD}|" "$ENV_FILE"
+        elif grep -q "^# CONFIGUI_PASSWORD=" "$ENV_FILE"; then
+            sed -i "s|^# CONFIGUI_PASSWORD=.*|CONFIGUI_PASSWORD=${CONFIGUI_PASSWORD}|" "$ENV_FILE"
+        else
+            echo "CONFIGUI_PASSWORD=${CONFIGUI_PASSWORD}" >> "$ENV_FILE"
+        fi
+        log_success "Generated CONFIGUI_PASSWORD in .env"
+    else
+        CONFIGUI_PASSWORD=$(grep -E '^CONFIGUI_PASSWORD=' "$ENV_FILE" | head -1 | cut -d= -f2-)
+        log_info "Using existing CONFIGUI_PASSWORD from .env"
+    fi
+
+    # State directory (locations, self-signed cert, active-location marker)
+    sudo mkdir -p "$STATE_DIR/ssl" "$STATE_DIR/locations"
+    sudo chown -R "$CONFIGUI_USER:$CONFIGUI_GROUP" "$STATE_DIR"
+
+    # Install the sudoers rule (validate before installing!)
+    local tmp_sudoers
+    tmp_sudoers="$(mktemp)"
+    sed \
+        -e "s|__USER__|$CONFIGUI_USER|g" \
+        -e "s|__WORKDIR__|$SCRIPT_DIR|g" \
+        "$SUDOERS_TEMPLATE" > "$tmp_sudoers"
+    if sudo visudo -cf "$tmp_sudoers"; then
+        sudo cp "$tmp_sudoers" "$SUDOERS_FILE"
+        sudo chmod 440 "$SUDOERS_FILE"
+        log_success "Installed sudoers rule at $SUDOERS_FILE"
+    else
+        rm -f "$tmp_sudoers"
+        log_error "Generated sudoers file failed validation; aborting."
+        exit 1
+    fi
+    rm -f "$tmp_sudoers"
+
+    # Generate service file from template
+    sed \
+        -e "s|__USER__|$CONFIGUI_USER|g" \
+        -e "s|__GROUP__|$CONFIGUI_GROUP|g" \
+        -e "s|__WORKDIR__|$SCRIPT_DIR|g" \
+        "$SERVICE_TEMPLATE" | sudo tee "$SERVICE_FILE" > /dev/null
+
+    sudo systemctl daemon-reload
+    sudo systemctl enable configui
+    sudo systemctl restart configui
+
+    local cfg_port="${CONFIGUI_PORT:-7443}"
+    log_success "Config UI service deployed and started!"
+    log_info "Access:   ${GREEN}https://${APP_HOSTNAME:-localhost}:${cfg_port}/${NC}"
+    log_info "Password: ${GREEN}${CONFIGUI_PASSWORD}${NC}"
+    log_info "Check status: $0 configui-status"
+    log_info "View logs:    journalctl -u configui -f"
+}
+
+undeploy_configui() {
+    log_info "Removing Config UI systemd service..."
+
+    sudo systemctl stop configui 2>/dev/null || true
+    sudo systemctl disable configui 2>/dev/null || true
+    sudo rm -f /etc/systemd/system/configui.service
+    sudo rm -f /etc/sudoers.d/configui
+    sudo systemctl daemon-reload
+
+    log_success "Config UI service and sudoers rule removed"
+    log_info "Venv preserved at $SCRIPT_DIR/configui/venv"
+    log_info "Locations/certs preserved in /var/lib/configui/"
+}
+
+configui_status() {
+    if systemctl is-active --quiet configui 2>/dev/null; then
+        log_success "configui is running"
+        log_info "Access: https://${APP_HOSTNAME:-localhost}:${CONFIGUI_PORT:-7443}/"
+    else
+        log_warning "configui is not running"
+    fi
+    systemctl status configui --no-pager 2>/dev/null || true
 }
 
 reset_system() {
@@ -993,6 +1202,15 @@ case "${1:-help}" in
         ;;
     "proxy-status")
         proxy_status
+        ;;
+    "deploy-configui")
+        deploy_configui
+        ;;
+    "undeploy-configui")
+        undeploy_configui
+        ;;
+    "configui-status")
+        configui_status
         ;;
     "backup")
         shift
