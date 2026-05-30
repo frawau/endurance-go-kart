@@ -209,7 +209,8 @@ For production deployment, Docker provides easier setup and consistent environme
    **Important Security Notes:**
    - `SECRET_KEY`: Django's secret key for cryptographic signing. Generate a unique 50+ character random string
    - `STOPANDGO_HMAC_SECRET`: Used for secure communication with hardware penalty stations. **This same secret must be configured on your Stop & Go station hardware**
-   - Choose a strong admin password when you run `./race-manager create-admin`
+   - The first `./race-manager start` prompts you to set the admin **username and
+     password** (or run `./race-manager create-admin`) — choose a strong password
    - Use strong, unique passwords for production deployments
    - **`.env` file is NOT tracked by git** - it's in `.gitignore` to protect your secrets
    - On production servers, `git pull` will never overwrite your `.env` file
