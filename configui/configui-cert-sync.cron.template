@@ -1,0 +1,5 @@
+# Daily ACME (Let's Encrypt) certificate sync for the Config UI.
+# Installed by `race-manager deploy-configui`, removed by `undeploy-configui`.
+# Runs as root so it can reach Docker and restart the configui service; cd into
+# the repo so `docker compose` finds the project. Runs only when the cert changed.
+37 3 * * * root cd __WORKDIR__ && ./race-manager sync-acme-cert > /dev/null 2>&1

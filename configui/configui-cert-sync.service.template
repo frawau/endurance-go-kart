@@ -1,9 +1,0 @@
-[Unit]
-Description=Sync the ACME (Let's Encrypt) certificate to the Config UI
-After=docker.service
-Requires=docker.service
-
-[Service]
-Type=oneshot
-WorkingDirectory=__WORKDIR__
-ExecStart=__WORKDIR__/race-manager sync-acme-cert

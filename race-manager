@@ -940,17 +940,20 @@ deploy_configui() {
 
     # In automatic SSL modes the real certificate lives in the acme.sh Docker
     # volume, not on the host. Export it for the (native) Config UI and install a
-    # daily timer that refreshes it after renewals.
+    # daily cron job that refreshes it after renewals.
     if [ "${SSL_MODE:-none}" = "acme" ] || [ "${SSL_MODE:-none}" = "letsencrypt" ]; then
-        local sync_svc_tmpl="$CONFIGUI_DIR/configui-cert-sync.service.template"
-        local sync_timer_tmpl="$CONFIGUI_DIR/configui-cert-sync.timer.template"
-        if [ -f "$sync_svc_tmpl" ] && [ -f "$sync_timer_tmpl" ]; then
-            sed -e "s|__WORKDIR__|$SCRIPT_DIR|g" "$sync_svc_tmpl" \
-                | sudo tee /etc/systemd/system/configui-cert-sync.service > /dev/null
-            sudo cp "$sync_timer_tmpl" /etc/systemd/system/configui-cert-sync.timer
-            sudo systemctl daemon-reload
-            sudo systemctl enable --now configui-cert-sync.timer
-            log_success "Installed daily ACME cert sync (configui-cert-sync.timer)"
+        # Drop any earlier systemd timer (this used to be a timer; now cron).
+        sudo systemctl disable --now configui-cert-sync.timer 2>/dev/null || true
+        sudo rm -f /etc/systemd/system/configui-cert-sync.service \
+            /etc/systemd/system/configui-cert-sync.timer
+        sudo systemctl daemon-reload
+
+        local sync_cron_tmpl="$CONFIGUI_DIR/configui-cert-sync.cron.template"
+        if [ -f "$sync_cron_tmpl" ]; then
+            sed -e "s|__WORKDIR__|$SCRIPT_DIR|g" "$sync_cron_tmpl" \
+                | sudo tee /etc/cron.d/configui-cert-sync > /dev/null
+            sudo chmod 644 /etc/cron.d/configui-cert-sync
+            log_success "Installed daily ACME cert sync (/etc/cron.d/configui-cert-sync)"
         fi
         # Initial export so the Config UI uses the real cert right away.
         sync_acme_cert
@@ -967,7 +970,7 @@ deploy_configui() {
 # Export the ACME-issued certificate from the acme.sh container into <repo>/ssl/
 # so the native Config UI can serve the real cert. Only acts in automatic SSL
 # modes and only restarts configui when the certificate actually changed (so the
-# daily timer is a no-op between renewals).
+# daily cron job is a no-op between renewals).
 sync_acme_cert() {
     if [ "${SSL_MODE:-none}" != "acme" ] && [ "${SSL_MODE:-none}" != "letsencrypt" ]; then
         log_info "SSL_MODE is '${SSL_MODE:-none}' — no ACME certificate to sync."
@@ -978,8 +981,13 @@ sync_acme_cert() {
     mkdir -p "$ssl_dir"
     local tmpd
     tmpd="$(mktemp -d)"
-    if ! docker compose cp acme-sh:/etc/ssl/certs/fullchain.pem "$tmpd/fullchain.pem" >/dev/null 2>&1 \
-        || ! docker compose cp acme-sh:/etc/ssl/certs/privkey.pem "$tmpd/privkey.pem" >/dev/null 2>&1; then
+    # Stream the cert out via `exec cat` (host stdout redirect). `docker compose
+    # cp` to a host path is unreliable here — it reports success but the file
+    # never lands on the host.
+    docker compose exec -T acme-sh cat /etc/ssl/certs/fullchain.pem >"$tmpd/fullchain.pem" 2>/dev/null
+    docker compose exec -T acme-sh cat /etc/ssl/certs/privkey.pem >"$tmpd/privkey.pem" 2>/dev/null
+    if ! grep -q "BEGIN" "$tmpd/fullchain.pem" 2>/dev/null \
+        || ! grep -q "BEGIN" "$tmpd/privkey.pem" 2>/dev/null; then
         rm -rf "$tmpd"
         log_warning "Could not read the ACME certificate from the acme-sh container."
         log_info "Is SSL set up and the acme-sh service running? (try: $0 generate-cert)"
@@ -1013,11 +1021,13 @@ undeploy_configui() {
 
     sudo systemctl stop configui 2>/dev/null || true
     sudo systemctl disable configui 2>/dev/null || true
-    sudo systemctl disable --now configui-cert-sync.timer 2>/dev/null || true
     sudo rm -f /etc/systemd/system/configui.service
-    sudo rm -f /etc/systemd/system/configui-cert-sync.service
-    sudo rm -f /etc/systemd/system/configui-cert-sync.timer
+    sudo rm -f /etc/cron.d/configui-cert-sync
     sudo rm -f /etc/sudoers.d/configui
+    # Drop the old systemd timer too, in case this host predates the cron switch.
+    sudo systemctl disable --now configui-cert-sync.timer 2>/dev/null || true
+    sudo rm -f /etc/systemd/system/configui-cert-sync.service \
+        /etc/systemd/system/configui-cert-sync.timer
     sudo systemctl daemon-reload
 
     log_success "Config UI service and sudoers rule removed"
