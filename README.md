@@ -110,6 +110,13 @@ Default login: `admin` / `admin` (change immediately!)
 # Certificates auto-renew - zero maintenance!
 ```
 
+By default this uses the **HTTP-01** challenge (needs port 80 reachable from the
+internet). For hosts behind NAT/firewall, or for **wildcard** certificates, set
+`ACME_CHALLENGE=dns` plus an acme.sh DNS provider (`ACME_DNS_PROVIDER=dns_cf`,
+…) and that provider's API credentials in `.env` — see the
+[acme.sh dnsapi list](https://github.com/acmesh-official/acme.sh/wiki/dnsapi).
+The Config UI exposes both under SSL settings.
+
 ---
 
 ## 📖 Detailed Installation Guide
@@ -201,7 +208,7 @@ For production deployment, Docker provides easier setup and consistent environme
    **Important Security Notes:**
    - `SECRET_KEY`: Django's secret key for cryptographic signing. Generate a unique 50+ character random string
    - `STOPANDGO_HMAC_SECRET`: Used for secure communication with hardware penalty stations. **This same secret must be configured on your Stop & Go station hardware**
-   - Change default admin credentials immediately after first login
+   - Choose a strong admin password when you run `./race-manager create-admin`
    - Use strong, unique passwords for production deployments
    - **`.env` file is NOT tracked by git** - it's in `.gitignore` to protect your secrets
    - On production servers, `git pull` will never overwrite your `.env` file
@@ -234,10 +241,6 @@ For production deployment, Docker provides easier setup and consistent environme
       - In Django admin, go to Users
       - Add a new user with your preferred credentials
       - Assign the user to groups: `Admin` and `Race Director`
-
-   d. **Switch to your new user**
-      - Logout from the default admin account
-      - Login with your new user credentials
       - You can now start configuring championships and races
 
 #### Service Management

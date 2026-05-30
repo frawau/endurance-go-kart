@@ -57,6 +57,10 @@ services:
     image: neilpang/acme.sh:latest
     container_name: acme_sh
     restart: unless-stopped
+    # DNS-01 provider credentials (e.g. CF_Token) live in .env and acme.sh reads
+    # them from the environment.
+    env_file:
+      - .env
     environment:
       - TZ=${TZ}
       - LE_WORKING_DIR=/acme.sh

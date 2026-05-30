@@ -319,7 +319,19 @@ generate_cert() {
     fi
 
     log_info "Generating SSL certificate for ${APP_HOSTNAME}..."
-    docker compose exec acme-sh acme.sh --issue -d "${APP_HOSTNAME}" --webroot /var/www/certbot
+    if [ "${ACME_CHALLENGE:-http}" = "dns" ]; then
+        if [ -z "${ACME_DNS_PROVIDER:-}" ]; then
+            log_error "ACME_CHALLENGE=dns but ACME_DNS_PROVIDER is not set in .env"
+            log_info "Set the acme.sh DNS hook (e.g. ACME_DNS_PROVIDER=dns_cf) and the"
+            log_info "provider's API credentials — see the acme.sh dnsapi wiki."
+            exit 1
+        fi
+        log_info "Using DNS-01 challenge via ${ACME_DNS_PROVIDER}..."
+        docker compose exec acme-sh acme.sh --issue -d "${APP_HOSTNAME}" --dns "${ACME_DNS_PROVIDER}"
+    else
+        log_info "Using HTTP-01 challenge (webroot)..."
+        docker compose exec acme-sh acme.sh --issue -d "${APP_HOSTNAME}" --webroot /var/www/certbot
+    fi
 
     if [ $? -eq 0 ]; then
         log_info "Installing certificate..."

@@ -19,7 +19,9 @@ class Field:
     label: str
     type: str = "text"  # text | password | number | select | bool
     help: str = ""
-    choices: list[str] = field(default_factory=list)
+    # Either plain values ("http") or (value, label) pairs for friendlier
+    # dropdowns (("dns_cf", "Cloudflare")).
+    choices: list[str | tuple[str, str]] = field(default_factory=list)
     placeholder: str = ""
     secret: bool = False  # rendered masked; has a "generate" affordance
     # Show this field only when another key currently equals one of the given
@@ -105,8 +107,34 @@ SCHEMA: list[Group] = [
                 "ACME_CHALLENGE",
                 "ACME challenge",
                 type="select",
-                choices=["http"],
+                choices=["http", "dns"],
+                help="http (HTTP-01, needs port 80) or dns (DNS-01, works behind "
+                "NAT and supports wildcards).",
                 show_if=("SSL_MODE", ["letsencrypt", "acme"]),
+            ),
+            Field(
+                "ACME_DNS_PROVIDER",
+                "DNS provider",
+                type="select",
+                # acme.sh DNS hook names; add the provider's API credentials to
+                # the .env (see acme.sh dnsapi wiki) for these to work.
+                choices=[
+                    ("", "—"),
+                    ("dns_cf", "Cloudflare"),
+                    ("dns_aws", "AWS Route 53"),
+                    ("dns_gcloud", "Google Cloud DNS"),
+                    ("dns_azure", "Azure DNS"),
+                    ("dns_gandi_livedns", "Gandi LiveDNS"),
+                    ("dns_ovh", "OVH"),
+                    ("dns_dgon", "DigitalOcean"),
+                    ("dns_namecheap", "Namecheap"),
+                    ("dns_linode_v4", "Linode"),
+                    ("dns_hetzner", "Hetzner"),
+                    ("dns_desec", "deSEC"),
+                ],
+                help="Then add this provider's API credentials to the .env "
+                "(see the acme.sh dnsapi wiki).",
+                show_if=("ACME_CHALLENGE", "dns"),
             ),
             Field(
                 "SSL_CERT_PATH",
