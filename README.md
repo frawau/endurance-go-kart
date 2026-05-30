@@ -74,6 +74,14 @@ A comprehensive Django-based management system for endurance go-kart races and c
 - **Data Export**: Comprehensive race results and statistics
 - **Multi-user Support**: Role-based access control (Race Directors, Queue Scanners, etc.)
 
+### Setup & Administration
+- **Web Config UI** *(no CLI required)*: an HTTPS browser interface to edit `.env`,
+  manage per-venue **Location** profiles, configure the decoder proxy, manage SSL,
+  and run service/deploy commands with live output — see
+  [Config UI](#config-ui-web-configurator). Locked automatically while a race is live.
+- **`race-manager` CLI**: one script for service control, SSL, secrets, station
+  config, backups, and native-service deployment.
+
 ## 🚀 Quick Start (TL;DR)
 
 ### Prerequisites
@@ -101,6 +109,11 @@ cp .env.example .env               # Create .env from template
 
 Log in with the admin credentials you set when `start` first ran
 (or run `./race-manager create-admin` to create/recreate it).
+
+**Prefer a browser over the CLI?** Install the web configurator once with
+`sudo ./race-manager deploy-configui` and manage everything (`.env`, locations,
+proxy, SSL, service control) from `https://your-domain:7443/` — see
+[Config UI](#config-ui-web-configurator).
 
 ### Enable HTTPS (Optional)
 
