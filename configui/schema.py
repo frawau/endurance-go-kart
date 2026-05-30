@@ -22,10 +22,11 @@ class Field:
     choices: list[str] = field(default_factory=list)
     placeholder: str = ""
     secret: bool = False  # rendered masked; has a "generate" affordance
-    # Show this field only when another key currently equals a given value, e.g.
-    # ("TIMING_PLUGIN_TYPE", "nettag"). Hidden fields are still submitted, so
-    # switching plugin type never wipes the other plugins' settings.
-    show_if: tuple[str, str] | None = None
+    # Show this field only when another key currently equals one of the given
+    # value(s), e.g. ("TIMING_PLUGIN_TYPE", "nettag") or
+    # ("SSL_MODE", ["letsencrypt", "acme"]). Hidden fields are still submitted,
+    # so switching the controller never wipes the other branches' settings.
+    show_if: tuple[str, str | list[str]] | None = None
 
 
 @dataclass
@@ -45,13 +46,8 @@ SCHEMA: list[Group] = [
             Field("POSTGRES_DB", "Postgres database"),
         ],
     ),
-    Group(
-        "Django Admin",
-        [
-            Field("DJANGO_SUPERUSER_USERNAME", "Admin username"),
-            Field("DJANGO_SUPERUSER_PASSWORD", "Admin password", type="password"),
-        ],
-    ),
+    # Django admin credentials are intentionally NOT here: they are install-only
+    # and set interactively via `race-manager create-admin`.
     Group(
         "Security Secrets",
         [
@@ -99,12 +95,31 @@ SCHEMA: list[Group] = [
                 type="select",
                 choices=["none", "letsencrypt", "acme", "manual"],
             ),
-            Field("SSL_EMAIL", "SSL contact email", placeholder="admin@example.com"),
             Field(
-                "SSL_CERT_PATH", "Certificate path", placeholder="./ssl/fullchain.pem"
+                "SSL_EMAIL",
+                "SSL contact email",
+                placeholder="admin@example.com",
+                show_if=("SSL_MODE", ["letsencrypt", "acme"]),
             ),
-            Field("SSL_KEY_PATH", "Private key path", placeholder="./ssl/privkey.pem"),
-            Field("ACME_CHALLENGE", "ACME challenge", type="select", choices=["http"]),
+            Field(
+                "ACME_CHALLENGE",
+                "ACME challenge",
+                type="select",
+                choices=["http"],
+                show_if=("SSL_MODE", ["letsencrypt", "acme"]),
+            ),
+            Field(
+                "SSL_CERT_PATH",
+                "Certificate path",
+                placeholder="./ssl/fullchain.pem",
+                show_if=("SSL_MODE", "manual"),
+            ),
+            Field(
+                "SSL_KEY_PATH",
+                "Private key path",
+                placeholder="./ssl/privkey.pem",
+                show_if=("SSL_MODE", "manual"),
+            ),
         ],
     ),
     Group(

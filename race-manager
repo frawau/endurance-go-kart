@@ -139,6 +139,7 @@ show_help() {
     echo "  restore <file>      Restore from a host-side backup file"
     echo ""
     echo "Utility:"
+    echo "  create-admin       Create the Django admin user (prompts for username/password)"
     echo "  generate-secret    Generate secure random secrets for .env file"
     echo "  configure-stations Write .env values (hostname, HMAC secrets) into station TOML files"
     echo "  reset              Show steps to fully reset the database and rebuild"
@@ -953,6 +954,40 @@ configui_status() {
     systemctl status configui --no-pager 2>/dev/null || true
 }
 
+create_admin() {
+    log_info "Create the Django admin user (interactive)..."
+
+    if [ -z "$(docker compose ps -q appseed-app 2>/dev/null)" ]; then
+        log_error "The application container is not running. Start it first: $0 start"
+        exit 1
+    fi
+
+    local username password password2 email
+    read -r -p "Admin username [admin]: " username
+    username="${username:-admin}"
+    read -r -s -p "Admin password: " password
+    echo
+    read -r -s -p "Confirm password: " password2
+    echo
+    if [ -z "$password" ]; then
+        log_error "Password cannot be empty."
+        exit 1
+    fi
+    if [ "$password" != "$password2" ]; then
+        log_error "Passwords do not match."
+        exit 1
+    fi
+    read -r -p "Admin email [admin@${APP_HOSTNAME:-localhost}]: " email
+    email="${email:-admin@${APP_HOSTNAME:-localhost}}"
+
+    # createsuperuser_with_password creates the user only if it does not already
+    # exist (it reports if the username is taken); change an existing password
+    # from the Django admin instead.
+    docker compose exec -T appseed-app \
+        python manage.py createsuperuser_with_password \
+        --username "$username" --password "$password" --email "$email"
+}
+
 reset_system() {
     local commit="${1:-}"
 
@@ -1211,6 +1246,9 @@ case "${1:-help}" in
         ;;
     "configui-status")
         configui_status
+        ;;
+    "create-admin")
+        create_admin
         ;;
     "backup")
         shift

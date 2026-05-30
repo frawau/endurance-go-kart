@@ -41,6 +41,8 @@ PROXY_TOML = Path(
 # The Django app (for the race-state lock check). Same host:port the timing
 # station uses — gunicorn is published on 127.0.0.1:5005.
 APP_URL = os.environ.get("CONFIGUI_APP_URL", "http://127.0.0.1:5005")
+# Manual-SSL certificates live here (the fixed names `install-cert` expects).
+SSL_DIR = Path(os.environ.get("CONFIGUI_SSL_DIR", REPO_ROOT / "ssl"))
 TEMPLATES_DIR = HERE / "templates"
 STATIC_DIR = HERE / "static"
 
@@ -194,8 +196,46 @@ async def env_get(request: web.Request):
         "csrf": auth.csrf_token(password()),
         "groups": groups,
         "saved": request.query.get("saved"),
+        "ssl_uploaded": request.query.get("ssl_uploaded"),
+        "ssl_error": request.query.get("ssl_error"),
         "lock": await current_lock(),
     }
+
+
+def _read_upload(form, name: str) -> bytes | None:
+    field = form.get(name)
+    if field is None or isinstance(field, str):
+        return None
+    data = field.file.read()
+    return data or None
+
+
+async def ssl_upload(request: web.Request):
+    """Save uploaded manual-SSL PEM files to ssl/fullchain.pem and privkey.pem."""
+    form = await request.post()
+    _require_csrf(request, form)
+    await _require_unlocked()
+
+    cert = _read_upload(form, "cert")
+    key = _read_upload(form, "key")
+    if not cert and not key:
+        raise web.HTTPFound(
+            "/env?" + urlencode({"ssl_error": "Choose a file to upload."})
+        )
+    for label, data in (("certificate", cert), ("private key", key)):
+        if data is not None and not data.lstrip().startswith(b"-----BEGIN"):
+            raise web.HTTPFound(
+                "/env?" + urlencode({"ssl_error": f"The {label} is not a PEM file."})
+            )
+
+    SSL_DIR.mkdir(parents=True, exist_ok=True)
+    if cert is not None:
+        (SSL_DIR / "fullchain.pem").write_bytes(cert)
+    if key is not None:
+        key_path = SSL_DIR / "privkey.pem"
+        key_path.write_bytes(key)
+        key_path.chmod(0o600)
+    raise web.HTTPFound("/env?ssl_uploaded=1")
 
 
 async def env_post(request: web.Request):
@@ -358,6 +398,7 @@ def make_app() -> web.Application:
             web.get("/", dashboard),
             web.get("/env", env_get),
             web.post("/env", env_post),
+            web.post("/ssl/upload", ssl_upload),
             web.get("/locations", locations_get),
             web.post("/locations", locations_post),
             web.get("/proxy", proxy_get),

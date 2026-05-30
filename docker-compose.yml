@@ -12,8 +12,10 @@ services:
       - POSTGRES_DB=${POSTGRES_DB}
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
-      - DJANGO_SUPERUSER_USERNAME=${DJANGO_SUPERUSER_USERNAME}
-      - DJANGO_SUPERUSER_PASSWORD=${DJANGO_SUPERUSER_PASSWORD}
+      # Admin user is created via `./race-manager create-admin`; these stay
+      # empty unless explicitly exported for a non-interactive/legacy setup.
+      - DJANGO_SUPERUSER_USERNAME=${DJANGO_SUPERUSER_USERNAME:-}
+      - DJANGO_SUPERUSER_PASSWORD=${DJANGO_SUPERUSER_PASSWORD:-}
       - APP_HOSTNAME=${APP_HOSTNAME:-localhost}
       - SECRET_KEY=${SECRET_KEY}
       - STOPANDGO_HMAC_SECRET=${STOPANDGO_HMAC_SECRET}

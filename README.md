@@ -144,9 +144,8 @@ For production deployment, Docker provides easier setup and consistent environme
    POSTGRES_PASSWORD=gokart
    POSTGRES_DB=gokart
 
-   # Admin user (created automatically)
-   DJANGO_SUPERUSER_USERNAME=admin
-   DJANGO_SUPERUSER_PASSWORD=admin
+   # Admin user: created after first start with `./race-manager create-admin`
+   # (it prompts for username/password), so it is not stored in .env.
 
    # Security keys (generate your own - see examples below!)
    SECRET_KEY=your-django-secret-key-change-this-to-something-random-and-secure
@@ -223,15 +222,15 @@ For production deployment, Docker provides easier setup and consistent environme
 
 4. **Initial setup and configuration**
 
-   a. **Login with default admin**
-      - Navigate to your site
-      - Login with username: `admin`, password: `admin`
+   a. **Create the admin user** (prompts for username/password)
+      ```bash
+      ./race-manager create-admin
+      ```
 
-   b. **Change admin password**
-      - Go to Admin menu → Administration
-      - Change the admin user password
+   b. **Log in**
+      - Navigate to your site and log in with the credentials you just set
 
-   c. **Create a new admin user**
+   c. **Create additional users (optional)**
       - In Django admin, go to Users
       - Add a new user with your preferred credentials
       - Assign the user to groups: `Admin` and `Race Director`
