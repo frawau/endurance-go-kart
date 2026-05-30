@@ -974,6 +974,21 @@ create_admin() {
         exit 1
     fi
 
+    # On a fresh install the container is up but still migrating; wait until the
+    # database schema is ready before trying to create the user.
+    log_info "Waiting for the application database to be ready..."
+    local ready=0 i
+    for i in $(seq 1 30); do
+        if docker compose exec -T appseed-app python manage.py migrate --check >/dev/null 2>&1; then
+            ready=1
+            break
+        fi
+        sleep 2
+    done
+    if [ "$ready" -ne 1 ]; then
+        log_warning "Database not confirmed ready after 60s — trying anyway."
+    fi
+
     local username password password2 email
     read -r -p "Admin username [admin]: " username
     username="${username:-admin}"
