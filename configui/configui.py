@@ -320,6 +320,7 @@ async def proxy_get(request: web.Request):
         "log_levels": ["DEBUG", "INFO", "WARNING", "ERROR"],
         "deployed": deployed,
         "saved": request.query.get("saved"),
+        "error": request.query.get("error"),
         "lock": await current_lock(),
     }
 
@@ -328,15 +329,31 @@ async def proxy_post(request: web.Request):
     form = await request.post()
     _require_csrf(request, form)
     await _require_unlocked()
+
+    listen_port = _to_int(form.get("listen_port"), 2010)
+    local_port = _to_int(form.get("local_port"), 2011)
+    # The proxy binds listen_port; the loopback timing station holds local_port.
+    # If they're equal the proxy can't bind, so refuse to save.
+    if listen_port == local_port:
+        raise web.HTTPFound(
+            "/proxy?"
+            + urlencode(
+                {
+                    "error": f"ACK listen port and the local timing client port must "
+                    f"differ (both are {listen_port})."
+                }
+            )
+        )
+
     data = proxytoml.load(PROXY_TOML)
     data["upstream"]["decoder_host"] = form.get("decoder_host", "").strip()
     data["upstream"]["decoder_port"] = _to_int(form.get("decoder_port"), 2009)
-    data["downstream"]["listen_port"] = _to_int(form.get("listen_port"), 2010)
+    data["downstream"]["listen_port"] = listen_port
     data["downstream"]["resend_interval"] = _to_float(form.get("resend_interval"), 1.0)
     data["logging"]["level"] = form.get("log_level", "INFO")
 
     # Local timing client first, then any extra clients (blank hosts dropped).
-    clients = [{"host": "127.0.0.1", "port": _to_int(form.get("local_port"), 2011)}]
+    clients = [{"host": "127.0.0.1", "port": local_port}]
     hosts = form.getall("client_host", [])
     ports = form.getall("client_port", [])
     for host, port in zip(hosts, ports):

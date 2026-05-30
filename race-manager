@@ -84,6 +84,8 @@ if what == "upstream-host":
     print(cfg.get("upstream", {}).get("decoder_host", ""))
 elif what == "upstream-port":
     print(cfg.get("upstream", {}).get("decoder_port", ""))
+elif what == "downstream-listen-port":
+    print(cfg.get("downstream", {}).get("listen_port", ""))
 elif what == "local-client-port":
     for client in cfg.get("client", []):
         if client.get("host") in ("127.0.0.1", "localhost"):
@@ -663,6 +665,18 @@ deploy_proxy() {
     if [ ! -f "$PROXY_DIR/nettag-proxy.toml" ]; then
         log_error "Config file not found at $PROXY_DIR/nettag-proxy.toml"
         log_info "Copy and edit the example: cp proxy/nettag-proxy.toml proxy/nettag-proxy.toml"
+        exit 1
+    fi
+
+    # The downstream ACK port and the co-located timing station's port must
+    # differ: the proxy binds the listen_port socket, and the loopback timing
+    # station already holds its own port — sharing one would fail to bind.
+    local check_listen check_local
+    check_listen="$(proxy_toml_get "$PROXY_DIR/nettag-proxy.toml" downstream-listen-port)"
+    check_local="$(proxy_toml_get "$PROXY_DIR/nettag-proxy.toml" local-client-port)"
+    if [ -n "$check_listen" ] && [ -n "$check_local" ] && [ "$check_listen" = "$check_local" ]; then
+        log_error "Proxy listen_port (${check_listen}) must differ from the local timing-station client port (${check_local})."
+        log_info "Edit proxy/nettag-proxy.toml (or the Config UI 'Decoder Proxy' page) so they use different ports."
         exit 1
     fi
 
