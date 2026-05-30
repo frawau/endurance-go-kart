@@ -74,6 +74,14 @@ A comprehensive Django-based management system for endurance go-kart races and c
 - **Data Export**: Comprehensive race results and statistics
 - **Multi-user Support**: Role-based access control (Race Directors, Queue Scanners, etc.)
 
+### Setup & Administration
+- **Web Config UI** *(no CLI required)*: an HTTPS browser interface to edit `.env`,
+  manage per-venue **Location** profiles, configure the decoder proxy, manage SSL,
+  and run service/deploy commands with live output — see
+  [Config UI](#config-ui-web-configurator). Locked automatically while a race is live.
+- **`race-manager` CLI**: one script for service control, SSL, secrets, station
+  config, backups, and native-service deployment.
+
 ## 🚀 Quick Start (TL;DR)
 
 ### Prerequisites
@@ -93,13 +101,19 @@ cp .env.example .env               # Create .env from template
 ./race-manager generate-secret  # Generate and add secure secrets to .env
 # Edit .env: Set APP_HOSTNAME, configure timezone, adjust other settings
 
-# 3. Start the application
+# 3. Start the application (prompts for an admin username/password on first run)
 ./race-manager start
 ```
 
 **That's it!** Access at `http://your-domain:5085`
 
-Default login: `admin` / `admin` (change immediately!)
+Log in with the admin credentials you set when `start` first ran
+(or run `./race-manager create-admin` to create/recreate it).
+
+**Prefer a browser over the CLI?** Install the web configurator once with
+`sudo ./race-manager deploy-configui` and manage everything (`.env`, locations,
+proxy, SSL, service control) from `https://your-domain:7443/` — see
+[Config UI](#config-ui-web-configurator).
 
 ### Enable HTTPS (Optional)
 
@@ -109,6 +123,13 @@ Default login: `admin` / `admin` (change immediately!)
 # Now available at https://your-domain.com
 # Certificates auto-renew - zero maintenance!
 ```
+
+By default this uses the **HTTP-01** challenge (needs port 80 reachable from the
+internet). For hosts behind NAT/firewall, or for **wildcard** certificates, set
+`ACME_CHALLENGE=dns` plus an acme.sh DNS provider (`ACME_DNS_PROVIDER=dns_cf`,
+…) and that provider's API credentials in `.env` — see the
+[acme.sh dnsapi list](https://github.com/acmesh-official/acme.sh/wiki/dnsapi).
+The Config UI exposes both under SSL settings.
 
 ---
 
@@ -144,9 +165,8 @@ For production deployment, Docker provides easier setup and consistent environme
    POSTGRES_PASSWORD=gokart
    POSTGRES_DB=gokart
 
-   # Admin user (created automatically)
-   DJANGO_SUPERUSER_USERNAME=admin
-   DJANGO_SUPERUSER_PASSWORD=admin
+   # Admin user: created after first start with `./race-manager create-admin`
+   # (it prompts for username/password), so it is not stored in .env.
 
    # Security keys (generate your own - see examples below!)
    SECRET_KEY=your-django-secret-key-change-this-to-something-random-and-secure
@@ -202,43 +222,33 @@ For production deployment, Docker provides easier setup and consistent environme
    **Important Security Notes:**
    - `SECRET_KEY`: Django's secret key for cryptographic signing. Generate a unique 50+ character random string
    - `STOPANDGO_HMAC_SECRET`: Used for secure communication with hardware penalty stations. **This same secret must be configured on your Stop & Go station hardware**
-   - Change default admin credentials immediately after first login
+   - The first `./race-manager start` prompts you to set the admin **username and
+     password** (or run `./race-manager create-admin`) — choose a strong password
    - Use strong, unique passwords for production deployments
    - **`.env` file is NOT tracked by git** - it's in `.gitignore` to protect your secrets
    - On production servers, `git pull` will never overwrite your `.env` file
 
 3. **Start the application**
 
-   Using race-manager (recommended):
    ```bash
    ./race-manager start
    ```
 
-   Or using Docker Compose directly:
-   ```bash
-   docker compose up -d
-   ```
+   On a fresh install, `start` detects that no admin user exists yet and
+   **prompts you for an admin username and password** (skipped automatically
+   when run non-interactively, e.g. from a deploy script). You can also create
+   or recreate it any time with `./race-manager create-admin`.
 
-   The application will be available at `http://your-domain:5085`
+   The application will be available at `http://your-domain:5085`.
 
 4. **Initial setup and configuration**
 
-   a. **Login with default admin**
-      - Navigate to your site
-      - Login with username: `admin`, password: `admin`
+   a. **Log in** with the admin credentials you set during `start`
 
-   b. **Change admin password**
-      - Go to Admin menu → Administration
-      - Change the admin user password
-
-   c. **Create a new admin user**
+   b. **Create additional users (optional)**
       - In Django admin, go to Users
       - Add a new user with your preferred credentials
       - Assign the user to groups: `Admin` and `Race Director`
-
-   d. **Switch to your new user**
-      - Logout from the default admin account
-      - Login with your new user credentials
       - You can now start configuring championships and races
 
 #### Service Management
@@ -567,18 +577,22 @@ Each client gets its own buffered queue backed by SQLite (WAL mode). If a client
    port = 2011
    ```
 
-2. Set the timing station to listen on a different port than the decoder:
-   ```bash
-   # In .env
-   TIMING_NETTAG_PORT=2011
-   ```
+   The client on `127.0.0.1` is the co-located timing station. (You can edit all
+   of this from the **Decoder Proxy** page in the Config UI instead of by hand —
+   it also lets you add/remove extra clients.)
 
-3. Deploy and start:
+2. Deploy and start:
    ```bash
    sudo ./race-manager deploy-proxy
-   sudo ./race-manager configure-stations
-   sudo systemctl restart timing-station
    ```
+
+   `deploy-proxy` now also **couples the timing station to the proxy**: it reads
+   the local (`127.0.0.1`) client port from the proxy config, repoints the timing
+   station at it (`TIMING_NETTAG_HOST=127.0.0.1`, `TIMING_NETTAG_PORT=<that port>`,
+   moving the real decoder address into the proxy's `[upstream]`), runs
+   `configure-stations`, and **deploys the timing station if it isn't already** —
+   because a proxy is pointless without one. Conversely, `undeploy-proxy` reverts
+   the timing station to talk to the decoder directly.
 
 #### Management
 
@@ -587,6 +601,64 @@ sudo ./race-manager deploy-proxy      # Install and start systemd service
 ./race-manager proxy-status            # Check service status
 sudo ./race-manager undeploy-proxy    # Stop and remove service
 journalctl -u nettag-proxy -f         # View logs
+```
+
+### Config UI (web configurator)
+
+For operators who would rather not touch the CLI, the **Config UI** is a small
+HTTPS web service that edits `.env`, saves/switches named **Location** profiles,
+configures the **decoder proxy** (including its client list), and runs the
+`race-manager` commands above with live output. It runs as a native systemd
+service (it needs to edit the host `.env` and call the host `race-manager`, so it
+cannot live in Docker).
+
+A **Location** snapshots both `.env` and the decoder-proxy config, so per-venue
+settings travel together. **Switching** a Location restores both (keeping the
+configurator's own login/port intact), then automatically reconfigures the
+stations and restarts the services so the change takes effect.
+
+**Race-day lock:** while a round is live — from the moment its pre-race check
+passes (`Round.ready`) until the round is ended — the Config UI refuses all
+configuration changes and service commands (read-only views and status commands
+stay available), so nobody can disturb a running event. It learns the state from
+a read-only `/api/config_lock/` endpoint on the app; if the app is unreachable it
+fails open (assumes no race is running). This needs the app rebuilt once
+(`race-manager rebuild`) after pulling, for the endpoint to exist.
+
+```bash
+# Install once (creates venv, installs deps, generates a login password,
+# installs a least-privilege sudoers rule, starts the HTTPS service)
+sudo ./race-manager deploy-configui
+```
+
+`deploy-configui`:
+1. Creates `configui/venv` and installs `configui/requirements.txt`.
+2. Generates `CONFIGUI_PASSWORD` in `.env` if not already set (and prints it).
+3. Installs `/etc/sudoers.d/configui` allowing the service user to run **only**
+   the `race-manager` script without a password (validated with `visudo -cf`).
+4. Installs and starts the `configui` systemd service.
+
+It is **HTTPS-only**: it uses `ssl/fullchain.pem` + `ssl/privkey.pem` if present
+(the same certificate the app uses), otherwise it generates a self-signed
+certificate under `/var/lib/configui/ssl/`. Access it at
+`https://<APP_HOSTNAME>:7443/` (override with `CONFIGUI_PORT`). Keep it on a
+trusted network — it can change configuration and run deployment commands.
+
+> **Tip:** run `deploy-configui` as the final step of a fresh install — from
+> then on the rest of the system can be configured entirely from the browser.
+
+```bash
+./race-manager configui-status         # Check service status
+sudo ./race-manager undeploy-configui  # Stop and remove service + sudoers rule
+journalctl -u configui -f              # View logs
+```
+
+Relevant `.env` keys:
+
+```bash
+# CONFIGUI_PORT=7443        # HTTPS port this service listens on
+# CONFIGUI_BIND=0.0.0.0     # Bind address
+# CONFIGUI_PASSWORD=        # Login password (auto-generated by deploy-configui)
 ```
 
 ## 🔧 Configuration

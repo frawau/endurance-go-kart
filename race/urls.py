@@ -83,6 +83,7 @@ urlpatterns = [
     path("driver/add/", views.create_driver, name="add_driver"),
     path("team/add/", views.create_team, name="add_team"),
     path("get_round_status/", views.get_round_status, name="get_round_status"),
+    path("api/config_lock/", views.config_lock, name="config_lock"),
     path("get_race_lanes/", views.get_race_lanes, name="get_race_lane"),
     path("singleteam/", views.singleteam_view, name="single_team"),
     path("join_championship/", views.join_championship_view, name="join_championship"),

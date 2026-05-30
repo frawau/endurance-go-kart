@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<div class="wrap">
+  <div class="page-head">
+    <h1>Dashboard</h1>
+    <p>Run management commands and watch their output live.
+      {% if active_location %}Active location: <strong>{{ active_location }}</strong>.{% endif %}</p>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <h4>Commands</h4>
+      <span id="status-dot" class="term-dot idle" title="idle"></span>
+    </div>
+    <div class="card-body">
+      {% for title, names in sections %}
+      <div class="cmd-section">
+        <h5>{{ title }}</h5>
+        <div class="cmd-grid">
+          {% for name in names %}
+          {% set label = commands[name][1] %}
+          {% set destructive = commands[name][2] %}
+          {% set blocked = lock and lock.locked and name not in read_only %}
+          <button class="btn {% if destructive %}btn-primary{% else %}btn-ghost{% endif %}"
+                  data-cmd="{{ name }}" data-destructive="{{ '1' if destructive else '0' }}"
+                  {% if blocked %}disabled title="Locked during a live round"{% endif %}>
+            {{ label }}
+          </button>
+          {% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <h4>Live output</h4>
+      <button id="clear-log" class="btn btn-sm btn-ghost"
+              style="background: rgba(255,255,255,.15); color:#fff; border-color: transparent;">Clear</button>
+    </div>
+    <div class="card-body">
+      <pre id="terminal" class="terminal"></pre>
+    </div>
+  </div>
+</div>
+
+<script>
+  const CSRF = "{{ csrf }}";
+  const term = document.getElementById("terminal");
+  const dot = document.getElementById("status-dot");
+  let ws = null;
+  let busy = false;
+
+  function setStatus(state, title) {
+    dot.className = "term-dot " + state;
+    dot.title = title;
+  }
+
+  function append(text, cls) {
+    const span = document.createElement("span");
+    if (cls) span.className = cls;
+    span.textContent = text;
+    term.appendChild(span);
+    term.scrollTop = term.scrollHeight;
+  }
+
+  function connect() {
+    return new Promise((resolve) => {
+      const proto = location.protocol === "https:" ? "wss" : "ws";
+      ws = new WebSocket(`${proto}://${location.host}/ws/run`);
+      ws.onmessage = (e) => {
+        const line = e.data;
+        if (line.startsWith("__EXIT__")) {
+          const rc = parseInt(line.split(" ")[1] || "0", 10);
+          append(`\n— finished (exit ${rc}) —\n\n`, rc === 0 ? "term-exit-ok" : "term-exit-err");
+          busy = false;
+          setStatus(rc === 0 ? "ok" : "err", rc === 0 ? "success" : "failed");
+        } else if (line.startsWith("$ ")) {
+          append(line, "term-cmd");
+        } else {
+          append(line);
+        }
+      };
+      ws.onopen = () => resolve();
+      ws.onclose = () => { if (busy) { append("\n— connection closed —\n", "term-exit-err"); busy = false; setStatus("err", "disconnected"); } };
+    });
+  }
+
+  async function runCmd(cmd) {
+    if (busy) return;
+    busy = true;
+    setStatus("run", "running");
+    if (!ws || ws.readyState > 1) await connect();
+    ws.send(JSON.stringify({ cmd, csrf: CSRF }));
+  }
+
+  document.querySelectorAll("button[data-cmd]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const cmd = btn.dataset.cmd;
+      if (btn.dataset.destructive === "1" && !confirm(`Run "${cmd}"? This changes running services.`)) return;
+      runCmd(cmd);
+    });
+  });
+
+  document.getElementById("clear-log").addEventListener("click", () => { term.textContent = ""; setStatus("idle", "idle"); });
+
+  {% if auto_apply %}
+  // We just switched Location — apply it to the running services live.
+  append("Applying switched location: reconfiguring stations and restarting services…\n\n", "term-cmd");
+  runCmd("apply-location");
+  {% endif %}
+</script>
+{% endblock %}

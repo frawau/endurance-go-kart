@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Sign in{% endblock %}
+{% block chrome %}{% endblock %}
+{% block content %}
+<div class="login-screen">
+  <div class="login-card">
+    <div class="login-hero">
+      <div class="spark">Race Control</div>
+      <h1>Configurator</h1>
+    </div>
+    <div class="login-body">
+      {% if error %}
+      <div class="alert alert-error">Incorrect password.</div>
+      {% endif %}
+      <form method="post" action="/login">
+        <div class="field" style="margin-bottom: 1.1rem;">
+          <label for="password">Password</label>
+          <input type="password" id="password" name="password" autocomplete="current-password" autofocus required />
+        </div>
+        <button type="submit" class="btn btn-primary" style="width: 100%;">Sign in</button>
+      </form>
+      <p class="muted-note">This service edits your configuration and runs deployment
+        commands. Keep it on a trusted network.</p>
+    </div>
+  </div>
+</div>
+{% endblock %}

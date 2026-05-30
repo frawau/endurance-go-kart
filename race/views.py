@@ -1361,6 +1361,29 @@ def get_round_status(request):
     )
 
 
+def config_lock(request):
+    """Report whether the configurator should be locked.
+
+    The Config UI (a separate native service) polls this before allowing any
+    configuration change. We lock from the moment a round's pre-race check has
+    passed (``ready=True``) until the round is ended — ``current_round()`` only
+    returns rounds that are not yet ended, so ``ready`` is the whole condition.
+    """
+    cround = current_round()
+    locked = bool(cround and cround.ready)
+    return JsonResponse(
+        {
+            "locked": locked,
+            "round": str(cround) if cround else None,
+            "reason": (
+                f"Round '{cround}' is in progress (pre-race check completed)."
+                if locked
+                else ""
+            ),
+        }
+    )
+
+
 def get_race_lanes(request):
     """Return the lanes for the current race"""
     # Get the current active round (use your existing method)

@@ -1,0 +1,5 @@
+# Go-Kart Config UI — passwordless access to the race-manager script only.
+# Installed at /etc/sudoers.d/configui by `race-manager deploy-configui`.
+# race-manager itself performs the privileged work (systemctl, docker, cp, …),
+# so granting the script is sufficient and keeps the service non-root.
+__USER__ ALL=(root) NOPASSWD: __WORKDIR__/race-manager

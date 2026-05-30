@@ -12,8 +12,8 @@ services:
       - POSTGRES_DB=${POSTGRES_DB}
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
-      - DJANGO_SUPERUSER_USERNAME=${DJANGO_SUPERUSER_USERNAME}
-      - DJANGO_SUPERUSER_PASSWORD=${DJANGO_SUPERUSER_PASSWORD}
+      # Admin user is created from the host with `./race-manager create-admin`,
+      # so no superuser credentials are passed to the app.
       - APP_HOSTNAME=${APP_HOSTNAME:-localhost}
       - SECRET_KEY=${SECRET_KEY}
       - STOPANDGO_HMAC_SECRET=${STOPANDGO_HMAC_SECRET}
@@ -55,6 +55,10 @@ services:
     image: neilpang/acme.sh:latest
     container_name: acme_sh
     restart: unless-stopped
+    # DNS-01 provider credentials (e.g. CF_Token) live in .env and acme.sh reads
+    # them from the environment.
+    env_file:
+      - .env
     environment:
       - TZ=${TZ}
       - LE_WORKING_DIR=/acme.sh

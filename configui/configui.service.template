@@ -1,0 +1,28 @@
+[Unit]
+Description=Go-Kart Config UI (web configurator)
+After=network.target
+Requires=network.target
+
+[Service]
+Type=exec
+User=__USER__
+Group=__GROUP__
+WorkingDirectory=__WORKDIR__/configui
+ExecStart=__WORKDIR__/configui/venv/bin/python __WORKDIR__/configui/configui.py
+KillMode=mixed
+TimeoutStopSec=5
+Restart=on-failure
+RestartSec=10
+
+# State directory for locations, self-signed cert and active-location marker
+StateDirectory=configui
+
+# This service shells out to `sudo race-manager` to perform privileged host
+# operations (systemctl, docker, writing /etc and /var/lib), so it must permit
+# privilege escalation and must NOT be filesystem-sandboxed. In particular the
+# kernel/cgroup Protect* options force NoNewPrivileges=yes, which makes sudo
+# fail with "the no new privileges flag is set" — so they are deliberately omitted.
+NoNewPrivileges=false
+
+[Install]
+WantedBy=multi-user.target

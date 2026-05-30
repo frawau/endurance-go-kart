@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{% block title %}Config UI{% endblock %} · Race Control</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/css/configui.css" />
+</head>
+<body>
+  {% block chrome %}
+  <header class="appbar">
+    <div class="brand">Race&nbsp;Control <span class="spark">config</span></div>
+    <nav class="nav">
+      <a href="/" class="{% if page == 'dashboard' %}active{% endif %}">Dashboard</a>
+      <a href="/env" class="{% if page == 'env' %}active{% endif %}">Configuration</a>
+      <a href="/proxy" class="{% if page == 'proxy' %}active{% endif %}">Decoder Proxy</a>
+      <a href="/locations" class="{% if page == 'locations' %}active{% endif %}">Locations</a>
+      <a href="/logout">Log out</a>
+    </nav>
+  </header>
+  {% if lock and lock.locked %}
+  <div class="lockbar">🔒 Configuration locked — round “{{ lock.round }}” is in progress.
+    Changes are disabled until the round ends.</div>
+  {% endif %}
+  {% endblock %}
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

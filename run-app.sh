@@ -49,7 +49,10 @@ if [ "$PENALTY_EXISTS" = "MISSING" ]; then
     echo "First run detected - running initial setup..."
     python manage.py makemigrations race
     python manage.py migrate
-    python manage.py createsuperuser_with_password --username ${DJANGO_SUPERUSER_USERNAME} --password ${DJANGO_SUPERUSER_PASSWORD}
+    # No admin is created here. Create it from the host (it prompts for
+    # username/password) so credentials never live in .env or get defaulted:
+    #   ./race-manager create-admin
+    echo "No admin user yet — run './race-manager create-admin' on the host to create one."
     echo "First run setup complete"
 else
     echo "Database already initialized - checking for new migrations..."
