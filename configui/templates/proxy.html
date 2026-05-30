@@ -13,6 +13,7 @@
   <div class="alert alert-success">Proxy configuration saved.
     Run <a href="/">Deploy nettag proxy</a> to apply.</div>
   {% endif %}
+  {% if error %}<div class="alert alert-error">{{ error }}</div>{% endif %}
 
   <form method="post" action="/proxy">
     <input type="hidden" name="csrf" value="{{ csrf }}" />
