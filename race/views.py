@@ -514,6 +514,20 @@ def race_start(request):
 
     if active_race:
         # ---- Lap-based: start the active race ----
+        if not active_race.ready:
+            return JsonResponse(
+                {
+                    "result": False,
+                    "error": ["Pre-race check has not been completed for this race."],
+                }
+            )
+        if active_race.armed or active_race.started:
+            return JsonResponse(
+                {
+                    "result": False,
+                    "error": ["Start has already been pressed for this race."],
+                }
+            )
         now = dt.datetime.now()
 
         # Mark the race as armed: the start button has been pressed, so
@@ -556,6 +570,20 @@ def race_start(request):
         _notify_timing_race_started(active_race, cround)
     else:
         # ---- Legacy path ----
+        if not cround.ready:
+            return JsonResponse(
+                {
+                    "result": False,
+                    "error": ["Pre-race check has not been completed."],
+                }
+            )
+        if cround.started:
+            return JsonResponse(
+                {
+                    "result": False,
+                    "error": ["The race has already been started."],
+                }
+            )
         cround.start_race()
 
     return JsonResponse({"result": True})
@@ -659,6 +687,20 @@ def endofrace(request):
 
     if active_race:
         # ---- Lap-based: end the active race ----
+        # An armed-but-unstarted race must be aborted with False Start, not
+        # ended — ending it would create an ended-without-started race and
+        # run result processing on zero crossings. This also makes a
+        # duplicate End request harmless: after the first one, active_race
+        # is the next (unstarted) race, which is rejected here.
+        if active_race.started is None:
+            return JsonResponse(
+                {
+                    "result": False,
+                    "error": [
+                        "This race has not started. Use False Start to abort an armed start."
+                    ],
+                }
+            )
         now = dt.datetime.now()
         active_race.ended = now
         active_race.save()
