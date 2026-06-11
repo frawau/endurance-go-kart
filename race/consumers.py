@@ -1360,7 +1360,9 @@ class TimingConsumer(SafeSendMixin, AsyncWebsocketConsumer):
                 race.ending_mode in _TIME_FINISH_MODES + ("CROSS_AFTER_LEADER",)
                 and race.started
             ):
-                cutoff_time = race.started + race.get_effective_time_limit()
+                # Pause-aware cutoff: a red-flag pause pushes "time expired"
+                # later so the finish agrees with the displayed countdown.
+                cutoff_time = race.effective_cutoff_time()
 
             finish_boundary = None
             if cutoff_time is not None:
