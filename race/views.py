@@ -4077,26 +4077,54 @@ def serve_penalty(request):
         try:
             data = json.loads(request.body)
             round_id = data.get("round_id")
+            # The client tells us which queue entry it believed was active so we
+            # can detect a stale request (e.g. a double-click after the first
+            # click already served and removed that entry).
+            expected_queue_id = data.get("queue_id")
 
             if not round_id:
                 return JsonResponse(
                     {"success": False, "error": "round_id is required"}, status=400
                 )
 
-            # Get the current active penalty (first in queue order)
-            queue_entry = PenaltyQueue.get_next_penalty(round_id)
-            if not queue_entry:
-                return JsonResponse(
-                    {"success": False, "error": "No active penalty found"}, status=404
+            with transaction.atomic():
+                # Lock the head-of-queue row so two near-simultaneous requests
+                # can't each serve a different penalty (serve_penalty used to
+                # serve "whatever is head now", so a double-click served team A
+                # and then team B who never stopped).
+                queue_entry = (
+                    PenaltyQueue.objects.select_for_update()
+                    .filter(round_penalty__round_id=round_id)
+                    .first()
                 )
+                if not queue_entry:
+                    return JsonResponse(
+                        {"success": False, "error": "No active penalty found"},
+                        status=404,
+                    )
 
-            # Mark penalty as served
-            queue_entry.round_penalty.served = dt.datetime.now()
-            queue_entry.round_penalty.save()
+                # If the head changed since the client rendered it, the intended
+                # penalty was already served/cancelled — do nothing rather than
+                # serve the next team by mistake.
+                if (
+                    expected_queue_id is not None
+                    and queue_entry.id != expected_queue_id
+                ):
+                    return JsonResponse(
+                        {
+                            "success": False,
+                            "error": "This penalty is no longer active — it may already have been served.",
+                        },
+                        status=409,
+                    )
 
-            # Remove from queue
-            round_id = queue_entry.round_penalty.round.id
-            queue_entry.delete()
+                # Mark penalty as served
+                queue_entry.round_penalty.served = dt.datetime.now()
+                queue_entry.round_penalty.save()
+
+                # Remove from queue
+                round_id = queue_entry.round_penalty.round.id
+                queue_entry.delete()
 
             # Reset next penalty's timestamp so crossing count starts fresh
             from .signals import reset_next_penalty_timestamp

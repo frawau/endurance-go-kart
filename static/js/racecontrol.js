@@ -1376,14 +1376,22 @@ function handleStopGoButtonClick() {
  */
 function handleServedButtonClick() {
   if (!currentQueueId || !currentRoundId) return;
-  
+
+  // Capture and clear the active queue id, and disable the button, so a rapid
+  // double-click can't fire a second serve. The second request would otherwise
+  // serve the *next* team's penalty (the server pops head-of-queue).
+  const servedQueueId = currentQueueId;
+  currentQueueId = null;
+  const servedButton = document.getElementById('servedButton');
+  if (servedButton) servedButton.disabled = true;
+
   fetch('/api/serve-penalty/', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'X-CSRFToken': getCookie('csrftoken')
     },
-    body: JSON.stringify({ round_id: currentRoundId })
+    body: JSON.stringify({ round_id: currentRoundId, queue_id: servedQueueId })
   })
   .then(response => response.json())
   .then(data => {
@@ -1398,6 +1406,10 @@ function handleServedButtonClick() {
   .catch(error => {
     console.error('Failed to serve penalty:', error);
     addSystemMessage('Failed to serve penalty: ' + error.message, 'danger');
+    // Restore so the operator can retry; the queue_update broadcast will also
+    // re-sync these on success.
+    currentQueueId = servedQueueId;
+    if (servedButton) servedButton.disabled = false;
   });
 }
 
