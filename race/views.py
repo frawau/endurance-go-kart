@@ -3944,7 +3944,9 @@ def get_laps_penalties(request, round_id):
         return JsonResponse({"error": str(e)}, status=400)
 
 
-@csrf_exempt
+@login_required
+@user_passes_test(is_race_director)
+@require_POST
 def queue_penalty(request):
     """API endpoint to queue a Stop & Go penalty."""
     if request.method == "POST":
@@ -4031,7 +4033,9 @@ def queue_penalty(request):
     return JsonResponse({"success": False, "error": "Method not allowed"}, status=405)
 
 
-@csrf_exempt
+@login_required
+@user_passes_test(is_race_director)
+@require_http_methods(["GET"])
 def get_penalty_queue_status(request, round_id):
     """API endpoint to get current penalty queue status."""
     try:
@@ -4070,7 +4074,9 @@ def get_penalty_queue_status(request, round_id):
         return JsonResponse({"error": str(e)}, status=400)
 
 
-@csrf_exempt
+@login_required
+@user_passes_test(is_race_director)
+@require_POST
 def serve_penalty(request):
     """API endpoint to mark a penalty as served."""
     if request.method == "POST":
@@ -4136,7 +4142,9 @@ def serve_penalty(request):
     return JsonResponse({"success": False, "error": "Method not allowed"}, status=405)
 
 
-@csrf_exempt
+@login_required
+@user_passes_test(is_race_director)
+@require_POST
 def cancel_penalty(request):
     """API endpoint to cancel a penalty (remove both penalty and queue entry)."""
     if request.method == "POST":
@@ -4185,7 +4193,9 @@ def cancel_penalty(request):
     return JsonResponse({"success": False, "error": "Method not allowed"}, status=405)
 
 
-@csrf_exempt
+@login_required
+@user_passes_test(is_race_director)
+@require_POST
 def delay_penalty(request):
     """API endpoint to delay a penalty (move to end of queue)."""
     if request.method == "POST":
