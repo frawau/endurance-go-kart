@@ -1283,6 +1283,33 @@ class Race(models.Model):
         """Get active (non-retired) teams in this race"""
         return self.round.round_team_set.filter(retired=False)
 
+    def effective_cutoff_time(self):
+        """Wall-clock instant at which green-flag elapsed reaches the time limit.
+
+        This is the pause-aware version of ``started + time_limit``. A red-flag
+        pause freezes the race clock, so the finish must be pushed later by the
+        pause duration — otherwise the finish logic (which decides when "time
+        expired") disagrees with the displayed countdown (``time_elapsed``,
+        which already subtracts pauses) and the race ends early.
+
+        Only pauses that fall inside this race's window count. An open (ongoing)
+        pause uses "now" as its end, so while the race is red-flagged the cutoff
+        keeps moving and time never "expires".
+        """
+        if not self.started:
+            return None
+        cutoff = self.started + self.get_effective_time_limit()
+        now = dt.datetime.now()
+        for pause in self.round.round_pause_set.order_by("start"):
+            # Pauses are sorted; cutoff only grows, so once a pause starts at or
+            # after the (extended) cutoff, all later ones do too.
+            if pause.start < self.started:
+                continue
+            if pause.start >= cutoff:
+                break
+            cutoff += (pause.end or now) - pause.start
+        return cutoff
+
     def is_race_finished(self):
         """Check if race ended based on configured mode"""
         if not self.started:
@@ -1305,8 +1332,7 @@ class Race(models.Model):
 
     def _check_cross_after_time(self):
         """Leader-based finish: leader must cross after time, then all active teams must cross."""
-        time_limit = self.get_effective_time_limit()
-        cutoff_time = self.started + time_limit
+        cutoff_time = self.effective_cutoff_time()
 
         if timezone.now() < cutoff_time:
             return False
@@ -1424,8 +1450,7 @@ class Race(models.Model):
         """Leader crosses after time → ends leader's race.  Every subsequent
         crossing ends the race for that team.  Race over when all teams have
         crossed at or after the leader's finishing crossing (or timeout)."""
-        time_limit = self.get_effective_time_limit()
-        cutoff_time = self.started + time_limit
+        cutoff_time = self.effective_cutoff_time()
 
         if timezone.now() < cutoff_time:
             return False
@@ -1481,9 +1506,8 @@ class Race(models.Model):
 
     def _check_qualifying(self):
         """Time elapsed - all laps that finish before time count"""
-        time_limit = self.get_effective_time_limit()
-        elapsed = timezone.now() - self.started
-        return elapsed >= time_limit
+        # Pause-aware: time_elapsed already subtracts red-flag pauses.
+        return self.time_elapsed >= self.get_effective_time_limit()
 
     def _check_qualifying_plus(self):
         """
@@ -1491,8 +1515,7 @@ class Race(models.Model):
         but can finish after time (last start-finish crossing after time ran out).
         This is F1 qualifying style.
         """
-        time_limit = self.get_effective_time_limit()
-        cutoff_time = self.started + time_limit
+        cutoff_time = self.effective_cutoff_time()
 
         if timezone.now() < cutoff_time:
             return False  # Time hasn't expired yet
@@ -1537,9 +1560,8 @@ class Race(models.Model):
 
     def _check_time_only(self):
         """Time limit reached - positions frozen at last crossing before time"""
-        time_limit = self.get_effective_time_limit()
-        elapsed = timezone.now() - self.started
-        return elapsed >= time_limit
+        # Pause-aware: time_elapsed already subtracts red-flag pauses.
+        return self.time_elapsed >= self.get_effective_time_limit()
 
     def _check_auto_transform(self):
         """
@@ -1547,7 +1569,8 @@ class Race(models.Model):
         Otherwise check lap completion.
         """
         time_limit = self.get_effective_time_limit()
-        elapsed = timezone.now() - self.started
+        # Pause-aware: time_elapsed already subtracts red-flag pauses.
+        elapsed = self.time_elapsed
 
         if elapsed < time_limit:
             # Still in lap-based mode
@@ -1965,7 +1988,7 @@ class Race(models.Model):
             "TIME_ONLY",
             "QUALIFYING",
         ):
-            _cutoff_time = self.started + self.get_effective_time_limit()
+            _cutoff_time = self.effective_cutoff_time()
 
         # For CROSS_AFTER_LEADER, pre-compute the leader's finish time once
         _leader_finish_time = None
