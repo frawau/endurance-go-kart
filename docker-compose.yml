@@ -39,8 +39,11 @@ services:
     container_name: postgres
     restart: always
     image: "postgres:13"
+    # Bind to loopback only: the app reaches postgres over the internal
+    # db_network and backups run via `docker exec`, so the published port is
+    # for local host tools only and must not be exposed to the LAN/internet.
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     environment:
       - POSTGRES_USER=${POSTGRES_USER}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
