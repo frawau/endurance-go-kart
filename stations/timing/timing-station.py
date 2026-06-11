@@ -352,7 +352,11 @@ class TimingStation:
         connected = await self.plugin.connect()
         if not connected:
             self.logger.error("Failed to connect to timing hardware")
-            return
+            # Signal failure so main() exits non-zero. Otherwise the process
+            # exits 0, systemd treats it as success and (Restart=on-failure)
+            # never restarts — the station stays dead after a transient
+            # hardware/port problem at boot.
+            return False
 
         # Start reading from hardware immediately (independent of WebSocket)
         await self.plugin.start_reading()
@@ -408,7 +412,9 @@ async def main():
         loop.add_signal_handler(sig, signal_handler)
 
     try:
-        await station.start()
+        result = await station.start()
+        if result is False:
+            sys.exit(1)
     except KeyboardInterrupt:
         await station.stop()
 
