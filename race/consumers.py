@@ -1065,6 +1065,24 @@ class TimingConsumer(SafeSendMixin, AsyncWebsocketConsumer):
         # Schedule server-side auto-end for time-only modes (QUALIFYING, etc.)
         asyncio.ensure_future(self._schedule_auto_end(event["race_id"]))
 
+    async def timing_race_paused(self, event):
+        """Forward a red-flag pause to the timing station (simulator holds cars)."""
+        command = {
+            "type": "command",
+            "command": "race_paused",
+            "race_id": event["race_id"],
+        }
+        await self.safe_send(json.dumps(self.sign_message(command)))
+
+    async def timing_race_resumed(self, event):
+        """Forward a red-flag resume to the timing station (running-order restart)."""
+        command = {
+            "type": "command",
+            "command": "race_resumed",
+            "race_id": event["race_id"],
+        }
+        await self.safe_send(json.dumps(self.sign_message(command)))
+
     async def timing_team_delay(self, event):
         """Forward team_delay event to the connected timing station."""
         command = {
