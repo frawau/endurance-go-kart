@@ -186,6 +186,23 @@ def handle_pause_change(sender, instance, **kwargs):
     channel_layer = get_channel_layer()
     async_to_sync(channel_layer.group_send)(f"round_{cround.id}", payload)
 
+    # Notify the timing station so the simulator can hold the cars during a red
+    # flag and restart them in running order on resume. A new round_pause with
+    # end=None is a pause; setting end is the resume.
+    active = cround.active_race
+    if active is not None:
+        async_to_sync(channel_layer.group_send)(
+            "timing",
+            {
+                "type": (
+                    "timing_race_paused"
+                    if instance.end is None
+                    else "timing_race_resumed"
+                ),
+                "race_id": active.id,
+            },
+        )
+
 
 @receiver(post_save, sender=Round)
 def handle_round_change(sender, instance, **kwargs):
