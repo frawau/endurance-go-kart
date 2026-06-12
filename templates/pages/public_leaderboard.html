@@ -354,6 +354,12 @@
             };
         }
 
+        function escHtml(s) {
+            return String(s == null ? '' : s)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+
         function updateStandings(standings, flashTeamNumber) {
             const tbody = document.getElementById('standingsBody');
             if (standings.length === 0) return;
@@ -388,7 +394,7 @@
 
                 const retiredBadge = s.retired ? '<span class="retired-badge">RET</span>' : '';
                 const driverCell = s.current_driver_nickname
-                    ? `<img src="/static/flags/${s.current_driver_country}.png" style="height:16px;margin-right:5px;" alt="${s.current_driver_country}">${s.current_driver_nickname}`
+                    ? `<img src="/static/flags/${escHtml(s.current_driver_country)}.png" style="height:16px;margin-right:5px;" alt="${escHtml(s.current_driver_country)}">${escHtml(s.current_driver_nickname)}`
                     : '';
                 const gapClass = s.gap_ahead && s.gap_ahead.includes('-') ? 'gap-laps' : 'gap-time';
                 const bestLapClass = (s.best_lap_time !== null && s.best_lap_time === overallBest) ? 'best-lap-overall' : '';
@@ -397,7 +403,7 @@
                 row.innerHTML = `
                     <td><span class="position-badge">${s.position}</span></td>
                     <td><strong>${s.team_number}</strong></td>
-                    <td>${s.team_name}${retiredBadge}</td>
+                    <td>${escHtml(s.team_name)}${retiredBadge}</td>
                     <td>${driverCell}</td>
                     <td><strong>${s.laps_completed}</strong></td>
                     <td>${s.last_lap_time_formatted}</td>

@@ -452,6 +452,13 @@ data-round-name="{% if round %}{{ round.name }}{% endif %}">
 <script src="{% static 'js/racecontrol.js' %}?v=14"></script>
 
 <script>
+// Escape user-controlled strings (team names, nicknames) before inserting
+// into innerHTML, to prevent stored XSS from registered names.
+function escHtml(s) {
+    return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
 document.addEventListener('DOMContentLoaded', function() {
     // Initialize message timeouts
     const messages = document.querySelectorAll('#messagesContainer .alert[data-timeout]');
@@ -655,8 +662,8 @@ document.addEventListener('DOMContentLoaded', function() {
                                         newRow.setAttribute('data-team-number', driverInfo.team_number);
 
                                         newRow.innerHTML = `
-                                            <td>${driverInfo.team_number}</td>
-                                            <td>${driverInfo.nickname}</td>
+                                            <td>${escHtml(driverInfo.team_number)}</td>
+                                            <td>${escHtml(driverInfo.nickname)}</td>
                                             <td class="next-change-number">…</td>
                                         `;
 
