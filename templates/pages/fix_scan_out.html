@@ -52,6 +52,12 @@
 <script>
 const csrfToken = '{{ csrf_token }}';
 const messages = document.getElementById('messages');
+// Escape user-controlled strings (nicknames) before inserting into innerHTML.
+function escHtml(s) {
+    return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
 
 function endSession(driverId, name) {
     if (!confirm(`Force-end session for ${name}?`)) return;
@@ -64,7 +70,7 @@ function endSession(driverId, name) {
     .then(r => r.json())
     .then(data => {
         if (data.success) {
-            messages.innerHTML = `<div class="alert alert-success">Session ended for ${name}</div>`;
+            messages.innerHTML = `<div class="alert alert-success">Session ended for ${escHtml(name)}</div>`;
             setTimeout(() => location.reload(), 500);
         } else {
             messages.innerHTML = `<div class="alert alert-danger">${data.error || 'Failed'}</div>`;
