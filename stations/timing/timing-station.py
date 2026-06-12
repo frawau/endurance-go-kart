@@ -258,6 +258,18 @@ class TimingStation:
                         )
                     )
 
+            elif cmd_type == "race_paused":
+                if self.plugin and hasattr(self.plugin, "on_race_paused"):
+                    asyncio.create_task(
+                        self.plugin.on_race_paused(command.get("race_id"))
+                    )
+
+            elif cmd_type == "race_resumed":
+                if self.plugin and hasattr(self.plugin, "on_race_resumed"):
+                    asyncio.create_task(
+                        self.plugin.on_race_resumed(command.get("race_id"))
+                    )
+
             else:
                 self.logger.warning(f"Unknown command: {cmd_type}")
 

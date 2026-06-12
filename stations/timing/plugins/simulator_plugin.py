@@ -76,6 +76,18 @@ class SimulatorPlugin(TimingPlugin):
         self._skip_next: set = set()
         self._tod_offset: float = 0.0
 
+        # Per-transponder race progress, kept so a red-flag resume can restart
+        # the field in current running order and continue each car's own
+        # accumulated race time (raw_time) instead of starting from scratch.
+        self._cumulative: Dict[str, float] = {}  # race-time accumulated per tid
+        self._laps: Dict[str, int] = {}  # crossings fired per tid
+        self._start_cumulative: Dict[str, float] = {}  # resume baseline per tid
+        self._paused: bool = False
+
+        # Rolling-restart bunch spacing (seconds between cars on a red-flag
+        # resume, in running order).
+        self._restart_gap: float = float(config.get("restart_gap", 0.4))
+
         # Asyncio coordination
         self._race_start_event: asyncio.Event = asyncio.Event()
         self._race_end_event: asyncio.Event = asyncio.Event()
@@ -226,12 +238,28 @@ class SimulatorPlugin(TimingPlugin):
             if a.get("team_number") is not None
         }
         self._extra_delay.clear()
+        # Fresh grid start: clear any prior race progress so raw_time and the
+        # running order start from zero. A false-start restart lands here too —
+        # Django has deleted the earlier crossings, so the cars re-form on the
+        # grid.
+        self._cumulative.clear()
+        self._laps.clear()
+        self._start_cumulative.clear()
+        self._paused = False
 
         print(
             f"Simulator: race {race_id} (round {round_id}) — "
-            f"{len(self._current_assignments)} transponders, firing"
+            f"{len(self._current_assignments)} transponders, grid start"
         )
-        self._race_start_event.set()
+        if self._sim_tasks:
+            # A simulation is already running: this is a restart after a False
+            # Start. Relaunch from the grid so timing reflects the new start
+            # rather than the stale pre-false-start timeline.
+            await self._cancel_sim_tasks()
+            self._launch_sim_tasks()
+        else:
+            # Cold start: wake the idle race loop, which launches the loops.
+            self._race_start_event.set()
 
     async def on_race_ended(self, race_id: int):
         """Called when Django signals the race has finished."""
@@ -241,6 +269,54 @@ class SimulatorPlugin(TimingPlugin):
                 f"continuing for {self.post_race_duration:.0f} s"
             )
             self._race_end_event.set()
+
+    async def on_race_paused(self, race_id: int):
+        """Red flag: hold the cars (stop firing). Each car's progress is
+        preserved so the resume can restart the field in running order."""
+        if self._race_id != race_id or self._paused:
+            return
+        self._paused = True
+        await self._cancel_sim_tasks()
+        print(f"Simulator: race {race_id} paused — cars held")
+
+    async def on_race_resumed(self, race_id: int):
+        """Resume after a red flag: relaunch the field bunched in current
+        running order (leaderboard), each car continuing its own race time.
+
+        This is the red-flag counterpart to a false start: a false start
+        re-forms the grid (on_race_started), a red flag re-forms in running
+        order with laps preserved.
+        """
+        if self._race_id != race_id or not self._paused:
+            return
+        self._paused = False
+
+        # Running order: most crossings first, ties broken by least accumulated
+        # race time (derived from this station's own crossings).
+        order = sorted(
+            self._current_assignments.keys(),
+            key=lambda t: (-self._laps.get(t, 0), self._cumulative.get(t, 0.0)),
+        )
+        # Rolling restart: each car does a formation lap, bunched a fixed gap
+        # apart in running order, then resumes normal pace. start_cumulative
+        # continues each car's own race time so raw_time stays monotonic and
+        # excludes the pause.
+        round_deltas = self._round_deltas.get(self._round_id, {})
+        self._start_cumulative = {}
+        new_assignments = {}
+        for idx, tid in enumerate(order):
+            delta = round_deltas.get(tid, 4.0)
+            formation = round(self.min_time + idx * self._restart_gap, 3)
+            new_assignments[tid] = (formation, delta)
+            self._start_cumulative[tid] = self._cumulative.get(tid, 0.0)
+        self._current_assignments = new_assignments
+
+        await self._cancel_sim_tasks()
+        self._launch_sim_tasks()
+        print(
+            f"Simulator: race {race_id} resumed — {len(order)} cars restarted "
+            f"in running order"
+        )
 
     async def on_team_delay(
         self, team_number: int, extra_seconds: float, skip_crossing: bool = False
@@ -267,8 +343,36 @@ class SimulatorPlugin(TimingPlugin):
 
     # ── Simulation loops ──────────────────────────────────────────────────────
 
+    def _launch_sim_tasks(self):
+        """(Re)launch one coroutine per active transponder."""
+        self._sim_tasks = [
+            asyncio.create_task(
+                self._transponder_loop(
+                    tid,
+                    first_offset,
+                    delta,
+                    start_cumulative=self._start_cumulative.get(tid, 0.0),
+                )
+            )
+            for tid, (first_offset, delta) in self._current_assignments.items()
+        ]
+
+    async def _cancel_sim_tasks(self):
+        """Cancel and await any running transponder loops (swap-then-cancel so
+        a concurrent caller can't double-cancel)."""
+        tasks, self._sim_tasks = self._sim_tasks, []
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
     async def _race_loop(self):
-        """Main loop: idle → race → post-race cooldown → idle → …"""
+        """Main loop: idle → race → post-race cooldown → idle → …
+
+        Launch happens here for a cold start; false-start and red-flag restarts
+        relaunch directly from the on_race_* callbacks while this loop is
+        waiting for the race to end.
+        """
         while self.is_reading:
             # Wait for next race
             self._race_start_event.clear()
@@ -280,11 +384,7 @@ class SimulatorPlugin(TimingPlugin):
             if not self.is_reading:
                 break
 
-            # Launch one coroutine per active transponder
-            self._sim_tasks = [
-                asyncio.create_task(self._transponder_loop(tid, first_offset, delta))
-                for tid, (first_offset, delta) in self._current_assignments.items()
-            ]
+            self._launch_sim_tasks()
 
             # Wait until race ends, then let the post-race window expire
             self._race_end_event.clear()
@@ -295,22 +395,29 @@ class SimulatorPlugin(TimingPlugin):
                 pass
 
             # Tear down transponder tasks
-            for task in self._sim_tasks:
-                task.cancel()
-            await asyncio.gather(*self._sim_tasks, return_exceptions=True)
-            self._sim_tasks = []
+            await self._cancel_sim_tasks()
             print("Simulator: race simulation wound down — waiting for next race")
 
     async def _transponder_loop(
-        self, transponder_id: str, first_offset: float, delta: float
+        self,
+        transponder_id: str,
+        first_offset: float,
+        delta: float,
+        start_cumulative: float = 0.0,
     ):
-        """Simulate one transponder for the lifetime of a race."""
+        """Simulate one transponder for the lifetime of a race.
+
+        start_cumulative is the race time already accumulated before this
+        (re)launch: 0 for a grid start, the saved value for a red-flag resume,
+        so raw_time continues monotonically across a pause.
+        """
         try:
-            # Le Mans start delay
+            # Start delay: Le Mans grid gap, or formation-lap delay on resume.
             await asyncio.sleep(first_offset)
 
-            cumulative = round(first_offset, 3)
-            pending_interval = cumulative  # for interval mode
+            cumulative = round(start_cumulative + first_offset, 3)
+            pending_interval = round(first_offset, 3)  # for interval mode
+            self._cumulative[transponder_id] = cumulative
 
             # First crossing
             if random.random() >= self.miss_probability:
@@ -319,6 +426,7 @@ class SimulatorPlugin(TimingPlugin):
                     self._raw_time(cumulative, pending_interval),
                 )
                 pending_interval = 0.0
+                self._laps[transponder_id] = self._laps.get(transponder_id, 0) + 1
 
             # Continuous laps
             while True:
@@ -339,6 +447,7 @@ class SimulatorPlugin(TimingPlugin):
                 total = round(lap_time + extra, 3)
                 cumulative = round(cumulative + total, 3)
                 pending_interval = round(pending_interval + total, 3)
+                self._cumulative[transponder_id] = cumulative
 
                 # Pit bypass: skip this crossing (kart went through pit lane)
                 if transponder_id in self._skip_next:
@@ -353,6 +462,7 @@ class SimulatorPlugin(TimingPlugin):
                     self._raw_time(cumulative, pending_interval),
                 )
                 pending_interval = 0.0
+                self._laps[transponder_id] = self._laps.get(transponder_id, 0) + 1
 
         except asyncio.CancelledError:
             pass
