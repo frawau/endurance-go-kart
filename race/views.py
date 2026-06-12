@@ -1104,66 +1104,119 @@ def _parse_duration(duration_str):
 
 def _create_qualifying_races(cround, post_data, ending_mode):
     """
-    Create qualifying and main race objects from form data.
-    Deletes existing races (if none started) and recreates.
+    Create or update qualifying and main race objects from form data.
+
+    Saving the round form re-runs this on every edit. If the requested race
+    structure (the ordered set of race types) already matches the existing
+    races, the existing Race rows are updated IN PLACE so that the
+    RaceTransponderAssignment / GridPosition rows that FK to them survive.
+    A blind delete+recreate would silently wipe confirmed transponder
+    assignments — which are made before the pre-race check, while the round is
+    still editable — just because an unrelated field (or a duration) changed.
+
+    Only when the structure actually changes (the qualifying count differs) are
+    races deleted and recreated, since the old assignments then refer to a race
+    layout that no longer exists.
     """
-    # Guard: don't delete if a race has started
+    # Guard: don't reconfigure if a race has started
     if Race.objects.filter(round=cround, started__isnull=False).exists():
         return False, "Cannot reconfigure: a race has already started."
-
-    # Clean up existing races and knockout rules
-    QualifyingKnockoutRule.objects.filter(qualifying_race__round=cround).delete()
-    Race.objects.filter(round=cround).delete()
 
     qualifying_count = int(post_data.get("qualifying_count", 0))
     qualifying_ending_mode = post_data.get("qualifying_ending_mode", "QUALIFYING")
     qualifying_grid_method = post_data.get("qualifying_grid_method", "best_time")
 
-    seq = 1
-    q_races = []
-    prev_race = None
+    desired_types = [f"Q{i}" for i in range(1, qualifying_count + 1)] + ["MAIN"]
+    existing = list(Race.objects.filter(round=cround).order_by("sequence_number"))
+    structure_unchanged = [r.race_type for r in existing] == desired_types
 
-    for i in range(1, qualifying_count + 1):
-        q_duration = _parse_duration(post_data.get(f"q{i}_duration", "00:15:00"))
-        race_type = f"Q{i}"
-        q_race = Race.objects.create(
-            round=cround,
-            race_type=race_type,
-            sequence_number=seq,
-            ending_mode=qualifying_ending_mode,
-            time_limit_override=q_duration,
-            depends_on_race=prev_race,
-            start_mode=cround.quali_start_mode,
-        )
-        q_races.append(q_race)
-        prev_race = q_race
-        seq += 1
+    def _rebuild_knockout_rules(q_races, main_race):
+        # Knockout rules have no external FK dependents, so rebuilding them on
+        # every save is safe and keeps cutoffs in sync with the form.
+        QualifyingKnockoutRule.objects.filter(qualifying_race__round=cround).delete()
+        if qualifying_grid_method == "elimination" and qualifying_count > 1:
+            for i in range(qualifying_count - 1):
+                cutoff = post_data.get(f"q{i+1}_cutoff")
+                if cutoff:
+                    cutoff = int(cutoff)
+                    # Teams from position cutoff+1 to end are eliminated
+                    QualifyingKnockoutRule.objects.create(
+                        qualifying_race=q_races[i],
+                        eliminates_to_position_range_start=cutoff,
+                        eliminates_to_position_range_end=-1,
+                        sets_grid_positions_for=main_race,
+                        grid_position_offset=cutoff,
+                    )
 
-    # Create MAIN race
-    main_race = Race.objects.create(
-        round=cround,
-        race_type="MAIN",
-        sequence_number=seq,
-        ending_mode=ending_mode,
-        time_limit_override=cround.duration,
-        depends_on_race=prev_race,
-        start_mode=cround.race_start_mode,
-    )
-
-    # Create knockout rules for elimination mode
-    if qualifying_grid_method == "elimination" and qualifying_count > 1:
-        for i in range(qualifying_count - 1):
-            cutoff = post_data.get(f"q{i+1}_cutoff")
-            if cutoff:
-                cutoff = int(cutoff)
-                # Teams from position cutoff+1 to end are eliminated
-                QualifyingKnockoutRule.objects.create(
-                    qualifying_race=q_races[i],
-                    eliminates_to_position_range_start=cutoff,
-                    eliminates_to_position_range_end=-1,
-                    sets_grid_positions_for=main_race,
-                    grid_position_offset=cutoff,
+    with transaction.atomic():
+        if structure_unchanged:
+            # Update existing races in place — preserves transponder assignments.
+            by_type = {r.race_type: r for r in existing}
+            seq = 1
+            prev_race = None
+            q_races = []
+            for i in range(1, qualifying_count + 1):
+                q_duration = _parse_duration(
+                    post_data.get(f"q{i}_duration", "00:15:00")
                 )
+                q_race = by_type[f"Q{i}"]
+                q_race.sequence_number = seq
+                q_race.ending_mode = qualifying_ending_mode
+                q_race.time_limit_override = q_duration
+                q_race.depends_on_race = prev_race
+                q_race.start_mode = cround.quali_start_mode
+                q_race.save()
+                q_races.append(q_race)
+                prev_race = q_race
+                seq += 1
+
+            main_race = by_type["MAIN"]
+            main_race.sequence_number = seq
+            main_race.ending_mode = ending_mode
+            main_race.time_limit_override = cround.duration
+            main_race.depends_on_race = prev_race
+            main_race.start_mode = cround.race_start_mode
+            main_race.save()
+
+            _rebuild_knockout_rules(q_races, main_race)
+        else:
+            # Structure changed: recreate from scratch.
+            QualifyingKnockoutRule.objects.filter(
+                qualifying_race__round=cround
+            ).delete()
+            Race.objects.filter(round=cround).delete()
+
+            seq = 1
+            prev_race = None
+            q_races = []
+            for i in range(1, qualifying_count + 1):
+                q_duration = _parse_duration(
+                    post_data.get(f"q{i}_duration", "00:15:00")
+                )
+                q_race = Race.objects.create(
+                    round=cround,
+                    race_type=f"Q{i}",
+                    sequence_number=seq,
+                    ending_mode=qualifying_ending_mode,
+                    time_limit_override=q_duration,
+                    depends_on_race=prev_race,
+                    start_mode=cround.quali_start_mode,
+                )
+                q_races.append(q_race)
+                prev_race = q_race
+                seq += 1
+
+            main_race = Race.objects.create(
+                round=cround,
+                race_type="MAIN",
+                sequence_number=seq,
+                ending_mode=ending_mode,
+                time_limit_override=cround.duration,
+                depends_on_race=prev_race,
+                start_mode=cround.race_start_mode,
+            )
+
+            _rebuild_knockout_rules(q_races, main_race)
 
     return True, None
 
