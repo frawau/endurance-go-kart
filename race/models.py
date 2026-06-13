@@ -874,6 +874,15 @@ class Round(models.Model):
         ).order_by("register")
         return sessions
 
+    def pit_lane_due_team_ids(self):
+        """Team ids of the top <change_lanes> entries in the change queue — the
+        teams due in the pit lane right now (only this many fit in the lanes)."""
+        return set(
+            self.change_queue().values_list("driver__team_id", flat=True)[
+                : self.change_lanes
+            ]
+        )
+
     def next_driver_change(self):
         if not self.pit_lane_open:
             return "close"

@@ -5555,17 +5555,25 @@ def fix_scan_in_action(request):
 @login_required
 @user_passes_test(_is_driver_scanner)
 def fix_scan_out(request):
-    """Emergency: force-end a driver's active session."""
+    """Emergency: force-end the active session of a driver whose team is due in
+    the pit lane right now — i.e. the outgoing driver of a team in the top
+    <change_lanes> of the driver (change) queue. Only that many can be in the
+    lanes at once, so the list is capped accordingly and re-evaluated on reload
+    after each scan-out."""
     cround = current_round()
     if not cround:
         return render(request, "pages/fix_scan_out.html", {"round": None})
 
-    # Find all active sessions (started, not ended)
+    # Teams due in the pit lane: the top <change_lanes> of the change queue.
+    eligible_team_ids = cround.pit_lane_due_team_ids()
+
+    # Their outgoing (currently-driving) drivers are the only ones scannable out.
     active_sessions = (
         Session.objects.filter(
             round=cround,
             start__isnull=False,
             end__isnull=True,
+            driver__team_id__in=eligible_team_ids,
         )
         .select_related("driver__member", "driver__team__team__team")
         .order_by("driver__team__team__number")
@@ -5592,6 +5600,15 @@ def fix_scan_out_action(request):
 
     try:
         driver = team_member.objects.get(pk=driver_id)
+        # Enforce the top-<change_lanes> cap server-side, not just in the UI:
+        # only the outgoing driver of a team currently due in the pit lane.
+        if driver.team_id not in cround.pit_lane_due_team_ids():
+            return JsonResponse(
+                {
+                    "success": False,
+                    "error": "That team is not currently due in the pit lane.",
+                }
+            )
         result = cround.driver_endsession(driver)
         return JsonResponse(
             {
