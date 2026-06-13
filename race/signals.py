@@ -191,6 +191,12 @@ def handle_pause_change(sender, instance, **kwargs):
     # end=None is a pause; setting end is the resume.
     active = cround.active_race
     if active is not None:
+        # The leaderboard joins leaderboard_<race_id> and has a pause_update
+        # handler, but only the round_ group was being notified — so the public
+        # leaderboard countdown kept ticking through a red flag and only
+        # re-synced on reload/tab-focus. Feed its group the same payload.
+        async_to_sync(channel_layer.group_send)(f"leaderboard_{active.id}", payload)
+
         async_to_sync(channel_layer.group_send)(
             "timing",
             {
@@ -212,6 +218,21 @@ def handle_round_change(sender, instance, **kwargs):
 
     channel_layer = get_channel_layer()
     async_to_sync(channel_layer.group_send)(f"round_{instance.id}", payload)
+
+
+def _notify_timing_race_ended(race_id):
+    """Push a race_ended command to the timing station channel group.
+
+    Fires for every race end because end_this_race() saves ``ended``, which
+    triggers handle_race_change — covering timer/auto-end, the apscheduler
+    task, and finishing crossings uniformly. The simulator plugin uses this to
+    stop firing crossings after a time-based finish; nettag hardware ignores it.
+    """
+    channel_layer = get_channel_layer()
+    async_to_sync(channel_layer.group_send)(
+        "timing",
+        {"type": "timing_race_ended", "race_id": race_id},
+    )
 
 
 @receiver(post_save, sender=Race)
@@ -258,6 +279,9 @@ def handle_race_change(sender, instance, **kwargs):
             f"leaderboard_{instance.id}",
             {"type": "race_standings_refresh"},
         )
+        # Tell the timing station the race is over so the simulator winds down
+        # (real hardware ignores this; the simulator relies on it to stop).
+        _notify_timing_race_ended(instance.id)
 
     # When a race ends, carry over its transponder assignments to the next race
     # so the director only needs to review/edit and click "Lock all assignments"

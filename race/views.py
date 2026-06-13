@@ -514,6 +514,20 @@ def race_start(request):
 
     if active_race:
         # ---- Lap-based: start the active race ----
+        if not active_race.ready:
+            return JsonResponse(
+                {
+                    "result": False,
+                    "error": ["Pre-race check has not been completed for this race."],
+                }
+            )
+        if active_race.armed or active_race.started:
+            return JsonResponse(
+                {
+                    "result": False,
+                    "error": ["Start has already been pressed for this race."],
+                }
+            )
         now = dt.datetime.now()
 
         # Mark the race as armed: the start button has been pressed, so
@@ -556,6 +570,20 @@ def race_start(request):
         _notify_timing_race_started(active_race, cround)
     else:
         # ---- Legacy path ----
+        if not cround.ready:
+            return JsonResponse(
+                {
+                    "result": False,
+                    "error": ["Pre-race check has not been completed."],
+                }
+            )
+        if cround.started:
+            return JsonResponse(
+                {
+                    "result": False,
+                    "error": ["The race has already been started."],
+                }
+            )
         cround.start_race()
 
     return JsonResponse({"result": True})
@@ -618,6 +646,24 @@ def falsestart(request):
         if not other_started_races.exists() and cround.started is not None:
             cround.started = None
             cround.save()
+
+        # Tell the leaderboard the race was aborted: stop its countdown and
+        # reset it to the full time (the false start sends the race back to
+        # "ready"). The leaderboard's round_update handler deliberately ignores
+        # started=false, so use a dedicated timer_reset message.
+        from channels.layers import get_channel_layer
+        from asgiref.sync import async_to_sync
+
+        channel_layer = get_channel_layer()
+        async_to_sync(channel_layer.group_send)(
+            f"leaderboard_{active_race.id}",
+            {
+                "type": "timer_reset",
+                "remaining_seconds": int(
+                    active_race.get_effective_time_limit().total_seconds()
+                ),
+            },
+        )
     else:
         # ---- Legacy path ----
         cround.false_start()
@@ -659,6 +705,20 @@ def endofrace(request):
 
     if active_race:
         # ---- Lap-based: end the active race ----
+        # An armed-but-unstarted race must be aborted with False Start, not
+        # ended — ending it would create an ended-without-started race and
+        # run result processing on zero crossings. This also makes a
+        # duplicate End request harmless: after the first one, active_race
+        # is the next (unstarted) race, which is rejected here.
+        if active_race.started is None:
+            return JsonResponse(
+                {
+                    "result": False,
+                    "error": [
+                        "This race has not started. Use False Start to abort an armed start."
+                    ],
+                }
+            )
         now = dt.datetime.now()
         active_race.ended = now
         active_race.save()
@@ -5513,17 +5573,25 @@ def fix_scan_in_action(request):
 @login_required
 @user_passes_test(_is_driver_scanner)
 def fix_scan_out(request):
-    """Emergency: force-end a driver's active session."""
+    """Emergency: force-end the active session of a driver whose team is due in
+    the pit lane right now — i.e. the outgoing driver of a team in the top
+    <change_lanes> of the driver (change) queue. Only that many can be in the
+    lanes at once, so the list is capped accordingly and re-evaluated on reload
+    after each scan-out."""
     cround = current_round()
     if not cround:
         return render(request, "pages/fix_scan_out.html", {"round": None})
 
-    # Find all active sessions (started, not ended)
+    # Teams due in the pit lane: the top <change_lanes> of the change queue.
+    eligible_team_ids = cround.pit_lane_due_team_ids()
+
+    # Their outgoing (currently-driving) drivers are the only ones scannable out.
     active_sessions = (
         Session.objects.filter(
             round=cround,
             start__isnull=False,
             end__isnull=True,
+            driver__team_id__in=eligible_team_ids,
         )
         .select_related("driver__member", "driver__team__team__team")
         .order_by("driver__team__team__number")
@@ -5550,6 +5618,15 @@ def fix_scan_out_action(request):
 
     try:
         driver = team_member.objects.get(pk=driver_id)
+        # Enforce the top-<change_lanes> cap server-side, not just in the UI:
+        # only the outgoing driver of a team currently due in the pit lane.
+        if driver.team_id not in cround.pit_lane_due_team_ids():
+            return JsonResponse(
+                {
+                    "success": False,
+                    "error": "That team is not currently due in the pit lane.",
+                }
+            )
         result = cround.driver_endsession(driver)
         return JsonResponse(
             {

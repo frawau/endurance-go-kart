@@ -304,15 +304,26 @@
                 const data = JSON.parse(event.data);
                 if (data.type === 'standings_update') {
                     updateStandings(data.standings, data.flash_team_number);
+                    // Update the displayed time only — never infer pause state
+                    // from remaining_seconds. A standings_update arriving during
+                    // a red flag used to un-pause the timer (it kept ticking
+                    // through the pause). Pause state comes solely from
+                    // pause_update / round_update, which carry is_paused.
                     if (raceTimer && data.remaining_seconds !== undefined) {
                         raceTimer.updateRemainingTime(data.remaining_seconds);
-                        if (raceTimer.paused && data.remaining_seconds > 0) {
-                            raceTimer.updatePauseState(false);
-                        }
                     }
                 } else if (data.type === 'race_ended') {
                     if (data.next_race_url) {
                         window.location.href = data.next_race_url;
+                    }
+                } else if (data.type === 'timer_reset') {
+                    // Race aborted (false start): freeze the clock and reset it
+                    // to the full time until the race is restarted.
+                    if (raceTimer) {
+                        if (data.remaining_seconds !== undefined) {
+                            raceTimer.updateRemainingTime(data.remaining_seconds);
+                        }
+                        raceTimer.updatePauseState(true);
                     }
                 } else if (data.type === 'pause_update') {
                     // Pause/resume only fires while the race is running — always apply

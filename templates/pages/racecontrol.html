@@ -558,6 +558,22 @@ document.addEventListener('DOMContentLoaded', function() {
                             currentState = 'ready';
                         }
 
+                        // Open the False Start / False Restart windows on the
+                        // actual transitions, so they survive the per-crossing
+                        // re-render. Covers FIRST_CROSSING (start = first
+                        // crossing, not a button click) as well as IMMEDIATE.
+                        // Qualifyings are excluded from False Start (no grid
+                        // start), matching the original action-FSM rule.
+                        const fsIsQualifying = !!(activeRaceType && activeRaceType.startsWith("Q"));
+                        if (isStarted && !window.fsLastStarted && !fsIsQualifying) {
+                            if (typeof openFalseStartWindow === 'function') openFalseStartWindow();
+                        }
+                        if (isStarted && window.fsLastPaused && !isPaused) {
+                            if (typeof openFalseRestartWindow === 'function') openFalseRestartWindow();
+                        }
+                        window.fsLastStarted = isStarted;
+                        window.fsLastPaused = isStarted && isPaused;
+
                         if (!buttonActionInProgress) {
                             updateButtonVisibility(currentState);
                         }

@@ -3,6 +3,12 @@ let falseStartTimeoutId = null;
 let falseStartTimeoutExpired = false;
 let falseRestartTimeoutId = null;
 let falseRestartTimeoutExpired = false;
+// Time-based windows: False Start / False Restart stay decidable for 30s after
+// the actual start / resume. Stored as absolute deadlines (ms epoch, 0 = closed)
+// so the per-crossing re-render can re-assert the button instead of hiding it.
+const FALSE_WINDOW_MS = 30000;
+let falseStartUntil = 0;
+let falseRestartUntil = 0;
 let emptyTeamsSocketInstance = null;
 
 // Multi-race state
@@ -381,9 +387,49 @@ function connectToLaneSockets() {
 }
 
 /**
+ * Opens the 30s window during which False Start is decidable after the actual
+ * start (the start click in IMMEDIATE mode, or the first crossing in
+ * FIRST_CROSSING mode). The deadline is what keeps the button visible across
+ * the per-crossing re-renders; a single timeout closes it when it expires.
+ */
+function openFalseStartWindow() {
+  falseStartUntil = Date.now() + FALSE_WINDOW_MS;
+  const btn = document.getElementById("falseStartButton");
+  if (btn) {
+    btn.removeAttribute("hidden");
+    btn.innerHTML = '<i class="fas fa-undo me-1"></i> False Start';
+    btn.disabled = false;
+  }
+  if (falseStartTimeoutId) clearTimeout(falseStartTimeoutId);
+  falseStartTimeoutId = setTimeout(() => {
+    falseStartTimeoutExpired = true;
+    hideFalseStartButton();
+  }, FALSE_WINDOW_MS);
+}
+
+/**
+ * Opens the 30s window during which False Restart is decidable after a resume.
+ */
+function openFalseRestartWindow() {
+  falseRestartUntil = Date.now() + FALSE_WINDOW_MS;
+  const btn = document.getElementById("falseRestartButton");
+  if (btn) {
+    btn.removeAttribute("hidden");
+    btn.innerHTML = '<i class="fas fa-history me-1"></i> False Restart';
+    btn.disabled = false;
+  }
+  if (falseRestartTimeoutId) clearTimeout(falseRestartTimeoutId);
+  falseRestartTimeoutId = setTimeout(() => {
+    falseRestartTimeoutExpired = true;
+    hideFalseRestartButton();
+  }, FALSE_WINDOW_MS);
+}
+
+/**
  * Hides the False Start button if it's currently visible.
  */
 function hideFalseStartButton() {
+  falseStartUntil = 0;
   const btn = document.getElementById("falseStartButton");
   if (btn && !btn.hidden) {
     console.log("Hiding False Start button due to timeout or state change.");
@@ -408,6 +454,7 @@ function hideFalseStartButton() {
  * Hides the False Restart button if it's currently visible.
  */
 function hideFalseRestartButton() {
+  falseRestartUntil = 0;
   const btn = document.getElementById("falseRestartButton");
   if (btn && !btn.hidden) {
     console.log("Hiding False Restart button due to timeout or state change.");
@@ -440,9 +487,13 @@ function updateButtonVisibility(state, options = {}) {
   );
   allActionButtons.forEach((btn) => (btn.hidden = true)); // Hide all first
 
-  // Clear any pending temporary button timeouts unless explicitly told otherwise
-  if (!options.keepFalseStart) hideFalseStartButton();
-  if (!options.keepFalseRestart) hideFalseRestartButton();
+  // Only tear down a False Start/Restart window once it has actually expired —
+  // otherwise the per-crossing re-render would close it early. While the
+  // deadline is in the future the running-state case re-asserts the button.
+  if (!options.keepFalseStart && Date.now() >= falseStartUntil)
+    hideFalseStartButton();
+  if (!options.keepFalseRestart && Date.now() >= falseRestartUntil)
+    hideFalseRestartButton();
 
   // Determine label suffix for lap-based rounds
   const raceLabel = (isLapBased && activeRaceLabel) ? activeRaceLabel : "Race";
@@ -490,37 +541,33 @@ function updateButtonVisibility(state, options = {}) {
         ?.style.setProperty("display", "block", "important");
       break;
     case "running": // Ready, started
-      if (options.showFalseStart) {
-        const falseStartBtn = document.getElementById("falseStartButton");
-        if (falseStartBtn) {
-          falseStartBtn.removeAttribute("hidden");
-          falseStartBtn.innerHTML = '<i class="fas fa-undo me-1"></i> False Start';
-          falseStartBtn.disabled = false;
+      // showFalse* opens the 30s window (start click / resume click); the
+      // deadline then keeps the button visible across every crossing re-render
+      // until it expires, at which point Pause takes over.
+      if (options.showFalseStart) openFalseStartWindow();
+      if (options.showFalseRestart) openFalseRestartWindow();
+      {
+        const fsOpen = Date.now() < falseStartUntil;
+        const frOpen = Date.now() < falseRestartUntil;
+        if (fsOpen) {
+          const b = document.getElementById("falseStartButton");
+          if (b) {
+            b.removeAttribute("hidden");
+            b.innerHTML = '<i class="fas fa-undo me-1"></i> False Start';
+            b.disabled = false;
+          }
         }
-        if (!options.keepFalseStart) {
-          // Avoid restarting timeout if already running
-          falseStartTimeoutId = setTimeout(() => {
-            falseStartTimeoutExpired = true;
-            hideFalseStartButton();
-          }, 15000); // 15 seconds
+        if (frOpen) {
+          const b = document.getElementById("falseRestartButton");
+          if (b) {
+            b.removeAttribute("hidden");
+            b.innerHTML = '<i class="fas fa-history me-1"></i> False Restart';
+            b.disabled = false;
+          }
         }
-      } else if (options.showFalseRestart) {
-        const falseRestartBtn = document.getElementById("falseRestartButton");
-        if (falseRestartBtn) {
-          falseRestartBtn.removeAttribute("hidden");
-          falseRestartBtn.innerHTML = '<i class="fas fa-history me-1"></i> False Restart';
-          falseRestartBtn.disabled = false;
+        if (!fsOpen && !frOpen) {
+          document.getElementById("pauseButton")?.removeAttribute("hidden");
         }
-        // Start timeout to hide False Restart button after a delay
-        if (!options.keepFalseRestart) {
-          // Avoid restarting timeout
-          falseRestartTimeoutId = setTimeout(() => {
-            falseRestartTimeoutExpired = true;
-            hideFalseRestartButton();
-          }, 15000); // 15 seconds
-        }
-      } else {
-        document.getElementById("pauseButton")?.removeAttribute("hidden");
       }
       // Show end button during running state
       {
@@ -604,9 +651,15 @@ async function handleRaceAction(event) {
   console.log(`Sending POST request to: ${url}`);
   buttonActionInProgress = true;
 
-  // --- Clear relevant timeouts when an action is initiated ---
-  if (action !== "false_start") clearTimeout(falseStartTimeoutId);
-  if (action !== "false_restart") clearTimeout(falseRestartTimeoutId);
+  // --- Clear relevant timeouts/windows when an action is initiated ---
+  if (action !== "false_start") {
+    clearTimeout(falseStartTimeoutId);
+    falseStartUntil = 0;
+  }
+  if (action !== "false_restart") {
+    clearTimeout(falseRestartTimeoutId);
+    falseRestartUntil = 0;
+  }
 
   try {
     const response = await fetch(url, {
@@ -893,6 +946,11 @@ document.addEventListener("DOMContentLoaded", () => {
     )
   )
     initialState = "ended";
+
+  // Seed the transition trackers from the loaded state so a reload mid-race
+  // does not spuriously re-open the False Start window on the first round_update.
+  window.fsLastStarted = initialState === "running" || initialState === "paused";
+  window.fsLastPaused = initialState === "paused";
 
   updateButtonVisibility(initialState);
 

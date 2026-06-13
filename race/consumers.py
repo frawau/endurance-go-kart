@@ -33,6 +33,22 @@ from channels.db import database_sync_to_async
 from django.db.models import Count, F, Q
 
 
+def lap_overlaps_pause(pauses, lap_start, lap_end):
+    """True if the lap interval [lap_start, lap_end] overlaps any red-flag pause.
+
+    ``pauses`` is an iterable of (start, end) datetimes; an open pause (end=None)
+    is treated as ongoing up to lap_end. Used to neutralise laps that straddle a
+    red flag — with a continuous decoder clock their time would otherwise be
+    inflated by the stoppage. Two intervals overlap iff each starts before the
+    other ends.
+    """
+    for p_start, p_end in pauses:
+        effective_end = p_end if p_end is not None else lap_end
+        if lap_start < effective_end and p_start < lap_end:
+            return True
+    return False
+
+
 class SafeSendMixin:
     """Catch RuntimeError when sending to a disconnected WebSocket client."""
 
@@ -1065,6 +1081,18 @@ class TimingConsumer(SafeSendMixin, AsyncWebsocketConsumer):
         # Schedule server-side auto-end for time-only modes (QUALIFYING, etc.)
         asyncio.ensure_future(self._schedule_auto_end(event["race_id"]))
 
+    async def timing_race_ended(self, event):
+        """Forward a race-ended notification to the timing station so the
+        simulator winds down. Fired by handle_race_change for every race end
+        (timer/auto-end, apscheduler task, or finishing crossing). Real
+        hardware ignores the command."""
+        command = {
+            "type": "command",
+            "command": "race_ended",
+            "race_id": event["race_id"],
+        }
+        await self.safe_send(json.dumps(self.sign_message(command)))
+
     async def timing_race_paused(self, event):
         """Forward a red-flag pause to the timing station (simulator holds cars)."""
         command = {
@@ -1164,14 +1192,9 @@ class TimingConsumer(SafeSendMixin, AsyncWebsocketConsumer):
                     "race_type": result["race_type"],
                 },
             )
-            # Tell the timing station so SimulatorPlugin can wind down
-            await self.safe_send(
-                json.dumps(
-                    self.sign_message(
-                        {"type": "command", "command": "race_ended", "race_id": race_id}
-                    )
-                )
-            )
+            # The timing station is notified via handle_race_change ->
+            # timing_race_ended when end_this_race() saves `ended`, so no
+            # explicit race_ended command is needed here.
 
     async def _schedule_auto_end(self, race_id):
         """Sleep until the race time limit expires then auto-end the race."""
@@ -1378,7 +1401,9 @@ class TimingConsumer(SafeSendMixin, AsyncWebsocketConsumer):
                 race.ending_mode in _TIME_FINISH_MODES + ("CROSS_AFTER_LEADER",)
                 and race.started
             ):
-                cutoff_time = race.started + race.get_effective_time_limit()
+                # Pause-aware cutoff: a red-flag pause pushes "time expired"
+                # later so the finish agrees with the displayed countdown.
+                cutoff_time = race.effective_cutoff_time()
 
             finish_boundary = None
             if cutoff_time is not None:
@@ -1420,11 +1445,31 @@ class TimingConsumer(SafeSendMixin, AsyncWebsocketConsumer):
             if lap_time is None and last_crossing:
                 lap_time = crossing_time - last_crossing.crossing_time
 
-            # Check if race is suspended
+            # Red-flag handling (unless the race opts to count crossings during
+            # suspension):
+            #  * a crossing that arrives *during* a pause is not a racing lap
+            #    (is_valid=False);
+            #  * a lap whose interval *straddles* a pause was still completed by
+            #    the kart, so it COUNTS toward the lap total/position, but its
+            #    time spans the stoppage (inflated by the continuous decoder
+            #    clock) and is void — excluded from timing stats.
             is_suspended = race.round.is_paused
             should_count = True
-            if is_suspended and not race.count_crossings_during_suspension:
-                should_count = False
+            void_time = False
+            if not race.count_crossings_during_suspension:
+                if is_suspended:
+                    should_count = False
+                elif last_crossing is not None:
+                    pauses = list(
+                        race.round.round_pause_set.values_list("start", "end")
+                    )
+                    if lap_overlaps_pause(
+                        pauses, last_crossing.crossing_time, crossing_time
+                    ):
+                        void_time = True
+
+            if void_time:
+                lap_time = None
 
             # Create lap crossing
             crossing = LapCrossing.objects.create(
@@ -1848,6 +1893,17 @@ class LeaderboardConsumer(SafeSendMixin, AsyncWebsocketConsumer):
                     "type": "pause_update",
                     "is_paused": event["is paused"],
                     "remaining_seconds": event["remaining seconds"],
+                }
+            )
+        )
+
+    async def timer_reset(self, event):
+        """Race aborted (false start): stop the countdown and reset to full."""
+        await self.safe_send(
+            json.dumps(
+                {
+                    "type": "timer_reset",
+                    "remaining_seconds": event["remaining_seconds"],
                 }
             )
         )
