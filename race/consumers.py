@@ -33,6 +33,22 @@ from channels.db import database_sync_to_async
 from django.db.models import Count, F, Q
 
 
+def lap_overlaps_pause(pauses, lap_start, lap_end):
+    """True if the lap interval [lap_start, lap_end] overlaps any red-flag pause.
+
+    ``pauses`` is an iterable of (start, end) datetimes; an open pause (end=None)
+    is treated as ongoing up to lap_end. Used to neutralise laps that straddle a
+    red flag — with a continuous decoder clock their time would otherwise be
+    inflated by the stoppage. Two intervals overlap iff each starts before the
+    other ends.
+    """
+    for p_start, p_end in pauses:
+        effective_end = p_end if p_end is not None else lap_end
+        if lap_start < effective_end and p_start < lap_end:
+            return True
+    return False
+
+
 class SafeSendMixin:
     """Catch RuntimeError when sending to a disconnected WebSocket client."""
 
@@ -1429,11 +1445,24 @@ class TimingConsumer(SafeSendMixin, AsyncWebsocketConsumer):
             if lap_time is None and last_crossing:
                 lap_time = crossing_time - last_crossing.crossing_time
 
-            # Check if race is suspended
+            # Neutralise laps tied to a red flag (unless the race opts to count
+            # them): a crossing that arrives *during* a pause, or a lap whose
+            # interval *straddles* a pause. The latter matters once the decoder
+            # clock runs continuously through the stoppage — without it the
+            # straddling lap's time would be inflated by the full pause.
             is_suspended = race.round.is_paused
             should_count = True
-            if is_suspended and not race.count_crossings_during_suspension:
-                should_count = False
+            if not race.count_crossings_during_suspension:
+                if is_suspended:
+                    should_count = False
+                elif last_crossing is not None:
+                    pauses = list(
+                        race.round.round_pause_set.values_list("start", "end")
+                    )
+                    if lap_overlaps_pause(
+                        pauses, last_crossing.crossing_time, crossing_time
+                    ):
+                        should_count = False
 
             # Create lap crossing
             crossing = LapCrossing.objects.create(

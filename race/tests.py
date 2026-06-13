@@ -116,3 +116,36 @@ class RaceResetGridPenaltyPolicyTests(SimpleTestCase):
         self.assertTrue(grid_penalties_survive_reset("MAIN"))
         self.assertFalse(grid_penalties_survive_reset("Q1"))
         self.assertFalse(grid_penalties_survive_reset("Q2"))
+
+
+class LapPauseOverlapTests(SimpleTestCase):
+    """A lap whose interval overlaps a red-flag pause is neutralised (not
+    counted). With a continuous decoder clock such a lap's time would otherwise
+    be inflated by the stoppage. Every lap touching the pause window is dropped;
+    the first lap bounded by two post-resume crossings is the first valid one."""
+
+    def _t(self, secs):
+        import datetime as dt
+
+        return dt.datetime(2026, 6, 13, 12, 0, 0) + dt.timedelta(seconds=secs)
+
+    def test_overlap_detection(self):
+        from race.consumers import lap_overlaps_pause
+
+        pauses = [(self._t(100), self._t(200))]  # red flag 100s..200s
+        # laps clear of the pause -> valid
+        self.assertFalse(lap_overlaps_pause(pauses, self._t(0), self._t(50)))
+        self.assertFalse(lap_overlaps_pause(pauses, self._t(250), self._t(300)))
+        self.assertFalse(lap_overlaps_pause(pauses, self._t(200), self._t(260)))
+        # laps touching the pause -> neutralised
+        self.assertTrue(lap_overlaps_pause(pauses, self._t(80), self._t(150)))
+        self.assertTrue(lap_overlaps_pause(pauses, self._t(120), self._t(180)))
+        self.assertTrue(lap_overlaps_pause(pauses, self._t(150), self._t(250)))
+        self.assertTrue(lap_overlaps_pause(pauses, self._t(50), self._t(250)))
+
+    def test_open_pause_treated_as_ongoing(self):
+        from race.consumers import lap_overlaps_pause
+
+        pauses = [(self._t(100), None)]  # still paused
+        self.assertTrue(lap_overlaps_pause(pauses, self._t(80), self._t(150)))
+        self.assertFalse(lap_overlaps_pause(pauses, self._t(0), self._t(50)))
