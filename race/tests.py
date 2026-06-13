@@ -54,6 +54,24 @@ class TimingConsumerRaceEndedForwardTests(SimpleTestCase):
         self.assertTrue(sent["_signed"])
 
 
+class LeaderboardTimerResetForwardTests(SimpleTestCase):
+    """On a false start the leaderboard must receive a timer_reset so its
+    countdown freezes and resets to full until the race restarts."""
+
+    def test_timer_reset_forwarded_to_client(self):
+        from race.consumers import LeaderboardConsumer
+
+        consumer = LeaderboardConsumer()
+        consumer.safe_send = AsyncMock()
+
+        asyncio.run(consumer.timer_reset({"remaining_seconds": 1800}))
+
+        consumer.safe_send.assert_awaited_once()
+        sent = json.loads(consumer.safe_send.call_args[0][0])
+        self.assertEqual(sent["type"], "timer_reset")
+        self.assertEqual(sent["remaining_seconds"], 1800)
+
+
 class LeaderboardPauseNotificationTests(SimpleTestCase):
     """A red-flag pause/resume must reach the leaderboard group, not just the
     round group — otherwise the leaderboard countdown keeps ticking through the

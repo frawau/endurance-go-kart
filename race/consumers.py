@@ -1897,6 +1897,17 @@ class LeaderboardConsumer(SafeSendMixin, AsyncWebsocketConsumer):
             )
         )
 
+    async def timer_reset(self, event):
+        """Race aborted (false start): stop the countdown and reset to full."""
+        await self.safe_send(
+            json.dumps(
+                {
+                    "type": "timer_reset",
+                    "remaining_seconds": event["remaining_seconds"],
+                }
+            )
+        )
+
     async def race_lap_update(self, event):
         """Lap update sent to the round group — leaderboard gets its own lap_crossing_update."""
         pass

@@ -646,6 +646,24 @@ def falsestart(request):
         if not other_started_races.exists() and cround.started is not None:
             cround.started = None
             cround.save()
+
+        # Tell the leaderboard the race was aborted: stop its countdown and
+        # reset it to the full time (the false start sends the race back to
+        # "ready"). The leaderboard's round_update handler deliberately ignores
+        # started=false, so use a dedicated timer_reset message.
+        from channels.layers import get_channel_layer
+        from asgiref.sync import async_to_sync
+
+        channel_layer = get_channel_layer()
+        async_to_sync(channel_layer.group_send)(
+            f"leaderboard_{active_race.id}",
+            {
+                "type": "timer_reset",
+                "remaining_seconds": int(
+                    active_race.get_effective_time_limit().total_seconds()
+                ),
+            },
+        )
     else:
         # ---- Legacy path ----
         cround.false_start()
