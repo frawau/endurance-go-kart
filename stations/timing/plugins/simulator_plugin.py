@@ -75,6 +75,12 @@ class SimulatorPlugin(TimingPlugin):
         # transponder_ids that should skip their next crossing (pit bypass)
         self._skip_next: set = set()
         self._tod_offset: float = 0.0
+        # own_time models a single decoder clock shared by every transponder:
+        # raw_time = (now - decoder_epoch) % rollover. Anchored at each grid
+        # start and runs continuously in wall-clock — including through a red
+        # flag — so all cars wrap together and a pause-straddling lap is
+        # inflated exactly as real hardware would report it.
+        self._decoder_epoch: Optional[datetime] = None
 
         # Per-transponder race progress, kept so a red-flag resume can restart
         # the field in current running order and continue each car's own
@@ -246,6 +252,9 @@ class SimulatorPlugin(TimingPlugin):
         self._laps.clear()
         self._start_cumulative.clear()
         self._paused = False
+        # Anchor the shared decoder clock at the (re)start. It then runs in
+        # continuous wall-clock for own_time, independent of per-car progress.
+        self._decoder_epoch = datetime.now()
 
         print(
             f"Simulator: race {race_id} (round {round_id}) — "
@@ -299,8 +308,10 @@ class SimulatorPlugin(TimingPlugin):
         )
         # Rolling restart: each car does a formation lap, bunched a fixed gap
         # apart in running order, then resumes normal pace. start_cumulative
-        # continues each car's own race time so raw_time stays monotonic and
-        # excludes the pause.
+        # continues each car's own race time — this drives the internal lap
+        # pace/running order. (own_time raw_time comes from the shared decoder
+        # clock, which keeps running through the red flag, so the straddling
+        # lap is reported inflated; the server neutralises that lap.)
         round_deltas = self._round_deltas.get(self._round_id, {})
         self._start_cumulative = {}
         new_assignments = {}
@@ -480,6 +491,12 @@ class SimulatorPlugin(TimingPlugin):
         elif self.timing_mode == "time_of_day":
             return round((self._tod_offset + cumulative) % 86400.0, 3)
         elif self.timing_mode == "own_time":
+            # Single shared decoder clock in continuous wall-clock (not the
+            # per-car cumulative): every transponder reads the same frame and
+            # they all roll over together at rollover_seconds.
+            if self._decoder_epoch is not None:
+                elapsed = (datetime.now() - self._decoder_epoch).total_seconds()
+                return round(elapsed % self.rollover_seconds, 3)
             return round(cumulative % self.rollover_seconds, 3)
         return round(cumulative, 3)
 
