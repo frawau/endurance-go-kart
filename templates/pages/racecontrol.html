@@ -67,7 +67,7 @@
 
                             {% if round %}
                                 {# Render all buttons, use 'hidden' attribute based on initial state #}
-                                <button id="preRaceCheckButton" class="btn btn-warning btn-lg me-2 mb-2 race-action-btn"
+                                <button id="preRaceCheckButton" class="btn btn-warning btn-lg me-3 mb-2 race-action-btn"
                                         data-action="pre_check"
                                         data-url="{% url 'preracecheck' %}"
                                         {% if active_race %}
@@ -78,7 +78,7 @@
                                     <i class="fas fa-tasks me-1"></i> Pre Race Check
                                 </button>
 
-                                <button id="startButton" class="btn btn-success btn-lg me-2 mb-2 race-action-btn"
+                                <button id="startButton" class="btn btn-success btn-lg me-3 mb-2 race-action-btn"
                                         data-action="start"
                                         data-url="{% url 'race_start' %}"
                                         {% if active_race %}
@@ -89,21 +89,21 @@
                                     <i class="fas fa-play me-1"></i> {% if active_race %}Start {{ active_race.get_race_type_display }}{% else %}Start Race{% endif %}
                                 </button>
 
-                                <button id="pauseButton" class="btn btn-warning btn-lg me-2 mb-2 race-action-btn"
+                                <button id="pauseButton" class="btn btn-warning btn-lg me-3 mb-2 race-action-btn"
                                         data-action="pause"
                                         data-url="{% url 'racepaused' %}"
                                         {% if not active_race or not active_race.started or active_race.ended or is_paused %}hidden{% endif %}>
-                                    <i class="fas fa-pause me-1"></i> Pause
+                                    <i class="fas fa-flag me-1"></i> Red Flag
                                 </button>
 
-                                <button id="resumeButton" class="btn btn-info btn-lg me-2 mb-2 race-action-btn"
+                                <button id="resumeButton" class="btn btn-info btn-lg me-3 mb-2 race-action-btn"
                                         data-action="resume"
                                         data-url="{% url 'racerestart' %}"
                                         {% if not active_race or not active_race.started or active_race.ended or not is_paused %}hidden{% endif %}>
                                     <i class="fas fa-play-circle me-1"></i> Resume
                                 </button>
 
-                                <button id="endButton" class="btn btn-danger btn-lg me-2 mb-2 race-action-btn"
+                                <button id="endButton" class="btn btn-danger btn-lg me-3 mb-2 race-action-btn"
                                         data-action="end"
                                         data-url="{% url 'endofrace' %}"
                                         {% if active_race %}
@@ -114,14 +114,14 @@
                                     <i class="fas fa-stop me-1"></i> {% if active_race %}End {{ active_race.get_race_type_display }}{% else %}End Race{% endif %}
                                 </button>
 
-                                <button id="falseStartButton" class="btn btn-secondary btn-lg me-2 mb-2 race-action-btn"
+                                <button id="falseStartButton" class="btn btn-secondary btn-lg me-3 mb-2 race-action-btn"
                                         data-action="false_start"
                                         data-url="{% url 'falsestart' %}"
                                         {% if not active_race or not active_race.armed or active_race.started or active_race.ended %}hidden{% endif %}>
                                     <i class="fas fa-undo me-1"></i> False Start
                                 </button>
 
-                                <button id="falseRestartButton" class="btn btn-secondary btn-lg me-2 mb-2 race-action-btn"
+                                <button id="falseRestartButton" class="btn btn-secondary btn-lg me-3 mb-2 race-action-btn"
                                         data-action="false_restart"
                                         data-url="{% url 'falserestart' %}"
                                         hidden>
