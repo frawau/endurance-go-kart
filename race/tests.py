@@ -52,3 +52,67 @@ class TimingConsumerRaceEndedForwardTests(SimpleTestCase):
         self.assertEqual(sent["command"], "race_ended")
         self.assertEqual(sent["race_id"], 42)
         self.assertTrue(sent["_signed"])
+
+
+class LeaderboardPauseNotificationTests(SimpleTestCase):
+    """A red-flag pause/resume must reach the leaderboard group, not just the
+    round group — otherwise the leaderboard countdown keeps ticking through the
+    pause (it only re-syncs on reload / tab focus). The LeaderboardConsumer
+    already has a pause_update handler; the signal just never fed its group.
+    """
+
+    def _call_pause_change(self, end_value):
+        from race import signals
+
+        race = MagicMock()
+        race.id = 7
+        cround = MagicMock()
+        cround.id = 3
+        cround.active_race = race
+        instance = MagicMock()
+        instance.round = cround
+        instance.end = end_value  # None => pause active, set => resume
+
+        layer = MagicMock()
+        layer.group_send = AsyncMock()
+        with patch.object(
+            signals, "get_channel_layer", return_value=layer
+        ), patch.object(
+            signals,
+            "_build_round_update_payload",
+            return_value={"is paused": end_value is None, "remaining seconds": 120},
+        ):
+            signals.handle_pause_change(sender=None, instance=instance)
+        return layer.group_send.call_args_list
+
+    def test_pause_notifies_leaderboard_group(self):
+        calls = self._call_pause_change(end_value=None)
+        groups = [c.args[0] for c in calls]
+        self.assertIn("leaderboard_7", groups)
+        lb = next(c for c in calls if c.args[0] == "leaderboard_7")
+        self.assertEqual(lb.args[1]["type"], "pause_update")
+        self.assertEqual(lb.args[1]["is paused"], True)
+
+    def test_resume_notifies_leaderboard_group(self):
+        import datetime as dt
+
+        calls = self._call_pause_change(end_value=dt.datetime(2026, 6, 13, 12, 0, 0))
+        groups = [c.args[0] for c in calls]
+        self.assertIn("leaderboard_7", groups)
+        lb = next(c for c in calls if c.args[0] == "leaderboard_7")
+        self.assertEqual(lb.args[1]["type"], "pause_update")
+        self.assertEqual(lb.args[1]["is paused"], False)
+
+
+class RaceResetGridPenaltyPolicyTests(SimpleTestCase):
+    """racereset must clear grid penalties (sanction='G') when resetting a
+    Qualifying race (reconfigure fresh), but keep them when resetting MAIN
+    (they produced that grid). Resetting a Q used to keep them, which let a
+    re-added grid penalty stack into a duplicate."""
+
+    def test_grid_penalties_survive_only_for_main_reset(self):
+        from race.management.commands.racereset import grid_penalties_survive_reset
+
+        self.assertTrue(grid_penalties_survive_reset("MAIN"))
+        self.assertFalse(grid_penalties_survive_reset("Q1"))
+        self.assertFalse(grid_penalties_survive_reset("Q2"))

@@ -16,14 +16,24 @@ from race.models import (
 import datetime as dt
 
 
+def grid_penalties_survive_reset(race_type):
+    """Whether grid penalties (sanction='G') should be kept when resetting a race.
+
+    They survive only for a MAIN reset — the grid they produced is being
+    re-run. Resetting a Qualifying means redoing that setup, so grid penalties
+    are cleared (otherwise a re-added penalty stacks into a duplicate).
+    """
+    return race_type == "MAIN"
+
+
 class Command(BaseCommand):
     help = (
         "Reset the last started race in the current round. "
         "Clears lap crossings, sessions, in-race penalties, pauses, and pit lanes "
         "for that race, and unconfirms transponder assignments so they can be "
-        "re-locked. Transponder assignments, grid positions, and grid penalties "
-        "(sanction='G') are kept — grid penalties were configured before the "
-        "race ran and stay applied to the rebuilt grid."
+        "re-locked. Transponder assignments and grid positions are kept. Grid "
+        "penalties (sanction='G') are kept for a MAIN reset (they produced that "
+        "grid) but cleared for a Qualifying reset (so they reconfigure fresh)."
     )
 
     def get_current_round(self):
@@ -77,15 +87,15 @@ class Command(BaseCommand):
         crossings_count = LapCrossing.objects.filter(race=race).count()
         sessions_count = Session.objects.filter(round=cround, race=race).count()
 
-        # All penalties for this round EXCEPT grid penalties.
-        # Grid penalties (sanction='G') are pre-race setup data: they were
-        # configured before the race ran, applied to the grid at build time,
-        # and should survive a race reset so the rebuilt grid still reflects
-        # them. The other sanctions (S, D, L, P, T) belong to the race
-        # being reset and go away.
-        penalties_qs = RoundPenalty.objects.filter(round=cround).exclude(
-            penalty__sanction="G"
-        )
+        # In-race penalties for this round always go. Grid penalties
+        # (sanction='G') survive only for a MAIN reset — see
+        # grid_penalties_survive_reset(). For a Qualifying reset they are
+        # cleared so they can be reconfigured fresh (otherwise re-adding one
+        # stacks into a duplicate grid penalty).
+        keep_grid = grid_penalties_survive_reset(race.race_type)
+        penalties_qs = RoundPenalty.objects.filter(round=cround)
+        if keep_grid:
+            penalties_qs = penalties_qs.exclude(penalty__sanction="G")
         penalties_count = penalties_qs.count()
         penalty_queue_count = PenaltyQueue.objects.filter(
             round_penalty__in=penalties_qs
@@ -118,10 +128,12 @@ class Command(BaseCommand):
         self.stdout.write(
             f"Found {penalty_queue_count} penalty queue entries to delete"
         )
-        self.stdout.write(
-            f"Found {penalties_count} in-race penalties to delete "
-            "(grid penalties kept)"
+        grid_note = (
+            "grid penalties kept — MAIN reset"
+            if keep_grid
+            else "incl. grid penalties — Qualifying reset clears them"
         )
+        self.stdout.write(f"Found {penalties_count} penalties to delete ({grid_note})")
         self.stdout.write(
             f"Found {confirmed_assignments} transponder assignments to unconfirm "
             f"(assignments kept, lock removed)"
@@ -135,8 +147,8 @@ class Command(BaseCommand):
                     "- Deleting sessions linked to this race\n"
                     "- Deleting pauses that started during this race\n"
                     "- Deleting all pit lane (ChangeLane) records for the round\n"
-                    "- Deleting penalty queue entries and in-race penalties\n"
-                    "  (grid penalties, sanction='G', are kept)\n"
+                    "- Deleting penalty queue entries and penalties\n"
+                    f"  ({grid_note})\n"
                     "- Clearing championship standings for this round\n"
                     "- Unconfirming transponder assignments (assignments kept)\n"
                     "- Resetting race: started=None, ended=None, ready=False\n"
@@ -171,9 +183,7 @@ class Command(BaseCommand):
 
                 n, _ = penalties_qs.delete()
                 self.stdout.write(
-                    self.style.SUCCESS(
-                        f"Deleted {n} in-race penalties (kept grid penalties)"
-                    )
+                    self.style.SUCCESS(f"Deleted {n} penalties ({grid_note})")
                 )
 
                 n = RaceTransponderAssignment.objects.filter(

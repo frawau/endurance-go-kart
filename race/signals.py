@@ -191,6 +191,12 @@ def handle_pause_change(sender, instance, **kwargs):
     # end=None is a pause; setting end is the resume.
     active = cround.active_race
     if active is not None:
+        # The leaderboard joins leaderboard_<race_id> and has a pause_update
+        # handler, but only the round_ group was being notified — so the public
+        # leaderboard countdown kept ticking through a red flag and only
+        # re-synced on reload/tab-focus. Feed its group the same payload.
+        async_to_sync(channel_layer.group_send)(f"leaderboard_{active.id}", payload)
+
         async_to_sync(channel_layer.group_send)(
             "timing",
             {
