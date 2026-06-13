@@ -641,6 +641,11 @@ async function handleRaceAction(event) {
     /* ... validation ... */ return;
   }
 
+  // End Race is destructive and final — require an explicit confirm (2-step).
+  if (action === "end" && !confirm("End the race now? This cannot be undone.")) {
+    return;
+  }
+
   // --- Disable ALL action buttons during processing ---
   const allActionButtons = document.querySelectorAll(
     "#race-control-buttons .race-action-btn",

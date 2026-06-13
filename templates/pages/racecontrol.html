@@ -89,7 +89,7 @@
                                     <i class="fas fa-play me-1"></i> {% if active_race %}Start {{ active_race.get_race_type_display }}{% else %}Start Race{% endif %}
                                 </button>
 
-                                <button id="pauseButton" class="btn btn-warning btn-lg me-3 mb-2 race-action-btn"
+                                <button id="pauseButton" class="btn btn-danger btn-lg me-3 mb-2 race-action-btn"
                                         data-action="pause"
                                         data-url="{% url 'racepaused' %}"
                                         {% if not active_race or not active_race.started or active_race.ended or is_paused %}hidden{% endif %}>
@@ -103,7 +103,7 @@
                                     <i class="fas fa-play-circle me-1"></i> Resume
                                 </button>
 
-                                <button id="endButton" class="btn btn-danger btn-lg me-3 mb-2 race-action-btn"
+                                <button id="endButton" class="btn btn-dark btn-lg me-3 mb-2 race-action-btn"
                                         data-action="end"
                                         data-url="{% url 'endofrace' %}"
                                         {% if active_race %}
