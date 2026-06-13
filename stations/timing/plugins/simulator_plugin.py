@@ -94,6 +94,13 @@ class SimulatorPlugin(TimingPlugin):
         # resume, in running order).
         self._restart_gap: float = float(config.get("restart_gap", 0.4))
 
+        # In-flight window: a real flag doesn't stop cars instantly — those
+        # already at the line cross it. On pause, keep firing for this long so
+        # cars within it complete their lap (during suspension) before the field
+        # is held; the server credits those in-flight laps (time voided). Models
+        # the real decoder, which reports every crossing including post-flag ones.
+        self._inflight_window: float = float(config.get("inflight_window", 3.0))
+
         # Asyncio coordination
         self._race_start_event: asyncio.Event = asyncio.Event()
         self._race_end_event: asyncio.Event = asyncio.Event()
@@ -285,6 +292,13 @@ class SimulatorPlugin(TimingPlugin):
         if self._race_id != race_id or self._paused:
             return
         self._paused = True
+        # In-flight completion: let cars already at the line finish that lap
+        # (they cross within the window) before holding the field. Their
+        # crossings land during the suspension and the server credits the
+        # in-flight lap (time voided), so two cars split by the flag keep the
+        # same lap. The loops keep firing until _cancel_sim_tasks().
+        if self._inflight_window > 0:
+            await asyncio.sleep(self._inflight_window)
         await self._cancel_sim_tasks()
         print(f"Simulator: race {race_id} paused — cars held")
 
