@@ -1445,13 +1445,17 @@ class TimingConsumer(SafeSendMixin, AsyncWebsocketConsumer):
             if lap_time is None and last_crossing:
                 lap_time = crossing_time - last_crossing.crossing_time
 
-            # Neutralise laps tied to a red flag (unless the race opts to count
-            # them): a crossing that arrives *during* a pause, or a lap whose
-            # interval *straddles* a pause. The latter matters once the decoder
-            # clock runs continuously through the stoppage — without it the
-            # straddling lap's time would be inflated by the full pause.
+            # Red-flag handling (unless the race opts to count crossings during
+            # suspension):
+            #  * a crossing that arrives *during* a pause is not a racing lap
+            #    (is_valid=False);
+            #  * a lap whose interval *straddles* a pause was still completed by
+            #    the kart, so it COUNTS toward the lap total/position, but its
+            #    time spans the stoppage (inflated by the continuous decoder
+            #    clock) and is void — excluded from timing stats.
             is_suspended = race.round.is_paused
             should_count = True
+            void_time = False
             if not race.count_crossings_during_suspension:
                 if is_suspended:
                     should_count = False
@@ -1462,7 +1466,10 @@ class TimingConsumer(SafeSendMixin, AsyncWebsocketConsumer):
                     if lap_overlaps_pause(
                         pauses, last_crossing.crossing_time, crossing_time
                     ):
-                        should_count = False
+                        void_time = True
+
+            if void_time:
+                lap_time = None
 
             # Create lap crossing
             crossing = LapCrossing.objects.create(
