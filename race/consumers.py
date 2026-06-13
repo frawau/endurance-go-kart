@@ -1065,6 +1065,18 @@ class TimingConsumer(SafeSendMixin, AsyncWebsocketConsumer):
         # Schedule server-side auto-end for time-only modes (QUALIFYING, etc.)
         asyncio.ensure_future(self._schedule_auto_end(event["race_id"]))
 
+    async def timing_race_ended(self, event):
+        """Forward a race-ended notification to the timing station so the
+        simulator winds down. Fired by handle_race_change for every race end
+        (timer/auto-end, apscheduler task, or finishing crossing). Real
+        hardware ignores the command."""
+        command = {
+            "type": "command",
+            "command": "race_ended",
+            "race_id": event["race_id"],
+        }
+        await self.safe_send(json.dumps(self.sign_message(command)))
+
     async def timing_race_paused(self, event):
         """Forward a red-flag pause to the timing station (simulator holds cars)."""
         command = {
@@ -1164,14 +1176,9 @@ class TimingConsumer(SafeSendMixin, AsyncWebsocketConsumer):
                     "race_type": result["race_type"],
                 },
             )
-            # Tell the timing station so SimulatorPlugin can wind down
-            await self.safe_send(
-                json.dumps(
-                    self.sign_message(
-                        {"type": "command", "command": "race_ended", "race_id": race_id}
-                    )
-                )
-            )
+            # The timing station is notified via handle_race_change ->
+            # timing_race_ended when end_this_race() saves `ended`, so no
+            # explicit race_ended command is needed here.
 
     async def _schedule_auto_end(self, race_id):
         """Sleep until the race time limit expires then auto-end the race."""
