@@ -167,3 +167,78 @@ class LapPauseOverlapTests(SimpleTestCase):
         pauses = [(self._t(100), None)]  # still paused
         self.assertTrue(lap_overlaps_pause(pauses, self._t(80), self._t(150)))
         self.assertFalse(lap_overlaps_pause(pauses, self._t(0), self._t(50)))
+
+
+class RedFlagCrossingClassificationTests(SimpleTestCase):
+    """Classify a crossing around a red flag into (should_count, void_time).
+
+    The lap a kart is *on* when the flag falls counts whichever side of the
+    flag it completes — during suspension (in-flight) or after resume
+    (straddling) — but its time is void. A whole extra lap done under the
+    suspension does not count. So two nose-to-tail cars split by the flag keep
+    the same lap instead of getting an artificial 1-lap gap."""
+
+    def _t(self, secs):
+        import datetime as dt
+
+        return dt.datetime(2026, 6, 13, 12, 0, 0) + dt.timedelta(seconds=secs)
+
+    def test_normal_lap_counts_with_time(self):
+        from race.consumers import classify_red_flag_crossing
+
+        self.assertEqual(
+            classify_red_flag_crossing(False, False, self._t(0), None, [], self._t(47)),
+            (True, False),
+        )
+
+    def test_count_during_suspension_config_counts_everything(self):
+        from race.consumers import classify_red_flag_crossing
+
+        # Race opts to count during suspension: normal counting, time kept.
+        self.assertEqual(
+            classify_red_flag_crossing(
+                True, True, self._t(0), self._t(10), [], self._t(47)
+            ),
+            (True, False),
+        )
+
+    def test_inflight_lap_during_suspension_counts_void_time(self):
+        from race.consumers import classify_red_flag_crossing
+
+        # Suspended, last crossing BEFORE the open pause start -> in-flight.
+        self.assertEqual(
+            classify_red_flag_crossing(
+                False, True, self._t(5), self._t(40), [], self._t(45)
+            ),
+            (True, True),
+        )
+
+    def test_extra_lap_during_suspension_dropped(self):
+        from race.consumers import classify_red_flag_crossing
+
+        # Suspended, last crossing AFTER the open pause start -> extra lap.
+        self.assertEqual(
+            classify_red_flag_crossing(
+                False, True, self._t(50), self._t(40), [], self._t(95)
+            ),
+            (False, False),
+        )
+
+    def test_suspended_with_no_previous_crossing_dropped(self):
+        from race.consumers import classify_red_flag_crossing
+
+        self.assertEqual(
+            classify_red_flag_crossing(False, True, None, self._t(40), [], self._t(45)),
+            (False, False),
+        )
+
+    def test_straddling_lap_after_resume_counts_void_time(self):
+        from race.consumers import classify_red_flag_crossing
+
+        pauses = [(self._t(40), self._t(100))]
+        self.assertEqual(
+            classify_red_flag_crossing(
+                False, False, self._t(80), None, pauses, self._t(120)
+            ),
+            (True, True),
+        )

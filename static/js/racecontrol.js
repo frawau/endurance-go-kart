@@ -438,7 +438,7 @@ function hideFalseStartButton() {
       const pauseBtn = document.getElementById("pauseButton");
       if (pauseBtn) {
         pauseBtn.removeAttribute("hidden");
-        pauseBtn.innerHTML = '<i class="fas fa-pause me-1"></i> Pause Race';
+        pauseBtn.innerHTML = '<i class="fas fa-flag me-1"></i> Red Flag';
         pauseBtn.disabled = false;
       }
     }
@@ -463,7 +463,7 @@ function hideFalseRestartButton() {
       const pauseBtn = document.getElementById("pauseButton");
       if (pauseBtn) {
         pauseBtn.removeAttribute("hidden");
-        pauseBtn.innerHTML = '<i class="fas fa-pause me-1"></i> Pause Race';
+        pauseBtn.innerHTML = '<i class="fas fa-flag me-1"></i> Red Flag';
         pauseBtn.disabled = false;
       }
     }
@@ -639,6 +639,11 @@ async function handleRaceAction(event) {
   );
   if (!action || !url || !roundId || !csrfToken) {
     /* ... validation ... */ return;
+  }
+
+  // End Race is destructive and final — require an explicit confirm (2-step).
+  if (action === "end" && !confirm("End the race now? This cannot be undone.")) {
+    return;
   }
 
   // --- Disable ALL action buttons during processing ---
