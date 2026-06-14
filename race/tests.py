@@ -136,6 +136,27 @@ class RaceResetGridPenaltyPolicyTests(SimpleTestCase):
         self.assertFalse(grid_penalties_survive_reset("Q2"))
 
 
+class StandingsLapCountRuleTests(SimpleTestCase):
+    """The standings lap count must count *completed laps* by lap_number, not by
+    the presence of a lap_time. Red-flag in-flight and straddling laps are stored
+    with lap_time=None on purpose (count the lap, void the time); counting by
+    lap_time used to drop them, so the in-flight cars showed a permanent 1-lap
+    deficit even though their lap_number (distance/position) was correct. The
+    start passage is lap_number=0 and must still NOT count."""
+
+    def test_completed_lap_filter_counts_by_lap_number_not_lap_time(self):
+        from race.models import Race
+
+        f = Race.completed_lap_filter()
+        # Counted by lap_number: the start passage (lap_number 0) is excluded,
+        # every real lap (>=1) included.
+        self.assertEqual(f.get("lap_number__gte"), 1)
+        # Must NOT filter on lap_time — that would drop voided red-flag laps.
+        self.assertNotIn("lap_time__isnull", f)
+        # Only valid crossings count (dropped extra-lap crossings excluded).
+        self.assertTrue(f.get("is_valid"))
+
+
 class LapPauseOverlapTests(SimpleTestCase):
     """A lap whose interval overlaps a red-flag pause is neutralised (not
     counted). With a continuous decoder clock such a lap's time would otherwise
