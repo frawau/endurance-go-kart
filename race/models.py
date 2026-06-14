@@ -1962,6 +1962,20 @@ class Race(models.Model):
             cround.ended = now
             cround.save()
 
+    @staticmethod
+    def completed_lap_filter():
+        """Filter kwargs selecting the crossings that count as completed laps.
+
+        Counted by ``lap_number``, NOT by the presence of a ``lap_time``. The
+        start passage is ``lap_number=0`` (no previous reference, lap_time=None)
+        and must not count. Red-flag in-flight and straddling laps are stored
+        with ``lap_time=None`` on purpose ("count the lap, void the time") but
+        are real laps (``lap_number >= 1``) and must count for distance and
+        position — counting by lap_time used to drop them, giving in-flight
+        cars a permanent 1-lap deficit. See classify_red_flag_crossing().
+        """
+        return {"is_valid": True, "lap_number__gte": 1}
+
     def calculate_race_standings(self):
         """
         Calculate current race standings.
@@ -2021,15 +2035,14 @@ class Race(models.Model):
 
         standings = []
         for team in self.get_all_teams():
-            # Count only crossings that have a lap_time — i.e. completed laps.
-            # The first crossing always has lap_time=None (no previous reference),
-            # so laps_completed=0 after the first passage and 1 after the first
-            # timed lap, matching "Lap 0 → Lap 1 → ..." numbering.
+            # Count completed laps by lap_number (see completed_lap_filter): the
+            # start passage is lap_number=0 and does not count, every real lap
+            # (>=1) does — including red-flag void laps (lap_time=None) which
+            # still count for distance/position, only their time is void.
             laps = self.lap_crossings.filter(
                 team=team,
-                is_valid=True,
                 crossing_time__gt=self.started,
-                lap_time__isnull=False,
+                **self.completed_lap_filter(),
             )
             if _end_boundary:
                 laps = laps.filter(crossing_time__lte=_end_boundary)

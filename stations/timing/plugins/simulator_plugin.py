@@ -32,6 +32,35 @@ from typing import Dict, List, Optional, Tuple
 from .base_plugin import CrossingEvent, TimingPlugin
 
 
+def red_flag_queue_completions(laps, cumulative):
+    """Red-flag queue-up: which cars complete their in-progress lap and where
+    they queue.
+
+    Real procedure: the leader rolls to the S/F line and stops just before it;
+    everyone queues behind in running order. A car that hadn't yet crossed for
+    the leader's current lap completes it (one crossing) to take its place; the
+    leader and anyone who just crossed stop short and don't gain a lap. So every
+    car below the lead lap advances exactly one lap, and the lead-lap pack ends
+    together.
+
+    ``laps`` is {tid: lap_count}, ``cumulative`` is {tid: accumulated_time}.
+    Returns [(tid, new_laps, new_cumulative)], ordered so the completing cars
+    queue (by accumulated time) just behind the lead-lap pack.
+    """
+    if not laps:
+        return []
+    max_laps = max(laps.values())
+    lead_cum = max(
+        (cumulative.get(t, 0.0) for t in laps if laps[t] == max_laps),
+        default=0.0,
+    )
+    behind = sorted(
+        (t for t in laps if laps[t] < max_laps),
+        key=lambda t: cumulative.get(t, 0.0),
+    )
+    return [(t, laps[t] + 1, lead_cum + (i + 1) * 0.01) for i, t in enumerate(behind)]
+
+
 class SimulatorPlugin(TimingPlugin):
     """Plugin that simulates transponder crossings for testing."""
 
@@ -280,13 +309,36 @@ class SimulatorPlugin(TimingPlugin):
             self._race_end_event.set()
 
     async def on_race_paused(self, race_id: int):
-        """Red flag: hold the cars (stop firing). Each car's progress is
-        preserved so the resume can restart the field in running order."""
+        """Red flag: form the queue at the line, then hold the field.
+
+        Hold everyone immediately (so no car naturally completes another lap),
+        then for every car below the lead lap fire one completion crossing — the
+        car rolls up and takes its place in the queue. The server's in-flight
+        logic counts those crossings (time voided), so the whole lead-lap pack
+        ends on the same lap instead of being split by the flag. Each car's
+        progress is preserved so the resume restarts the field in running order.
+        """
         if self._race_id != race_id or self._paused:
             return
         self._paused = True
         await self._cancel_sim_tasks()
-        print(f"Simulator: race {race_id} paused — cars held")
+
+        if self._current_assignments:
+            laps = {t: self._laps.get(t, 0) for t in self._current_assignments}
+            cumulative = {
+                t: self._cumulative.get(t, 0.0) for t in self._current_assignments
+            }
+            completions = red_flag_queue_completions(laps, cumulative)
+            for tid, new_laps, new_cum in completions:
+                self._laps[tid] = new_laps
+                self._cumulative[tid] = new_cum
+                await self._fire(tid, self._raw_time(new_cum, 0.0))
+            print(
+                f"Simulator: race {race_id} paused — field queued "
+                f"({len(completions)} cars completed their lap)"
+            )
+        else:
+            print(f"Simulator: race {race_id} paused — cars held")
 
     async def on_race_resumed(self, race_id: int):
         """Resume after a red flag: relaunch the field bunched in current

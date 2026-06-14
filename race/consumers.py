@@ -49,6 +49,48 @@ def lap_overlaps_pause(pauses, lap_start, lap_end):
     return False
 
 
+def classify_red_flag_crossing(
+    count_during_suspension,
+    is_suspended,
+    last_crossing_time,
+    open_pause_start,
+    pauses,
+    crossing_time,
+):
+    """Decide (should_count, void_time) for a crossing around a red flag.
+
+    The lap a kart is *on* when the flag falls counts whichever side of the flag
+    it completes, but with its time voided:
+
+    * ``count_during_suspension`` set: count everything as-is (time kept).
+    * During a pause: the lap in progress when the flag fell — its previous
+      crossing is *before* the open pause's start — is an in-flight completion,
+      so it COUNTS with void time. A whole extra lap done entirely under the
+      suspension (previous crossing also during the pause) does not count.
+    * After resume: a lap whose interval *straddles* a (now-closed) pause counts
+      with void time.
+
+    Counting both the in-flight and the straddling completion keeps two
+    nose-to-tail cars split by the flag on the same lap, instead of voiding the
+    lap of whichever one crossed just after the flag.
+    """
+    if count_during_suspension:
+        return True, False
+    if is_suspended:
+        if (
+            last_crossing_time is not None
+            and open_pause_start is not None
+            and last_crossing_time < open_pause_start
+        ):
+            return True, True  # in-flight lap: counts, time void
+        return False, False  # extra lap under suspension: dropped
+    if last_crossing_time is not None and lap_overlaps_pause(
+        pauses, last_crossing_time, crossing_time
+    ):
+        return True, True  # straddling lap: counts, time void
+    return True, False
+
+
 class SafeSendMixin:
     """Catch RuntimeError when sending to a disconnected WebSocket client."""
 
@@ -1445,28 +1487,23 @@ class TimingConsumer(SafeSendMixin, AsyncWebsocketConsumer):
             if lap_time is None and last_crossing:
                 lap_time = crossing_time - last_crossing.crossing_time
 
-            # Red-flag handling (unless the race opts to count crossings during
-            # suspension):
-            #  * a crossing that arrives *during* a pause is not a racing lap
-            #    (is_valid=False);
-            #  * a lap whose interval *straddles* a pause was still completed by
-            #    the kart, so it COUNTS toward the lap total/position, but its
-            #    time spans the stoppage (inflated by the continuous decoder
-            #    clock) and is void — excluded from timing stats.
-            is_suspended = race.round.is_paused
-            should_count = True
-            void_time = False
-            if not race.count_crossings_during_suspension:
-                if is_suspended:
-                    should_count = False
-                elif last_crossing is not None:
-                    pauses = list(
-                        race.round.round_pause_set.values_list("start", "end")
-                    )
-                    if lap_overlaps_pause(
-                        pauses, last_crossing.crossing_time, crossing_time
-                    ):
-                        void_time = True
+            # Red-flag handling: the lap a kart is on when the flag falls counts
+            # whichever side of the flag it completes (in-flight during the
+            # pause, or straddling after resume) but with its time voided; a
+            # whole extra lap done under suspension is dropped. See
+            # classify_red_flag_crossing(). Derive everything from one pauses
+            # query: is_suspended == an open pause exists.
+            pauses = list(race.round.round_pause_set.values_list("start", "end"))
+            open_pause_start = next((s for s, e in pauses if e is None), None)
+            is_suspended = open_pause_start is not None
+            should_count, void_time = classify_red_flag_crossing(
+                race.count_crossings_during_suspension,
+                is_suspended,
+                last_crossing.crossing_time if last_crossing else None,
+                open_pause_start,
+                pauses,
+                crossing_time,
+            )
 
             if void_time:
                 lap_time = None
