@@ -32,6 +32,18 @@ let currentRoundPenaltyId = null;
 let currentQueueId = null;
 
 /**
+ * Escape user-controlled strings (team names, nicknames) before inserting them
+ * into innerHTML, to prevent stored XSS from registered names.
+ */
+function escHtml(s) {
+  return String(s == null ? "" : s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/**
  * Sign message with HMAC using Web Crypto API (SHA-256 for JavaScript compatibility)
  */
 async function signMessage(messageData) {
@@ -836,7 +848,7 @@ function updateEmptyTeamsList(teams) {
 
       // Format: Team name (Number) - Championship name
       li.innerHTML = `
-            <span>${team.team_name} (#${team.number}) - ${team.championship_name}</span>
+            <span>${escHtml(team.team_name)} (#${escHtml(team.number)}) - ${escHtml(team.championship_name)}</span>
             <button class="btn btn-sm btn-outline-danger delete-single-team"
             data-team-id="${team.id}">Delete</button>
             `;
