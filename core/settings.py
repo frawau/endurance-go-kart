@@ -20,15 +20,14 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = os.environ.get("SECRET_KEY", "TODO_SET_SECRET_KEY")
 
-# Stop and Go Station HMAC Secret
-STOPANDGO_HMAC_SECRET = os.environ.get(
-    "STOPANDGO_HMAC_SECRET", "race_control_hmac_key_2024"
-)
+# Stop and Go Station HMAC Secret.
+# No committed default: an unset or empty secret is treated as a configuration
+# error and station WebSocket connections are refused (see race/consumers.py).
+# This prevents shipping a guessable key that would let anyone forge messages.
+STOPANDGO_HMAC_SECRET = os.environ.get("STOPANDGO_HMAC_SECRET", "")
 
-# Timing Station HMAC Secret
-TIMING_HMAC_SECRET = os.environ.get(
-    "TIMING_HMAC_SECRET", "timing_hmac_secret_change_me_2025"
-)
+# Timing Station HMAC Secret (same fail-closed handling as above).
+TIMING_HMAC_SECRET = os.environ.get("TIMING_HMAC_SECRET", "")
 
 DEBUG = os.environ.get("DEBUG", True)
 APP_HOSTNAME = os.getenv("APP_HOSTNAME", "gokart.wautier.eu")
