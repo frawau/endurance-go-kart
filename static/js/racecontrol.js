@@ -678,7 +678,20 @@ async function handleRaceAction(event) {
         data = await response.json();
         console.log(`Action '${action}' response data:`, data);
       } catch (e) {
-        addSystemMessage("Invalid response.", "warning");
+        // Response wasn't JSON — typically a session-expiry redirect to the
+        // login HTML. Recover the UI: restore the clicked button and re-enable
+        // the visible buttons. The finally block clears buttonActionInProgress,
+        // so WebSocket state updates are not ignored forever.
+        addSystemMessage(
+          "Unexpected response — your session may have expired. Reload the page.",
+          "danger",
+        );
+        button.innerHTML = originalButtonHTML;
+        document
+          .querySelectorAll(
+            "#race-control-buttons .race-action-btn:not([hidden])",
+          )
+          .forEach((btn) => (btn.disabled = false));
         return;
       }
 
@@ -803,9 +816,14 @@ async function handleRaceAction(event) {
     addSystemMessage(`Network error: ${error}.`, "danger");
     button.innerHTML = originalButtonHTML; // Restore button text
     button.disabled = false; // Re-enable only the clicked button on network error
+  } finally {
+    // Clear the in-progress flag no matter how we leave the try/catch —
+    // including the early return on a non-JSON response. Otherwise the flag
+    // stays true and the round WebSocket handler (guarded by
+    // !buttonActionInProgress) silently ignores every later state update,
+    // soft-locking race control until the page is reloaded.
+    buttonActionInProgress = false;
   }
-  // Clear in-progress flag regardless of outcome
-  buttonActionInProgress = false;
 }
 
 /**
