@@ -1,0 +1,50 @@
+# Keep secrets, local state and build cruft out of the image layers.
+# The app receives all configuration via compose `environment:`/`env_file:`
+# at runtime, so none of these are needed inside the image.
+
+# Secrets / environment
+.env
+.env.bak
+ssl/
+
+# SSL/ACME material exported to the repo by `race-manager sync-acme-cert`
+*.pem
+*.key
+
+# Database backups produced by `race-manager backup`
+backups/
+gokart_backup_*.tar.gz
+
+# Version control
+.git
+.gitignore
+.github
+
+# Virtualenvs
+.venv
+venv/
+**/venv/
+configui/venv/
+.beeware
+
+# Python build artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.egg*
+build/
+dist/
+
+# Local databases / editor
+*.sqlite*
+.idea
+.vscode
+*.DS_Store
+
+# Station runtime configs (derived locally; templates stay tracked)
+stations/timing/timing-station.toml
+stations/stopandgo/stopandgo-station.toml
+
+# Docs not needed at runtime
+docs/_build/
+node_modules/
