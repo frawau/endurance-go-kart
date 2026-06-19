@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="{% if compact_only %}width=416, initial-scale=1.0{% else %}width=device-width, initial-scale=1.0{% endif %}">
     <title>{% if race %}{{ race.get_race_type_display }} - Track Display{% else %}Track Display{% endif %}</title>
     {% load static %}
     <style>
@@ -145,6 +145,28 @@
             padding: calc(2px * var(--row-scale)) calc(4px * var(--row-scale));
         }
 
+        /* Fixed-size mode (Track Display 2): render everything into a hard
+           416×416 stage, then scale that whole stage to fit the real
+           viewport. Desktop browsers enforce a minimum window width, so we
+           cannot rely on 100vw shrinking to 416 — instead we lay out at a
+           fixed 416 and transform-scale the result. fitStage() in JS sets the
+           transform; the square aspect is preserved. */
+        body.fixed-mode { overflow: hidden; background: #000; }
+        #stage {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 416px;
+            height: 416px;
+            transform-origin: top left;
+            background: #000;
+            overflow: hidden;
+        }
+        body.fixed-mode .panels {
+            width: 416px;
+            height: 416px;
+        }
+
         .no-race {
             display: flex;
             align-items: center;
@@ -158,10 +180,11 @@
         }
     </style>
 </head>
-<body>
+<body{% if compact_only %} class="fixed-mode"{% endif %}>
     {% if not race %}
     <div class="no-race">No active race</div>
     {% else %}
+    {% if compact_only %}<div id="stage">{% endif %}
     <div class="panels">
         <div class="panel">
             <table class="track">
@@ -196,6 +219,7 @@
             </table>
         </div>
     </div>
+    {% if compact_only %}</div>{% endif %}
 
     <script>
         const raceId = {{ race.id }};
@@ -220,9 +244,27 @@
         const COMPACT_BREAKPOINT = 480;
         let useCompactFormat = false;
 
+        // Fixed-stage dimensions for compactOnly mode. The layout is rendered
+        // at exactly this size and then scaled to fit the actual viewport.
+        const STAGE_W = 416;
+        const STAGE_H = 416;
+
         function applyCompactLayout() {
             useCompactFormat = compactOnly || window.innerWidth <= COMPACT_BREAKPOINT;
             document.body.classList.toggle('compact', useCompactFormat);
+        }
+
+        // Scale the fixed 416×416 stage so it fills the viewport while keeping
+        // its square aspect. Centred on whichever axis has slack. No-op unless
+        // compactOnly (the #stage element only exists then).
+        function fitStage() {
+            if (!compactOnly) return;
+            const stage = document.getElementById('stage');
+            if (!stage) return;
+            const s = Math.min(window.innerWidth / STAGE_W, window.innerHeight / STAGE_H);
+            const offX = Math.max(0, (window.innerWidth - STAGE_W * s) / 2);
+            const offY = Math.max(0, (window.innerHeight - STAGE_H * s) / 2);
+            stage.style.transform = `translate(${offX}px, ${offY}px) scale(${s})`;
         }
 
         function formatLapTime(secs) {
@@ -416,7 +458,9 @@
             const maxRows = Math.max(leftRows, rightRows, 1);
 
             // Height target: at scale=1 a row takes ~76 px (3.2rem * 1.05 + padding).
-            const availH = (window.innerHeight - 16) / maxRows;
+            // In compactOnly mode size against the fixed stage, not the viewport.
+            const viewH = compactOnly ? STAGE_H : window.innerHeight;
+            const availH = (viewH - 16) / maxRows;
             const heightTarget = availH / 76;
 
             // Width target: empirical row-content width at scale=1.
@@ -424,7 +468,9 @@
             //   full (MM:SS.mmm):   ~310 px
             const baseRowWidth = useCompactFormat ? 190 : 310;
             const panel = document.querySelector('.panel');
-            const panelWidth = panel ? panel.clientWidth : window.innerWidth / 2;
+            const panelWidth = panel
+                ? panel.clientWidth
+                : (compactOnly ? STAGE_W : window.innerWidth) / 2;
             const widthTarget = panelWidth / baseRowWidth;
 
             applyScale(Math.min(heightTarget, widthTarget));
@@ -451,9 +497,11 @@
 
         window.addEventListener('resize', function() {
             applyCompactLayout();
+            fitStage();
             autoFit();
         });
         applyCompactLayout();
+        fitStage();
         relabelInitialLapTimes();
         autoFit();
         connect();
