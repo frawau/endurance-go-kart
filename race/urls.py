@@ -226,6 +226,11 @@ urlpatterns = [
         name="track_display",
     ),
     path(
+        "track-display-2/",
+        views.track_display2,
+        name="track_display2",
+    ),
+    path(
         "stopandgo-call/",
         views.stopandgo_call_screen,
         name="stopandgo_call_screen",

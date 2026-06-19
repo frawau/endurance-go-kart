@@ -4800,13 +4800,16 @@ def public_leaderboard(request):
     return render(request, "pages/public_leaderboard.html", context)
 
 
-def track_display(request):
-    """Track-side full-page display: tall portrait, two columns of teams.
+def _track_display(request, compact_only):
+    """Shared body for the trackside two-column team / last-lap display.
 
     Each row shows Team # and Last Lap time in big letters. Left column
     holds the top half (positions 1..ceil(N/2)); right column the rest.
     Standings are pushed via the existing leaderboard WebSocket so the
     display stays in sync with the leaderboard automatically.
+
+    compact_only=True renders the fixed-size variant (no +/- scaling strip,
+    always-compact layout) intended for small square LCDs (e.g. 416×416).
     """
     cround = Round.objects.filter(ended__isnull=True).order_by("start").first()
     race = cround.active_race if cround else None
@@ -4815,7 +4818,11 @@ def track_display(request):
         return render(
             request,
             "pages/track_display.html",
-            {"race": None, "organiser_logo": get_organiser_logo(cround)},
+            {
+                "race": None,
+                "compact_only": compact_only,
+                "organiser_logo": get_organiser_logo(cround),
+            },
         )
 
     standings = race.calculate_race_standings() if race.started else []
@@ -4828,10 +4835,22 @@ def track_display(request):
         "pages/track_display.html",
         {
             "race": race,
+            "compact_only": compact_only,
             "left_standings": left_standings,
             "right_standings": right_standings,
         },
     )
+
+
+def track_display(request):
+    """Track-side full-page display with auto-fit and manual +/- scaling."""
+    return _track_display(request, compact_only=False)
+
+
+def track_display2(request):
+    """Fixed-size trackside display (no scaling strip) for small square
+    LCDs such as 416×416. Same data as track_display."""
+    return _track_display(request, compact_only=True)
 
 
 @xframe_options_exempt

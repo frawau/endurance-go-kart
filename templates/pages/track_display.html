@@ -176,10 +176,12 @@
                 </tbody>
             </table>
         </div>
+        {% if not compact_only %}
         <div class="scale-strip">
             <div class="scale-btn" id="scaleUp" title="Larger rows">+</div>
             <div class="scale-btn" id="scaleDown" title="Smaller rows">−</div>
         </div>
+        {% endif %}
         <div class="panel">
             <table class="track">
                 <tbody id="rightBody">
@@ -198,6 +200,14 @@
     <script>
         const raceId = {{ race.id }};
         const raceType = "{{ race.race_type }}";
+        // Track Display 2: a fixed-size (e.g. 416×416) variant with no
+        // +/- scaling strip. compactOnly forces the compact layout and the
+        // M:SS.s lap format regardless of window width, and auto-fit is the
+        // only sizing mechanism (no manual override / localStorage).
+        const compactOnly = {{ compact_only|yesno:"true,false" }};
+        // Where to send the page when the race ends and we re-attach to the
+        // currently-active race — stay on whichever display this is.
+        const selfUrl = "{% if compact_only %}{% url 'track_display2' %}{% else %}{% url 'track_display' %}{% endif %}";
         const isQualifying = raceType.startsWith('Q');
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsUrl = `${protocol}//${window.location.host}/ws/leaderboard/${raceId}/`;
@@ -211,7 +221,7 @@
         let useCompactFormat = false;
 
         function applyCompactLayout() {
-            useCompactFormat = window.innerWidth <= COMPACT_BREAKPOINT;
+            useCompactFormat = compactOnly || window.innerWidth <= COMPACT_BREAKPOINT;
             document.body.classList.toggle('compact', useCompactFormat);
         }
 
@@ -367,7 +377,7 @@
                     // rolls forward to the next race. The track display
                     // should stay on its own page; reload so the view
                     // reattaches to whatever race is active now.
-                    window.location.href = "{% url 'track_display' %}";
+                    window.location.href = selfUrl;
                 }
             };
             socket.onclose = function() {
@@ -384,7 +394,11 @@
         const STEP = 0.1;
         const MIN = 0.4;
         const MAX = 3.0;
-        let manualScale = parseFloat(localStorage.getItem(STORAGE_KEY)) || null;
+        // In compactOnly mode there are no +/- buttons and no persisted
+        // override — auto-fit is the only sizing mechanism.
+        let manualScale = compactOnly
+            ? null
+            : (parseFloat(localStorage.getItem(STORAGE_KEY)) || null);
 
         function applyScale(scale) {
             scale = Math.max(MIN, Math.min(MAX, Math.round(scale * 20) / 20));
@@ -416,7 +430,9 @@
             applyScale(Math.min(heightTarget, widthTarget));
         }
 
-        document.getElementById('scaleDown').addEventListener('click', function() {
+        const scaleDownBtn = document.getElementById('scaleDown');
+        const scaleUpBtn = document.getElementById('scaleUp');
+        if (scaleDownBtn) scaleDownBtn.addEventListener('click', function() {
             manualScale = (manualScale === null
                 ? parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--row-scale')) || 1
                 : manualScale) - STEP;
@@ -424,7 +440,7 @@
             manualScale = applied;
             localStorage.setItem(STORAGE_KEY, applied);
         });
-        document.getElementById('scaleUp').addEventListener('click', function() {
+        if (scaleUpBtn) scaleUpBtn.addEventListener('click', function() {
             manualScale = (manualScale === null
                 ? parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--row-scale')) || 1
                 : manualScale) + STEP;
