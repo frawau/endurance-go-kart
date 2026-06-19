@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="{% if compact_only %}width=416, initial-scale=1.0{% else %}width=device-width, initial-scale=1.0{% endif %}">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% if race %}{{ race.get_race_type_display }} - Track Display{% else %}Track Display{% endif %}</title>
     {% load static %}
     <style>
@@ -254,17 +254,18 @@
             document.body.classList.toggle('compact', useCompactFormat);
         }
 
-        // Scale the fixed 416×416 stage so it fills the viewport while keeping
-        // its square aspect. Centred on whichever axis has slack. No-op unless
-        // compactOnly (the #stage element only exists then).
+        // Keep the fixed 416×416 stage pinned to the TOP-LEFT of the viewport
+        // at native size. The trackside LCD is the top-left 416×416 region of
+        // a larger (e.g. 1920×1080) viewport, so we must NOT scale up or
+        // centre — that would push content off the visible panel. We only
+        // scale DOWN (cap at 1) on the off-chance the viewport is smaller than
+        // 416 so nothing gets clipped. No-op unless compactOnly.
         function fitStage() {
             if (!compactOnly) return;
             const stage = document.getElementById('stage');
             if (!stage) return;
-            const s = Math.min(window.innerWidth / STAGE_W, window.innerHeight / STAGE_H);
-            const offX = Math.max(0, (window.innerWidth - STAGE_W * s) / 2);
-            const offY = Math.max(0, (window.innerHeight - STAGE_H * s) / 2);
-            stage.style.transform = `translate(${offX}px, ${offY}px) scale(${s})`;
+            const s = Math.min(window.innerWidth / STAGE_W, window.innerHeight / STAGE_H, 1);
+            stage.style.transform = `scale(${s})`;
         }
 
         function formatLapTime(secs) {
