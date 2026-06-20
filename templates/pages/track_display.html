@@ -167,6 +167,28 @@
             height: 416px;
         }
 
+        /* Readability tuning for the small fixed display. The lap time was
+           clipping into unreadable blobs because the team-number column took
+           38% of the width and sat far from the time. Here: shrink the team
+           number, right-align it and left-align the time so the number and the
+           colour dot sit next to each other, and give the time most of the
+           row width. The dot is also smaller with a tight gap. */
+        body.fixed-mode td.team-num {
+            width: 30%;
+            text-align: right;
+            font-size: calc(2.1rem * var(--row-scale));
+            padding-right: calc(5px * var(--row-scale));
+        }
+        body.fixed-mode td.last-lap {
+            text-align: left;
+            padding-left: 0;
+        }
+        body.fixed-mode .lap-dot {
+            width: 0.40em;
+            height: 0.40em;
+            margin-right: 0.20em;
+        }
+
         .no-race {
             display: flex;
             align-items: center;
@@ -229,9 +251,13 @@
         // M:SS.s lap format regardless of window width, and auto-fit is the
         // only sizing mechanism (no manual override / localStorage).
         const compactOnly = {{ compact_only|yesno:"true,false" }};
+        // Track Display 3: demo mode. Renders bogus data and drives it with a
+        // local simulator instead of the live WebSocket, so the layout can be
+        // checked on race day without disturbing the real race feed.
+        const demoMode = {{ demo|yesno:"true,false" }};
         // Where to send the page when the race ends and we re-attach to the
         // currently-active race — stay on whichever display this is.
-        const selfUrl = "{% if compact_only %}{% url 'track_display2' %}{% else %}{% url 'track_display' %}{% endif %}";
+        const selfUrl = "{% if demo %}{% url 'track_display3' %}{% elif compact_only %}{% url 'track_display2' %}{% else %}{% url 'track_display' %}{% endif %}";
         const isQualifying = raceType.startsWith('Q');
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsUrl = `${protocol}//${window.location.host}/ws/leaderboard/${raceId}/`;
@@ -464,15 +490,31 @@
             const availH = (viewH - 16) / maxRows;
             const heightTarget = availH / 76;
 
-            // Width target: empirical row-content width at scale=1.
-            //   compact (M:SS.s):   ~190 px
-            //   full (MM:SS.mmm):   ~310 px
-            const baseRowWidth = useCompactFormat ? 190 : 310;
             const panel = document.querySelector('.panel');
             const panelWidth = panel
                 ? panel.clientWidth
                 : (compactOnly ? STAGE_W : window.innerWidth) / 2;
-            const widthTarget = panelWidth / baseRowWidth;
+
+            let widthTarget;
+            if (compactOnly) {
+                // The binding constraint is the lap-time cell, which holds the
+                // dot + "M:SS.s" (allow ~6.5 glyphs for e.g. "9:59.9"). Arial
+                // Black tabular digits are ~0.6em wide; the dot+gap ~0.6em. The
+                // time cell is (1 - TEAM_FRAC) of the panel. Size the font so
+                // the time fits without clipping into blobs.
+                const TEAM_FRAC = 0.30;            // td.team-num width in fixed mode
+                const TIME_EMS = 6.5 * 0.60 + 0.60;  // ~4.5em of content
+                const baseFontPx = 3.2 * 16;       // 3.2rem at a 16px root
+                const timeBaseWidth = TIME_EMS * baseFontPx;
+                const timeCellWidth = panelWidth * (1 - TEAM_FRAC) - 10;
+                widthTarget = timeCellWidth / timeBaseWidth;
+            } else {
+                // Empirical row-content width at scale=1.
+                //   compact (M:SS.s):   ~190 px
+                //   full (MM:SS.mmm):   ~310 px
+                const baseRowWidth = useCompactFormat ? 190 : 310;
+                widthTarget = panelWidth / baseRowWidth;
+            }
 
             applyScale(Math.min(heightTarget, widthTarget));
         }
@@ -501,11 +543,49 @@
             fitStage();
             autoFit();
         });
+        // Demo simulator (Track Display 3). Seed from the bogus rows rendered
+        // by the server, then every couple of seconds give each team a new
+        // jittered lap time and re-render through the normal update path so the
+        // colour dots and M:SS.s formatting are exercised exactly as in a real
+        // race — without ever touching the live WebSocket.
+        function startDemo() {
+            const rows = Array.from(
+                document.querySelectorAll('#leftBody tr, #rightBody tr')
+            );
+            let standings = rows.map((tr, i) => {
+                const secs = parseFloat(tr.querySelector('.last-lap').dataset.secs);
+                return {
+                    position: i + 1,
+                    team_id: tr.dataset.teamId,
+                    team_number: tr.querySelector('.team-num').textContent,
+                    retired: tr.classList.contains('retired'),
+                    last_lap_time: isFinite(secs) ? secs : 60,
+                    best_lap_time: isFinite(secs) ? secs : 60,
+                };
+            });
+            setInterval(function() {
+                standings = standings.map(function(s) {
+                    const jitter = (Math.random() - 0.5) * 1.6;  // +/-0.8 s
+                    const t = Math.max(45, s.last_lap_time + jitter);
+                    return {
+                        ...s,
+                        last_lap_time: Math.round(t * 1000) / 1000,
+                        best_lap_time: Math.min(s.best_lap_time, t),
+                    };
+                });
+                updateStandings(standings);
+            }, 2000);
+        }
+
         applyCompactLayout();
         fitStage();
         relabelInitialLapTimes();
         autoFit();
-        connect();
+        if (demoMode) {
+            startDemo();
+        } else {
+            connect();
+        }
 
         // Resync standings when tab regains focus (browsers throttle WS in
         // background tabs; the leaderboard consumer accepts a 'reload'

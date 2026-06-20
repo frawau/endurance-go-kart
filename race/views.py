@@ -4853,6 +4853,53 @@ def track_display2(request):
     return _track_display(request, compact_only=True)
 
 
+@login_required
+def track_display3(request):
+    """Demo of the fixed-size display (Track Display 2) with bogus data.
+
+    Login-only. Renders fabricated standings and lets a client-side simulator
+    drive them, so the 416×416 layout / readability can be checked on race day
+    without an active race and without touching the live timing feed.
+    """
+    teams = []
+    for i in range(16):
+        secs = 58.0 + (i % 6) * 0.9 + 0.05 * i
+        total_ms = round(secs * 1000)
+        ms = total_ms % 1000
+        total_s = total_ms // 1000
+        formatted = f"{total_s // 60:02d}:{total_s % 60:02d}.{ms:03d}"
+        teams.append(
+            {
+                "position": i + 1,
+                "team_id": 9000 + i,
+                "team_number": str(i + 1),
+                "retired": False,
+                "last_lap_time": round(secs, 3),
+                "last_lap_time_formatted": formatted,
+                "best_lap_time": round(secs, 3),
+            }
+        )
+
+    half = (len(teams) + 1) // 2  # ceil(N/2)
+    race = {
+        "id": 0,
+        "race_type": "Main",
+        "get_race_type_display": "Main (Demo)",
+    }
+
+    return render(
+        request,
+        "pages/track_display.html",
+        {
+            "race": race,
+            "compact_only": True,
+            "demo": True,
+            "left_standings": teams[:half],
+            "right_standings": teams[half:],
+        },
+    )
+
+
 @xframe_options_exempt
 def stopandgo_call_screen(request):
     """Full-page S&G call screen: red bg + yellow team number when a
