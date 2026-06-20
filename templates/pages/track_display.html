@@ -174,9 +174,9 @@
            colour dot sit next to each other, and give the time most of the
            row width. The dot is also smaller with a tight gap. */
         body.fixed-mode td.team-num {
-            width: 30%;
+            width: 34%;
             text-align: right;
-            font-size: calc(2.1rem * var(--row-scale));
+            font-size: calc(2.5rem * var(--row-scale));
             padding-right: calc(5px * var(--row-scale));
         }
         body.fixed-mode td.last-lap {
@@ -502,7 +502,7 @@
                 // Black tabular digits are ~0.6em wide; the dot+gap ~0.6em. The
                 // time cell is (1 - TEAM_FRAC) of the panel. Size the font so
                 // the time fits without clipping into blobs.
-                const TEAM_FRAC = 0.30;            // td.team-num width in fixed mode
+                const TEAM_FRAC = 0.34;            // td.team-num width in fixed mode
                 const TIME_EMS = 6.5 * 0.60 + 0.60;  // ~4.5em of content
                 const baseFontPx = 3.2 * 16;       // 3.2rem at a 16px root
                 const timeBaseWidth = TIME_EMS * baseFontPx;
