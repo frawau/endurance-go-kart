@@ -295,13 +295,13 @@
         }
 
         function formatLapTime(secs) {
-            // Compact: M:SS.s (drop millisecond noise that's unreadable
-            // at small sizes anyway). Full: MM:SS.mmm.
+            // Compact: M:SS.mmm (single-digit minutes, no leading zero).
+            // Full: MM:SS.mmm.
             if (typeof secs !== 'number' || !isFinite(secs) || secs < 0) return '—';
             if (useCompactFormat) {
                 const m = Math.floor(secs / 60);
                 const s = secs - m * 60;
-                return `${m}:${s.toFixed(1).padStart(4, '0')}`;
+                return `${m}:${s.toFixed(3).padStart(6, '0')}`;
             }
             const totalMs = Math.round(secs * 1000);
             const ms = totalMs % 1000;
@@ -498,12 +498,12 @@
             let widthTarget;
             if (compactOnly) {
                 // The binding constraint is the lap-time cell, which holds the
-                // dot + "M:SS.s" (allow ~6.5 glyphs for e.g. "9:59.9"). Arial
-                // Black tabular digits are ~0.6em wide; the dot+gap ~0.6em. The
-                // time cell is (1 - TEAM_FRAC) of the panel. Size the font so
-                // the time fits without clipping into blobs.
+                // dot + "M:SS.mmm" (allow ~8.5 glyphs for e.g. "9:59.999").
+                // Arial Black tabular digits are ~0.6em wide; the dot+gap
+                // ~0.6em. The time cell is (1 - TEAM_FRAC) of the panel. Size
+                // the font so the time fits without clipping into blobs.
                 const TEAM_FRAC = 0.34;            // td.team-num width in fixed mode
-                const TIME_EMS = 6.5 * 0.60 + 0.60;  // ~4.5em of content
+                const TIME_EMS = 8.5 * 0.60 + 0.60;  // ~5.7em of content
                 const baseFontPx = 3.2 * 16;       // 3.2rem at a 16px root
                 const timeBaseWidth = TIME_EMS * baseFontPx;
                 const timeCellWidth = panelWidth * (1 - TEAM_FRAC) - 10;
