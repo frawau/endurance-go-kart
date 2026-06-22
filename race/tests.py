@@ -263,3 +263,51 @@ class RedFlagCrossingClassificationTests(SimpleTestCase):
             ),
             (True, True),
         )
+
+
+class OwnTimeRolloverLapTimeTests(SimpleTestCase):
+    """own_time decoder clock wrap must NOT add a guessed rollover constant.
+
+    A real race (#44, 2026-06-20) had a decoder whose own_time clock wrapped
+    at 14400 s, not the configured 360000 s. Adding the wrong constant turned
+    one lap per team into ~345650 s (~96 h). The fix: on a negative own_time
+    delta, return None so the caller falls back to the authoritative wall-clock
+    crossing-time delta, regardless of the decoder's actual rollover modulus.
+    """
+
+    def _consumer(self, mode="own_time"):
+        from race.consumers import TimingConsumer
+
+        consumer = TimingConsumer()
+        consumer._timing_mode = mode
+        consumer._rollover_seconds = 360000.0
+        return consumer
+
+    def test_own_time_normal_lap(self):
+        c = self._consumer()
+        self.assertEqual(
+            c._calculate_lap_time(14359.215, 14309.0).total_seconds(),
+            50.215,
+        )
+
+    def test_own_time_wrap_returns_none_not_guessed_constant(self):
+        # The exact shape of the real bug: prev ~14359, current ~9.
+        c = self._consumer()
+        self.assertIsNone(c._calculate_lap_time(9.449, 14359.215))
+
+    def test_own_time_wrap_never_yields_huge_lap(self):
+        # Across the affected teams the previous raw was ~14360 and current
+        # ~1-60; none of these may produce a multi-hour lap.
+        c = self._consumer()
+        for prev, cur in [
+            (14359.215, 9.449),
+            (14352.347, 1.974),
+            (14390.813, 43.999),
+        ]:
+            self.assertIsNone(c._calculate_lap_time(cur, prev))
+
+    def test_time_of_day_wrap_still_adds_24h(self):
+        # time_of_day has a well-defined 24 h modulus -- keep that behaviour.
+        c = self._consumer(mode="time_of_day")
+        lap = c._calculate_lap_time(30.0, 86390.0)  # crossed 30 s past midnight
+        self.assertAlmostEqual(lap.total_seconds(), 40.0, places=3)
