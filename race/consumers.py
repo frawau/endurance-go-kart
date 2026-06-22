@@ -1307,9 +1307,16 @@ class TimingConsumer(SafeSendMixin, AsyncWebsocketConsumer):
 
         if delta < 0:
             if self._timing_mode == "time_of_day":
+                # Wall-clock day wrap is well-defined (exactly 24 h).
                 delta += 86400.0
-            elif self._timing_mode == "own_time":
-                delta += self._rollover_seconds
+            # own_time: the decoder clock wrapped, but its rollover modulus is
+            # not reliably known -- different decoders wrap at different points
+            # (one site's TAG decoder wrapped at 14400 s, not the configured
+            # 360000 s, inflating one lap per team to ~96 h), and a device may
+            # be reset mid-event. Rather than add a guessed constant, leave
+            # delta negative so we return None below and the caller falls back
+            # to the wall-clock crossing-time delta, which is always present
+            # and authoritative.
             # duration mode: negative delta is genuinely invalid (shouldn't happen)
 
         if delta <= 0:
