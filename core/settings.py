@@ -219,12 +219,12 @@ REST_FRAMEWORK = {
 }
 
 # _CORS thingy
-CORS_ALLOW_ALL_ORIGINS = True
+# Restrict to known origins instead of allowing all: with credentials enabled,
+# CORS_ALLOW_ALL_ORIGINS reflects any requesting Origin, so any site a logged-in
+# operator visits could make credentialed reads of the API. Reuse the same
+# origin list as CSRF (localhost + APP_HOSTNAME + EXTRA_ALLOWED_HOSTS).
+CORS_ALLOWED_ORIGINS = list(CSRF_TRUSTED_ORIGINS)
 CORS_ALLOW_CREDENTIALS = True
-# CORS_ALLOWED_ORIGINS = [
-#     "http://toulouse.wautier.eu:8000",
-#     # Add other domains you need
-# ]
 # Allow specific HTTP methods
 CORS_ALLOW_METHODS = [
     "GET",
