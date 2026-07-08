@@ -103,6 +103,13 @@ class SafeSendMixin:
 
 class EmptyTeamsConsumer(SafeSendMixin, AsyncWebsocketConsumer):
     async def connect(self):
+        # This consumer accepts destructive commands (delete teams), so it is
+        # restricted to authenticated Race Directors. AuthMiddlewareStack
+        # populates scope["user"] from the session cookie.
+        if not await self.user_is_race_director():
+            await self.close(code=4403)
+            return
+
         # Get the current round
         self.current_round = await self.get_current_round()
 
@@ -197,6 +204,15 @@ class EmptyTeamsConsumer(SafeSendMixin, AsyncWebsocketConsumer):
         )
 
     # Database operations
+    @database_sync_to_async
+    def user_is_race_director(self):
+        user = self.scope.get("user")
+        return bool(
+            user
+            and user.is_authenticated
+            and user.groups.filter(name="Race Director").exists()
+        )
+
     @database_sync_to_async
     def get_current_round(self):
         end_date = dt.date.today()
@@ -499,10 +515,10 @@ class StopAndGoCallScreenConsumer(SafeSendMixin, AsyncWebsocketConsumer):
 class StopAndGoConsumer(SafeSendMixin, AsyncWebsocketConsumer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Get HMAC secret from settings or use default
-        self.hmac_secret = getattr(
-            settings, "STOPANDGO_HMAC_SECRET", "race_control_hmac_key_2024"
-        ).encode("utf-8")
+        # HMAC secret from settings; empty means "not configured" -> reject.
+        self.hmac_secret = getattr(settings, "STOPANDGO_HMAC_SECRET", "").encode(
+            "utf-8"
+        )
 
     def sign_message(self, message_data):
         """Sign outgoing message with HMAC"""
@@ -526,6 +542,16 @@ class StopAndGoConsumer(SafeSendMixin, AsyncWebsocketConsumer):
         return hmac.compare_digest(expected_signature, provided_signature)
 
     async def connect(self):
+        # Fail closed: without a configured HMAC secret, message signing is
+        # forgeable, so refuse the connection rather than run unauthenticated.
+        if not self.hmac_secret:
+            _log.error(
+                "STOPANDGO_HMAC_SECRET is not configured — refusing stop-and-go "
+                "station connection. Set the secret in the environment."
+            )
+            await self.close(code=4401)
+            return
+
         self.stopandgo_group_name = "stopandgo"
 
         # Join room group
@@ -998,9 +1024,8 @@ class TimingConsumer(SafeSendMixin, AsyncWebsocketConsumer):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.hmac_secret = getattr(
-            settings, "TIMING_HMAC_SECRET", "timing_hmac_secret_change_me_2025"
-        ).encode("utf-8")
+        # HMAC secret from settings; empty means "not configured" -> reject.
+        self.hmac_secret = getattr(settings, "TIMING_HMAC_SECRET", "").encode("utf-8")
         self._station_connected = False
         self._timing_mode = None
         self._rollover_seconds = 360000.0
@@ -1027,6 +1052,16 @@ class TimingConsumer(SafeSendMixin, AsyncWebsocketConsumer):
         return hmac.compare_digest(expected_signature, provided_signature)
 
     async def connect(self):
+        # Fail closed: without a configured HMAC secret, message signing is
+        # forgeable, so refuse the connection rather than run unauthenticated.
+        if not self.hmac_secret:
+            _log.error(
+                "TIMING_HMAC_SECRET is not configured — refusing timing station "
+                "connection. Set the secret in the environment."
+            )
+            await self.close(code=4401)
+            return
+
         self.timing_group_name = "timing"
 
         await self.channel_layer.group_add(self.timing_group_name, self.channel_name)
