@@ -1,7 +1,9 @@
 [Unit]
 Description=Go-Kart Timing Station Daemon
-After=network.target
-Requires=network.target
+# network-online (not just network.target) so the decoder/proxy port is
+# reachable before the station tries to connect at boot.
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=exec
@@ -13,7 +15,9 @@ ExecReload=/bin/kill -s HUP $MAINPID
 KillMode=mixed
 TimeoutStopSec=5
 PrivateTmp=true
-Restart=on-failure
+# always (not on-failure): a timing daemon should never stay down, even on a
+# clean exit (e.g. the WebSocket handler returning unexpectedly).
+Restart=always
 RestartSec=10
 
 # State directory for crossing buffer

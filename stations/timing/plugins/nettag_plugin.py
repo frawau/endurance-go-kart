@@ -5,10 +5,13 @@ TAG Heuer network timing system plugin.
 Reads transponder data over UDP or TCP from Chronelec decoder.
 Frames: <STA 023066 80:27'53"016 01 01 01 3 1569>
 
-ACK flow: The decoder resends data until ACK'd. We ACK immediately
-upon receiving valid data, then forward to Django. If the WebSocket
-to Django fails after ACK, the next crossing will have an unusually
-long lap time which Django detects as suspicious and allows splitting.
+ACK flow: The decoder/proxy resends each frame until ACK'd. We ACK every
+frame on receipt (before parsing) so the stop-and-wait pipeline always
+advances — an unparseable frame is acknowledged and then dropped, rather
+than being resent forever and blocking the crossings behind it. If the
+WebSocket to Django fails after ACK, the next crossing will have an
+unusually long lap time which Django detects as suspicious and allows
+splitting.
 """
 
 import asyncio
@@ -18,7 +21,6 @@ from datetime import datetime
 from typing import Optional
 
 from .base_plugin import TimingPlugin, CrossingEvent
-
 
 RE_FRAME = re.compile(rb"<STA\s+(\d+)\s+(\d+:\d+'[0-9]+\"[0-9]+).*?>")
 RE_TIME = re.compile(rb"(\d+):(\d+)'(\d+)\"(\d+)")
@@ -151,6 +153,24 @@ class NetTagPlugin(TimingPlugin):
                     except asyncio.TimeoutError:
                         continue
 
+                # ACK every datagram on receipt, BEFORE parsing. The upstream
+                # proxy delivers frames stop-and-wait: it resends frame N every
+                # second until we ACK, then advances. A datagram we can't parse
+                # (decoder status frame, a frame split across two packets, a
+                # stray packet on the port) is not a delivery failure — but if
+                # we only ACK parseable crossings, the proxy resends the
+                # unparseable one forever and every crossing behind it is
+                # blocked. ACK-on-receipt keeps the pipeline moving; an
+                # unparseable frame is then simply dropped below.
+                try:
+                    if self.protocol == "tcp":
+                        self.writer.write(ACK_BYTES)
+                        await self.writer.drain()
+                    else:
+                        self.transport.sendto(ACK_BYTES, addr)
+                except Exception as e:
+                    print(f"NetTag Plugin: Failed to send ACK: {e}", file=sys.stderr)
+
                 if not data.startswith(b"<"):
                     continue
 
@@ -162,16 +182,6 @@ class NetTagPlugin(TimingPlugin):
                 raw_time = self.parse_transponder_time(match.group(2))
                 if raw_time is None:
                     continue
-
-                # ACK immediately so decoder moves to next reading
-                try:
-                    if self.protocol == "tcp":
-                        self.writer.write(ACK_BYTES)
-                        await self.writer.drain()
-                    else:
-                        self.transport.sendto(ACK_BYTES, addr)
-                except Exception as e:
-                    print(f"NetTag Plugin: Failed to send ACK: {e}", file=sys.stderr)
 
                 crossing = CrossingEvent(
                     transponder_id=transponder_id,
