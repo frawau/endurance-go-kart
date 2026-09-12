@@ -374,3 +374,49 @@ class OwnTimeRolloverExactTimingTests(SimpleTestCase):
         # Nothing to measure the modulus against -> no guessing.
         c = self._consumer()
         self.assertIsNone(c._calculate_lap_time(9.449, 14359.215))
+
+
+class ChampionshipTieBreakTests(SimpleTestCase):
+    """Teams level on championship points are separated by the fastest lap
+    they set in the MAIN race of the last confirmed round (faster ranks
+    higher). A team with no timed lap in that race ranks below the others
+    it is tied with; points still decide everything else."""
+
+    def _row(self, name, total, fastest):
+        import datetime as dt
+
+        return {
+            "team_name": name,
+            "total": total,
+            "fastest_lap": None if fastest is None else dt.timedelta(seconds=fastest),
+        }
+
+    def _order(self, rows, descending=True):
+        from race.views import sort_championship_standings
+
+        return [r["team_name"] for r in sort_championship_standings(rows, descending)]
+
+    def test_tie_broken_by_fastest_lap(self):
+        # Real 2026-09-12 case: DA TEAM listed first, RCA was 26 ms faster.
+        rows = [
+            self._row("DA TEAM", 245, 55.136),
+            self._row("RCA RACING TEAM", 245, 55.110),
+            self._row("MANG MEE", 241, 54.0),
+        ]
+        self.assertEqual(self._order(rows), ["RCA RACING TEAM", "DA TEAM", "MANG MEE"])
+
+    def test_points_still_decide_before_fastest_lap(self):
+        rows = [self._row("slow", 250, 60.0), self._row("fast", 245, 50.0)]
+        self.assertEqual(self._order(rows), ["slow", "fast"])
+
+    def test_team_without_lap_ranks_below_tied_teams(self):
+        rows = [self._row("no lap", 245, None), self._row("lap", 245, 58.0)]
+        self.assertEqual(self._order(rows), ["lap", "no lap"])
+
+    def test_ascending_points_system_still_prefers_faster_lap(self):
+        rows = [
+            self._row("slow", 10, 57.0),
+            self._row("fast", 10, 56.0),
+            self._row("worse", 20, 50.0),
+        ]
+        self.assertEqual(self._order(rows, descending=False), ["fast", "slow", "worse"])
