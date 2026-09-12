@@ -1285,11 +1285,13 @@ class TimingConsumer(SafeSendMixin, AsyncWebsocketConsumer):
             return True
         return False
 
-    def _calculate_lap_time(self, raw_time, previous_raw_time):
+    def _calculate_lap_time(self, raw_time, previous_raw_time, wall_delta=None):
         """
         Calculate lap time from raw decoder values based on timing mode.
 
-        Returns dt.timedelta or None.
+        wall_delta is the crossing-time (wall-clock) gap in seconds since the
+        previous crossing, used only to recover the decoder's rollover modulus
+        when its clock wraps. Returns dt.timedelta or None.
         """
         if previous_raw_time is None:
             if self._timing_mode == "interval":
@@ -1309,20 +1311,56 @@ class TimingConsumer(SafeSendMixin, AsyncWebsocketConsumer):
             if self._timing_mode == "time_of_day":
                 # Wall-clock day wrap is well-defined (exactly 24 h).
                 delta += 86400.0
-            # own_time: the decoder clock wrapped, but its rollover modulus is
-            # not reliably known -- different decoders wrap at different points
-            # (one site's TAG decoder wrapped at 14400 s, not the configured
-            # 360000 s, inflating one lap per team to ~96 h), and a device may
-            # be reset mid-event. Rather than add a guessed constant, leave
-            # delta negative so we return None below and the caller falls back
-            # to the wall-clock crossing-time delta, which is always present
-            # and authoritative.
+            elif self._timing_mode == "own_time":
+                # The decoder clock wrapped. Its modulus is not reliably known
+                # from config -- one site's decoder wrapped at 14400 s while
+                # the config said 360000 s, inflating one lap per team to
+                # ~96 h -- so measure it rather than guess it.
+                delta = self._unwrap_own_time(delta, wall_delta)
+                if delta is None:
+                    return None
             # duration mode: negative delta is genuinely invalid (shouldn't happen)
 
         if delta <= 0:
             return None
 
         return dt.timedelta(seconds=delta)
+
+    def _unwrap_own_time(self, raw_delta, wall_delta):
+        """
+        Recover a decoder-exact lap time from a wrapped own_time delta.
+
+        Every decoder rollover seen in the field is a whole number of hours
+        (4 h, 24 h, 100 h), so the true modulus is the whole-hour value that
+        reconciles the raw delta with the wall clock. The wall clock only has
+        to be accurate to +/- 1800 s for that rounding to be exact, so the
+        recovered lap keeps the decoder's millisecond resolution instead of
+        inheriting the station's timestamp jitter.
+
+        Returns the corrected delta in seconds, or None when the raw values
+        cannot be explained by a whole-hour wrap (e.g. the decoder was reset
+        mid-event), leaving the caller to fall back to the wall clock.
+        """
+        if wall_delta is None or wall_delta <= 0:
+            return None
+
+        quantum = 3600.0
+        modulus = round((wall_delta - raw_delta) / quantum) * quantum
+        if modulus <= 0:
+            return None
+
+        corrected = raw_delta + modulus
+        # A genuine wrap reconciles to within the station's timestamp jitter;
+        # anything else is not a wrap and must not be "corrected".
+        if abs(corrected - wall_delta) > 1.0:
+            _log.warning(
+                f"Timing: own_time delta {raw_delta:.3f} is not a whole-hour "
+                f"wrap of wall-clock {wall_delta:.3f} (modulus guess "
+                f"{modulus:.0f}); using wall clock for this lap"
+            )
+            return None
+
+        return corrected
 
     @database_sync_to_async
     def handle_lap_crossing(self, data):
@@ -1488,7 +1526,12 @@ class TimingConsumer(SafeSendMixin, AsyncWebsocketConsumer):
 
             # Calculate lap time from raw_time using timing mode
             previous_raw = last_crossing.raw_time if last_crossing else None
-            lap_time = self._calculate_lap_time(raw_time, previous_raw)
+            wall_delta = (
+                (crossing_time - last_crossing.crossing_time).total_seconds()
+                if last_crossing
+                else None
+            )
+            lap_time = self._calculate_lap_time(raw_time, previous_raw, wall_delta)
             # Fallback: if previous crossing was a split (no raw_time),
             # compute lap time from crossing time difference
             if lap_time is None and last_crossing:

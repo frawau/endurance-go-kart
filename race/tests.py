@@ -311,3 +311,66 @@ class OwnTimeRolloverLapTimeTests(SimpleTestCase):
         c = self._consumer(mode="time_of_day")
         lap = c._calculate_lap_time(30.0, 86390.0)  # crossed 30 s past midnight
         self.assertAlmostEqual(lap.total_seconds(), 40.0, places=3)
+
+
+class OwnTimeRolloverExactTimingTests(SimpleTestCase):
+    """A decoder clock wrap must still yield decoder-exact lap times.
+
+    Every decoder rollover modulus seen in the field is a whole number of
+    hours (4 h, 24 h, 100 h), so the modulus can be *measured* at the wrap
+    instead of guessed from config:
+
+        M = round((wall_delta - raw_delta) / 3600) * 3600
+
+    The wall clock only has to be accurate to +/- 1800 s for that rounding to
+    land on the exact modulus, so the recovered lap time keeps the decoder's
+    millisecond resolution instead of inheriting the wall clock's jitter.
+
+    A residual check (|raw_delta + M - wall_delta| must be small) rejects the
+    cases where the raw values did not simply wrap -- e.g. a decoder reset
+    mid-event -- so the caller can still fall back to the wall clock there.
+    """
+
+    def _consumer(self, mode="own_time"):
+        from race.consumers import TimingConsumer
+
+        consumer = TimingConsumer()
+        consumer._timing_mode = mode
+        consumer._rollover_seconds = 360000.0
+        return consumer
+
+    def test_wrap_at_4h_gives_decoder_exact_lap(self):
+        # Real race #44 values; decoder wrapped at 14400 s. Wall clock is 8 ms
+        # off, the recovered lap time must not be.
+        c = self._consumer()
+        lap = c._calculate_lap_time(9.449, 14359.215, wall_delta=50.242)
+        self.assertAlmostEqual(lap.total_seconds(), 50.234, places=3)
+
+    def test_wrap_at_24h_gives_decoder_exact_lap(self):
+        c = self._consumer()
+        lap = c._calculate_lap_time(3.500, 86395.000, wall_delta=8.47)
+        self.assertAlmostEqual(lap.total_seconds(), 8.500, places=3)
+
+    def test_wrap_at_100h_gives_decoder_exact_lap(self):
+        c = self._consumer()
+        lap = c._calculate_lap_time(12.750, 359988.500, wall_delta=24.19)
+        self.assertAlmostEqual(lap.total_seconds(), 24.250, places=3)
+
+    def test_normal_lap_ignores_wall_clock(self):
+        # No wrap: the raw delta is authoritative, wall-clock jitter must not
+        # leak into the lap time.
+        c = self._consumer()
+        lap = c._calculate_lap_time(14359.215, 14309.000, wall_delta=50.9)
+        self.assertAlmostEqual(lap.total_seconds(), 50.215, places=3)
+
+    def test_decoder_reset_is_not_treated_as_a_wrap(self):
+        # An arbitrary offset (decoder reset mid-event) rounds to some
+        # multiple of 3600 but leaves a large residual -> reject, so the
+        # caller falls back to the wall clock.
+        c = self._consumer()
+        self.assertIsNone(c._calculate_lap_time(5.0, 14359.215, wall_delta=50.0))
+
+    def test_wrap_without_wall_clock_returns_none(self):
+        # Nothing to measure the modulus against -> no guessing.
+        c = self._consumer()
+        self.assertIsNone(c._calculate_lap_time(9.449, 14359.215))
