@@ -34,7 +34,7 @@ from rest_framework.decorators import (
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework import status
 from django.db import IntegrityError
-from django.db.models import Q, Sum
+from django.db.models import Min, Q, Sum
 from django.views.decorators.csrf import csrf_exempt
 import json
 from .models import (
@@ -2640,6 +2640,23 @@ def unconfirm_round_results(request, round_id):
     return JsonResponse({"success": True, "message": "Round results unconfirmed."})
 
 
+def sort_championship_standings(table, descending):
+    """Rank championship rows by points, breaking ties on fastest lap.
+
+    Teams level on points are separated by the fastest lap they set in the
+    MAIN race of the last confirmed round -- the faster lap ranks higher,
+    whatever the points system. A team with no timed lap there ranks below
+    the teams it is tied with.
+    """
+    slowest = dt.timedelta.max
+
+    def key(row):
+        points = -row["total"] if descending else row["total"]
+        return (points, row["fastest_lap"] or slowest)
+
+    return sorted(table, key=key)
+
+
 def championship_standings(request):
     """Public championship standings page."""
     championships = (
@@ -2674,6 +2691,28 @@ def championship_standings(request):
             .distinct()
         )
 
+        # Tie-break: fastest lap in the MAIN race of the last confirmed round.
+        # Split laps carry an evenly-divided synthetic time, so they are
+        # excluded; void laps have no lap_time and drop out naturally.
+        fastest_laps = {}
+        last_main = (
+            Race.objects.filter(round=confirmed_rounds[-1], race_type="MAIN").first()
+            if confirmed_rounds
+            else None
+        )
+        if last_main:
+            fastest_laps = dict(
+                LapCrossing.objects.filter(
+                    race=last_main,
+                    is_valid=True,
+                    was_split=False,
+                    lap_time__isnull=False,
+                )
+                .values("team__team")
+                .annotate(best=Min("lap_time"))
+                .values_list("team__team", "best")
+            )
+
         for ct in teams:
             row = {
                 "team_number": ct.number,
@@ -2681,6 +2720,7 @@ def championship_standings(request):
                 "team_logo": ct.team.logo if ct.team.logo else None,
                 "round_points": {},
                 "total": 0,
+                "fastest_lap": fastest_laps.get(ct.id),
             }
             for rs in RoundStanding.objects.filter(round__in=confirmed_rounds, team=ct):
                 row["round_points"][rs.round_id] = {
@@ -2690,8 +2730,9 @@ def championship_standings(request):
                 row["total"] += float(rs.points)
             standings_table.append(row)
 
-        reverse_sort = selected.points_system == "DESCENDING"
-        standings_table.sort(key=lambda r: r["total"], reverse=reverse_sort)
+        standings_table = sort_championship_standings(
+            standings_table, selected.points_system == "DESCENDING"
+        )
         for idx, row in enumerate(standings_table, 1):
             row["rank"] = idx
 
